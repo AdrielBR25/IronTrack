@@ -10,6 +10,11 @@ export interface AIProvider {
   /** Modelos oferecidos, cada um com as próprias capacidades. */
   readonly models: readonly AIModelInfo[];
   /**
+   * Destino público dos dados, para a prévia (ex.: endereço do gateway + provedor). Obrigatório para
+   * provedores `remote` e `local`; faz parte da assinatura da autorização. Nunca contém credenciais.
+   */
+  readonly destination?: string;
+  /**
    * Se o provedor pode atender agora (configurado, alcançável). Não deve enviar dados do usuário.
    * Ausente = sempre disponível.
    */
@@ -27,4 +32,5 @@ export interface AIProviderDescriptor {
   displayName: string;
   kind: AIProviderKind;
   models: AIModelInfo[];
+  destination?: string;
 }

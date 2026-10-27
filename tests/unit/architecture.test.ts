@@ -59,6 +59,18 @@ const DEPRECATED_SHIMS = ['session', 'rotation', 'progression', 'volume', 'stats
 
 const UI = ['pages', 'features', 'components', 'App.tsx'];
 
+/**
+ * Únicos imports permitidos de adaptadores de IA fora do módulo (raiz de composição do assistente).
+ * P05: provedor simulado. P06: provedor remoto via gateway (e o tipo do transporte, no transporte).
+ * O adaptador Ollama (P06) é só contrato: nenhum arquivo do app o importa.
+ */
+const ADAPTER_IMPORTS = new Set([
+  'integrations/ai/assistantService.ts → modules/ai/adapters/MockAIProvider.ts',
+  'integrations/ai/assistantService.ts → modules/ai/adapters/GatewayAIProvider.ts',
+  'integrations/ai/gatewayTransport.ts → modules/ai/adapters/GatewayAIProvider.ts',
+]);
+const allowedAdapterImport = (e: Edge) => ADAPTER_IMPORTS.has(`${e.from} → ${e.target}`);
+
 describe('arquitetura', () => {
   it('o leitor de imports encontra os arquivos e dependências do app', () => {
     expect(files.length).toBeGreaterThan(50);
@@ -112,8 +124,8 @@ describe('arquitetura', () => {
       // Exceções documentadas: reexportações de compatibilidade e o agregador de tipos.
       if (DEPRECATED_SHIMS.includes(e.from)) return false;
       if (e.from === 'lib/types.ts' && /^modules\/[^/]+\/types\.ts$/.test(e.target)) return false;
-      // Raiz de composição do assistente (P05): único ponto que registra o adaptador simulado.
-      if (e.from === 'integrations/ai/assistantService.ts' && e.target === 'modules/ai/adapters/MockAIProvider.ts') return false;
+      // Raiz de composição do assistente (P05/P06): único ponto que registra adaptadores.
+      if (allowedAdapterImport(e)) return false;
       return true;
     });
     expect(deep.map(fmt)).toEqual([]);
@@ -151,8 +163,6 @@ describe('arquitetura', () => {
 // Fundação de IA (IronTrack 2.0 F01/P04). Regras e motivos em docs/IA_ARQUITETURA.md.
 describe('arquitetura do módulo de IA', () => {
   const AI = 'modules/ai';
-  /** Raiz de composição (P05): registra o provedor simulado e monta o serviço. */
-  const COMPOSITION = 'integrations/ai/assistantService.ts';
   /** Código da funcionalidade de assistente (P05). */
   const ASSISTANT = ['integrations/ai', 'features/assistant', 'pages/AIAssistantPage.tsx'];
   const aiFiles = files.map(rel).filter((f) => inDir(f, AI));
@@ -185,7 +195,7 @@ describe('arquitetura do módulo de IA', () => {
 
   it('fora do módulo, ninguém importa adaptadores nem internals de provedores (exceto a raiz de composição)', () => {
     // P05: a raiz de composição do assistente é o único ponto que registra um adaptador.
-    const bad = edges.filter((e) => !inDir(e.from, AI) && e.target && inDir(e.target, AI) && e.target !== `${AI}/index.ts` && !(e.from === COMPOSITION && e.target === `${AI}/adapters/MockAIProvider.ts`));
+    const bad = edges.filter((e) => !inDir(e.from, AI) && e.target && inDir(e.target, AI) && e.target !== `${AI}/index.ts` && !allowedAdapterImport(e));
     expect(bad.map(fmt)).toEqual([]);
     expect(source(`${AI}/index.ts`)).not.toMatch(/adapters/);
   });
@@ -229,6 +239,7 @@ describe('arquitetura do assistente de IA', () => {
   const INTEGRATION = 'integrations/ai';
   const UI_ASSISTANT = ['features/assistant', 'pages/AIAssistantPage.tsx'];
   const assistantFiles = files.map(rel).filter((f) => inDir(f, INTEGRATION, ...UI_ASSISTANT));
+  const TRANSPORT = 'integrations/ai/gatewayTransport.ts';
   const source = (f: string) => readFileSync(join(ROOT, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 
   it('os arquivos do assistente existem', () => {
@@ -253,11 +264,44 @@ describe('arquitetura do assistente de IA', () => {
 
   it('sem HTML arbitrário, execução de código, armazenamento do navegador ou rede no assistente', () => {
     const FORBIDDEN = /dangerouslySetInnerHTML|innerHTML|outerHTML|insertAdjacentHTML|\beval\s*\(|new\s+Function\s*\(|\b(localStorage|sessionStorage|indexedDB)\b|fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|document\.cookie|caches\.|console\.(log|info|debug|warn|error)/;
-    expect(assistantFiles.filter((f) => FORBIDDEN.test(source(f)))).toEqual([]);
+    // P06: a única exceção de rede é o transporte do gateway (verificado no teste seguinte).
+    expect(assistantFiles.filter((f) => f !== TRANSPORT && FORBIDDEN.test(source(f)))).toEqual([]);
+    const NO_NETWORK = new RegExp(FORBIDDEN.source.replace('fetch\\s*\\(|', ''));
+    expect(NO_NETWORK.test(source(TRANSPORT))).toBe(false);
+  });
+
+  it('P06: rede de IA só no transporte do gateway, sem redirecionamento, cookies ou Referer', () => {
+    const net = files.map(rel).filter((f) => /fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon/.test(source(f)));
+    // Fora do transporte, só o registro do service worker e a importação de arquivos locais podem usar fetch.
+    expect(net.filter((f) => inDir(f, 'modules/ai', 'integrations/ai', 'features/assistant', 'pages/AIAssistantPage.tsx'))).toEqual([TRANSPORT]);
+    const t = source(TRANSPORT);
+    expect(t).toMatch(/redirect:\s*'error'/);
+    expect(t).toMatch(/credentials:\s*'omit'/);
+    expect(t).toMatch(/referrerPolicy:\s*'no-referrer'/);
+    // O transporte só é usado pela raiz de composição (nunca pelas telas).
+    expect(edges.filter((e) => e.target === TRANSPORT).map((e) => e.from)).toEqual(['integrations/ai/assistantService.ts']);
+  });
+
+  it('P06: o app não importa o gateway (services/) nem SDKs; o adaptador Ollama não está ativo', () => {
+    expect(edges.filter((e) => /(^|\/)services\//.test(e.spec)).map(fmt)).toEqual([]);
+    expect(edges.filter((e) => e.target === 'modules/ai/adapters/OllamaProvider.ts').map(fmt)).toEqual([]);
+  });
+
+  it('P06: o gateway não importa código do app (implantação independente)', () => {
+    const dir = resolve(process.cwd(), 'services/ai-gateway');
+    const gw = (d: string): string[] => readdirSync(d).flatMap((f) => (f === 'node_modules' ? [] : statSync(join(d, f)).isDirectory() ? gw(join(d, f)) : /\.ts$/.test(f) ? [join(d, f)] : []));
+    const bad = gw(dir).filter((f) => /from\s+['"](@\/|(\.\.\/){3,})/.test(readFileSync(f, 'utf8')));
+    expect(bad).toEqual([]);
+  });
+
+  it('P06: o token de acesso e o endereço do gateway não são persistidos nem registrados', () => {
+    for (const f of assistantFiles) expect(source(f), f).not.toMatch(/\b(localStorage|sessionStorage|indexedDB|document\.cookie)\b|db\.\w+\.(put|add)/);
   });
 
   it('sem endpoints, variáveis de ambiente ou credenciais no assistente', () => {
-    const bad = assistantFiles.filter((f) => /https?:\/\/|import\.meta\.env|VITE_|process\.env|api[_-]?key\s*[:=]|Bearer\s|sk-[A-Za-z0-9]{8,}|AIza[0-9A-Za-z_-]{10,}/i.test(source(f)));
+    // O transporte monta o cabeçalho `Bearer ${token}` com o token digitado (nenhum valor fixo).
+    const code = (f: string) => (f === TRANSPORT ? source(f).replace('`Bearer ${token}`', '') : source(f));
+    const bad = assistantFiles.filter((f) => /https?:\/\/|import\.meta\.env|VITE_|process\.env|api[_-]?key\s*[:=]|Bearer\s|sk-[A-Za-z0-9]{8,}|AIza[0-9A-Za-z_-]{10,}/i.test(code(f)));
     expect(bad).toEqual([]);
   });
 

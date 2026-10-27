@@ -1,12 +1,14 @@
-// Estado e fluxo da tela do assistente (IronTrack 2.0 F01/P05):
+// Estado e fluxo da tela do assistente (IronTrack 2.0 F01/P05–P06):
 //   pergunta → validação → leitura das categorias escolhidas → prepare() → prévia →
 //   autorização explícita (consentimento de uso único) → execute() → resposta.
 // Nada é executado antes da autorização. A conversa vive só na memória do componente.
 // A prévia perde a validade quando a pergunta, as categorias, o modelo ou o provedor mudam,
 // quando os registros usados mudam (inclusive em outra aba) ou quando expira.
+// P06: o modo simulado é o padrão. O modo remoto exige conectar um gateway (endereço + token, só na
+// memória) e escolher provedor e modelo explicitamente; nada é selecionado automaticamente.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_CONSENT_TTL_MS, createConsent, isAIError, type AIContextSources, type PreparedAIRequest } from '@/modules/ai';
-import { ASSISTANT_TIMEOUT_MS, createAssistantService, type AssistantComposition, type DemoScenario } from '@/integrations/ai/assistantService';
+import { ASSISTANT_TIMEOUT_MS, REMOTE_TIMEOUT_MS, createAssistantService, type AssistantComposition, type DemoScenario, type RemoteProviderInfo } from '@/integrations/ai/assistantService';
 import { ASSISTANT_CATEGORIES, contextFingerprint, loadContextSources, watchContextSources, type AssistantCategory } from '@/integrations/ai/contextSources';
 import { CATEGORY_LABEL, friendlyError, purposeFor, validateQuestion, type ChatMessage } from './assistantModel';
 
@@ -19,6 +21,8 @@ export interface AssistantDeps {
   /** Validade da prévia (padrão: a da autorização, 5 min). */
   previewTtlMs: number;
   timeoutMs: number;
+  /** Tempo limite das execuções remotas (gateway). */
+  remoteTimeoutMs: number;
 }
 
 let seq = 0;
@@ -33,6 +37,7 @@ export function defaultAssistantDeps(): AssistantDeps {
     newId: () => globalThis.crypto?.randomUUID?.() ?? tempId(),
     previewTtlMs: DEFAULT_CONSENT_TTL_MS,
     timeoutMs: ASSISTANT_TIMEOUT_MS,
+    remoteTimeoutMs: REMOTE_TIMEOUT_MS,
   };
 }
 
@@ -51,15 +56,30 @@ export interface AssistantPreview {
 
 export type AssistantPhase = 'idle' | 'preparing' | 'preview' | 'running';
 
+/** Simulado: nada sai do aparelho (padrão). Remoto: dados autorizados vão ao gateway e ao provedor. */
+export type AssistantMode = 'simulated' | 'remote';
+
+export interface GatewayState {
+  status: 'disconnected' | 'connecting' | 'connected' | 'error';
+  origin?: string;
+  providers: RemoteProviderInfo[];
+  error?: string;
+}
+
 export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
   const [deps] = useState<AssistantDeps>(() => ({ ...defaultAssistantDeps(), ...overrides }));
   const { composition } = deps;
-  const provider = composition.providers[0];
+  const simulated = composition.providers[0];
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraftState] = useState('');
   const [categories, setCategories] = useState<AssistantCategory[]>([]);
-  const [modelId, setModelState] = useState(provider?.models[0]?.id ?? '');
+  const [mode, setModeState] = useState<AssistantMode>('simulated');
+  const [gateway, setGateway] = useState<GatewayState>({ status: 'disconnected', providers: [] });
+  const [providerId, setProviderState] = useState(simulated?.id ?? '');
+  const [modelId, setModelState] = useState(simulated?.models[0]?.id ?? '');
+  const provider = mode === 'simulated' ? simulated : gateway.providers.find((p) => p.id === providerId);
+  const remoteInfo = mode === 'remote' ? gateway.providers.find((p) => p.id === providerId) : undefined;
   const [scenario, setScenarioState] = useState<DemoScenario>('echo');
   const [phase, setPhase] = useState<AssistantPhase>('idle');
   const [preview, setPreviewState] = useState<AssistantPreview | null>(null);
@@ -69,6 +89,7 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
   const unwatchRef = useRef<(() => void) | null>(null);
   const expiryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const connectRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
   /** Muda a cada alteração do rascunho: uma preparação em andamento para um rascunho antigo é descartada. */
   const draftVersion = useRef(0);
@@ -114,10 +135,13 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
       // Sair da página cancela a execução e encerra a observação dos dados.
       mountedRef.current = false;
       abortRef.current?.abort();
+      connectRef.current?.abort();
+      // O token do gateway some junto com a tela.
+      composition.disconnectGateway();
       unwatchRef.current?.();
       if (expiryRef.current) clearTimeout(expiryRef.current);
     };
-  }, []);
+  }, [composition]);
 
   const setDraft = useCallback(
     (t: string) => {
@@ -153,6 +177,72 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
     [invalidate],
   );
 
+  /** Troca de modo. Remoto começa sem provedor e sem modelo: a escolha é sempre explícita. */
+  const setMode = useCallback(
+    (m: AssistantMode) => {
+      if (m !== 'simulated' && m !== 'remote') return;
+      setModeState(m);
+      setNotice(null);
+      if (m === 'simulated') {
+        setProviderState(simulated?.id ?? '');
+        setModelState(simulated?.models[0]?.id ?? '');
+      } else {
+        setProviderState('');
+        setModelState('');
+      }
+      invalidate();
+    },
+    [simulated, invalidate],
+  );
+
+  /** Escolha explícita do provedor remoto (o modelo volta a ficar sem escolha). */
+  const setProvider = useCallback(
+    (id: string) => {
+      setProviderState(id);
+      setModelState('');
+      setNotice(null);
+      invalidate();
+    },
+    [invalidate],
+  );
+
+  /** Conecta ao gateway por ação do usuário. Só o token vai junto; nenhum dado pessoal. */
+  const connectGateway = useCallback(
+    async (url: string, token: string): Promise<boolean> => {
+      connectRef.current?.abort();
+      const ctrl = new AbortController();
+      connectRef.current = ctrl;
+      invalidate();
+      setProviderState('');
+      setModelState('');
+      setGateway({ status: 'connecting', providers: [] });
+      try {
+        const conn = await composition.connectGateway({ url, token }, ctrl.signal);
+        if (!mountedRef.current || connectRef.current !== ctrl) return false;
+        setGateway({ status: 'connected', origin: conn.origin, providers: conn.providers });
+        return true;
+      } catch (e) {
+        if (!mountedRef.current || connectRef.current !== ctrl) return false;
+        setGateway({ status: 'error', providers: [], error: friendlyError(e).message });
+        return false;
+      } finally {
+        if (connectRef.current === ctrl) connectRef.current = null;
+      }
+    },
+    [composition, invalidate],
+  );
+
+  /** Esquece o gateway e o token. Volta a não haver provedor remoto. */
+  const disconnectGateway = useCallback(() => {
+    connectRef.current?.abort();
+    connectRef.current = null;
+    composition.disconnectGateway();
+    setGateway({ status: 'disconnected', providers: [] });
+    setProviderState('');
+    setModelState('');
+    invalidate();
+  }, [composition, invalidate]);
+
   const setScenario = useCallback(
     (s: DemoScenario) => {
       composition.setScenario(s);
@@ -169,8 +259,20 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
       setNotice(check.error);
       return;
     }
-    if (!provider || !modelId) {
-      setNotice('Nenhum provedor de IA disponível.');
+    if (mode === 'remote' && gateway.status !== 'connected') {
+      setNotice('Conecte um gateway de IA ou volte ao modo simulado.');
+      return;
+    }
+    if (!provider) {
+      setNotice(mode === 'remote' ? 'Escolha um provedor remoto.' : 'Nenhum provedor de IA disponível.');
+      return;
+    }
+    if (!modelId) {
+      setNotice('Escolha um modelo.');
+      return;
+    }
+    if (remoteInfo && !remoteInfo.available) {
+      setNotice('Este provedor não está configurado no gateway (sem chave no servidor). Escolha outro ou use o modo simulado.');
       return;
     }
     stopWatching();
@@ -209,7 +311,7 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
       setPhase('idle');
       setNotice(friendlyError(e).message);
     }
-  }, [phase, draft, provider, modelId, categories, deps, composition, setPreview, stopWatching, markStale]);
+  }, [phase, draft, mode, gateway.status, provider, remoteInfo, modelId, categories, deps, composition, setPreview, stopWatching, markStale]);
 
   /** Autoriza a solicitação preparada (e só ela) e executa. */
   const authorize = useCallback(async () => {
@@ -231,7 +333,16 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
     const consent = createConsent(p.prepared, { grantedAt: deps.now(), id: deps.newId() });
     stopWatching();
     setPreview(null);
-    const userMsg: ChatMessage = { id: tempId(), role: 'user', text: p.question, status: 'sending', categories: p.prepared.categories.map((c) => CATEGORY_LABEL[c]) };
+    const target = composition.service.listProviders().find((x) => x.id === p.prepared.providerId);
+    const isRemote = !!target && target.kind !== 'simulated';
+    const userMsg: ChatMessage = {
+      id: tempId(),
+      role: 'user',
+      text: p.question,
+      status: 'sending',
+      categories: p.prepared.categories.map((c) => CATEGORY_LABEL[c]),
+      ...(isRemote ? { destination: target.displayName } : {}),
+    };
     setMessages((m) => [...m, userMsg]);
     setDraftState('');
     draftVersion.current++;
@@ -239,7 +350,7 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     try {
-      const res = await composition.service.execute(p.prepared, consent, { signal: ctrl.signal, timeoutMs: deps.timeoutMs });
+      const res = await composition.service.execute(p.prepared, consent, { signal: ctrl.signal, timeoutMs: isRemote ? deps.remoteTimeoutMs : deps.timeoutMs });
       if (!mountedRef.current) return;
       const reply: ChatMessage = {
         id: tempId(),
@@ -248,6 +359,7 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
         status: 'done',
         simulated: res.metadata.simulated,
         truncated: res.metadata.truncated,
+        ...(isRemote ? { providerLabel: target.displayName, modelId: res.modelId } : {}),
       };
       setMessages((m) => [...m.map((x) => (x.id === userMsg.id ? { ...x, status: 'sent' as const } : x)), reply]);
     } catch (e) {
@@ -283,7 +395,15 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
   const models = useMemo(() => provider?.models ?? [], [provider]);
 
   return {
+    mode,
+    setMode,
+    gateway,
+    connectGateway,
+    disconnectGateway,
     provider,
+    remoteInfo,
+    providerId,
+    setProvider,
     models,
     modelId,
     setModel,

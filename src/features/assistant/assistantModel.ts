@@ -91,4 +91,9 @@ export interface ChatMessage {
   error?: string;
   /** Categorias autorizadas para esta pergunta (rótulos). */
   categories?: string[];
+  /** Pergunta enviada a um provedor remoto: nome do provedor (para o rótulo da mensagem). */
+  destination?: string;
+  /** Resposta de provedor remoto: nome do provedor e modelo. */
+  providerLabel?: string;
+  modelId?: string;
 }

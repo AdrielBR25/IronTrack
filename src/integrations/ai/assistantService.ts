@@ -1,9 +1,12 @@
-// Raiz de composição do assistente de IA (IronTrack 2.0 F01/P05). É o ÚNICO lugar do app que
-// conhece um adaptador de provedor: aqui o provedor simulado é registrado e o serviço é montado.
-// A interface recebe só o AIService e uma descrição pública do provedor; nunca o adaptador.
-// Nenhum provedor real existe: nada sai do aparelho e não há rede, chave ou endpoint.
-import { AIService, ProviderRegistry, type AIProviderDescriptor } from '@/modules/ai';
+// Raiz de composição do assistente de IA (IronTrack 2.0 F01/P05–P06). É o ÚNICO lugar do app que
+// conhece adaptadores de provedor: registra o provedor simulado (padrão, offline) e, só quando o
+// usuário conecta um gateway, os provedores remotos que esse gateway permite. A interface recebe o
+// AIService e descrições públicas (sem adaptador, sem token, sem chave).
+// Sem gateway conectado, nada sai do aparelho e o app funciona offline como antes.
+import { AIError, AIService, ProviderRegistry, type AIProviderDescriptor } from '@/modules/ai';
 import { MockAIProvider } from '@/modules/ai/adapters/MockAIProvider';
+import { GatewayAIProvider, gatewayErrorCode, parseGatewayCatalog, type GatewayTransport } from '@/modules/ai/adapters/GatewayAIProvider';
+import { createGatewayTransport, isAccessTokenFormat, validateGatewayUrl } from './gatewayTransport';
 
 /** Cenários do modo de demonstração (o comportamento do provedor simulado). */
 export const DEMO_SCENARIOS = ['echo', 'hang', 'fail', 'invalid_response'] as const;
@@ -21,15 +24,38 @@ export const ASSISTANT_MODEL_IDS: readonly string[] = ['mock-text', 'mock-tiny']
 
 /** Atraso simulado da resposta: dá tempo de ver o processamento e de cancelar. */
 export const DEMO_LATENCY_MS = 1_500;
-/** Tempo limite de cada execução no assistente. */
+/** Tempo limite de cada execução simulada no assistente. */
 export const ASSISTANT_TIMEOUT_MS = 30_000;
+/** Tempo limite de uma execução remota (maior que o tempo limite padrão do gateway, 30 s). */
+export const REMOTE_TIMEOUT_MS = 45_000;
+/** Tempo limite para buscar o catálogo do gateway. */
+export const CATALOG_TIMEOUT_MS = 10_000;
+
+/** Provedor remoto oferecido pelo gateway conectado. */
+export interface RemoteProviderInfo extends AIProviderDescriptor {
+  /** false = permitido no gateway, mas sem chave configurada lá. */
+  available: boolean;
+}
+
+export interface GatewayConnection {
+  origin: string;
+  providers: RemoteProviderInfo[];
+}
 
 export interface AssistantComposition {
   service: AIService;
-  /** Provedores e modelos que a tela pode oferecer (descritores, sem o adaptador). */
+  /** Provedor simulado (sempre presente, padrão). */
   providers: AIProviderDescriptor[];
   /** Muda o cenário da demonstração. Não altera dados nem a solicitação preparada. */
   setScenario(s: DemoScenario): void;
+  /**
+   * Conecta a um gateway por ação explícita do usuário: valida o endereço e o formato do token,
+   * busca o catálogo (só o token vai junto; nenhum dado pessoal) e registra os provedores remotos.
+   * Não seleciona nenhum deles. Substitui uma conexão anterior.
+   */
+  connectGateway(input: { url: string; token: string }, signal?: AbortSignal): Promise<GatewayConnection>;
+  /** Esquece o gateway: remove os provedores remotos e descarta o token da memória. */
+  disconnectGateway(): void;
 }
 
 export interface AssistantCompositionOptions {
@@ -37,17 +63,30 @@ export interface AssistantCompositionOptions {
   scenario?: DemoScenario;
   now?: () => number;
   randomId?: () => string;
+  /** Implementação de fetch para o transporte do gateway (testes). */
+  fetchImpl?: typeof fetch;
+  /** Substitui o transporte inteiro (testes). */
+  transportFactory?: (origin: string, token: string) => GatewayTransport;
 }
 
 /**
- * Monta um serviço novo por tela: registro, autorizações usadas e conversa vivem só na memória
- * daquela página. Sem logger: nenhum evento (nem sem conteúdo) é gravado ou enviado.
+ * Monta um serviço novo por tela: registro, autorizações usadas, token e conversa vivem só na
+ * memória daquela página. Sem logger: nenhum evento (nem sem conteúdo) é gravado ou enviado.
  */
 export function createAssistantService(opts: AssistantCompositionOptions = {}): AssistantComposition {
   const registry = new ProviderRegistry();
   const mock = new MockAIProvider({ latencyMs: opts.latencyMs ?? DEMO_LATENCY_MS, behavior: opts.scenario ?? 'echo' });
   registry.register(mock);
   const service = new AIService({ registry, ...(opts.now ? { now: opts.now } : {}), ...(opts.randomId ? { randomId: opts.randomId } : {}) });
+  let remoteIds: string[] = [];
+  let generation = 0;
+
+  const disconnectGateway = () => {
+    generation++;
+    for (const id of remoteIds) registry.unregister(id);
+    remoteIds = [];
+  };
+
   return {
     service,
     providers: service
@@ -56,6 +95,44 @@ export function createAssistantService(opts: AssistantCompositionOptions = {}): 
       .filter((p) => p.models.length > 0),
     setScenario: (s) => {
       if ((DEMO_SCENARIOS as readonly string[]).includes(s)) mock.behavior = s;
+    },
+    disconnectGateway,
+    async connectGateway({ url, token }, signal) {
+      const check = validateGatewayUrl(url);
+      if (!check.ok) throw new AIError('provider_invalid');
+      const tok = typeof token === 'string' ? token.trim() : '';
+      if (!isAccessTokenFormat(tok)) throw new AIError('access_denied');
+      disconnectGateway();
+      const mine = generation;
+      const transport = opts.transportFactory ? opts.transportFactory(check.origin, tok) : createGatewayTransport({ origin: check.origin, token: tok, ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}) });
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), CATALOG_TIMEOUT_MS);
+      const onAbort = () => ctrl.abort();
+      signal?.addEventListener('abort', onAbort, { once: true });
+      let res;
+      try {
+        res = await transport({ method: 'GET', path: '/v1/models', signal: ctrl.signal });
+      } catch (e) {
+        if (signal?.aborted) throw new AIError('cancelled');
+        if (ctrl.signal.aborted) throw new AIError('gateway_unreachable');
+        throw e;
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+      }
+      if (res.status !== 200) throw new AIError(gatewayErrorCode(res.status, res.body));
+      const entries = parseGatewayCatalog(res.body);
+      // Outra conexão (ou desconexão) começou enquanto esta esperava: descarta.
+      if (mine !== generation) throw new AIError('cancelled');
+      const infos: RemoteProviderInfo[] = [];
+      for (const entry of entries) {
+        if (registry.has(entry.id)) continue;
+        registry.register(new GatewayAIProvider({ entry, transport, gatewayOrigin: check.origin }));
+        remoteIds.push(entry.id);
+        const d = service.listProviders().find((p) => p.id === entry.id)!;
+        infos.push({ ...d, available: entry.available });
+      }
+      return { origin: check.origin, providers: infos };
     },
   };
 }

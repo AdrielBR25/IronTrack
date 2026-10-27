@@ -1,13 +1,15 @@
 // Área de conversa do assistente. Respostas são texto puro (React escapa): sem HTML, sem
 // Markdown interpretado, sem links ou comandos executáveis.
 import { useEffect, useRef } from 'react';
-import { Ban, FlaskConical, Loader2, MessageCircleQuestion, RotateCcw, TriangleAlert } from 'lucide-react';
+import { Ban, Cloud, FlaskConical, Loader2, MessageCircleQuestion, RotateCcw, TriangleAlert } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { ChatMessage } from './assistantModel';
 
 export const SIMULATED_REPLY_NOTE = 'Resposta fictícia do modo de demonstração: não é uma análise real dos seus treinos ou avaliações, nem orientação de treino, médica ou nutricional.';
+
+export const REMOTE_REPLY_NOTE = 'Gerada por um provedor de IA externo. Pode conter erros e não é orientação médica, nutricional ou de treino profissional.';
 
 export const SUGGESTIONS = ['Como foi minha consistência de treinos?', 'Resuma minha evolução corporal.', 'O que mudou nos meus últimos treinos?'];
 
@@ -19,6 +21,7 @@ function UserBubble({ m, onRetry }: { m: ChatMessage; onRetry: (id: string) => v
       <span className="sr-only">Você:</span>
       <p className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-primary/15 px-3.5 py-2.5 text-sm">{m.text}</p>
       <p className="flex flex-wrap items-center justify-end gap-x-2 text-[11px] text-muted-foreground">
+        {m.destination && <span data-testid="chat-destination">Enviada a {m.destination} ·</span>}
         {m.categories?.length ? <span>Dados: {m.categories.join(', ')}</span> : <span>Sem dados pessoais</span>}
         {status && <span>· {status}</span>}
       </p>
@@ -40,22 +43,41 @@ function UserBubble({ m, onRetry }: { m: ChatMessage; onRetry: (id: string) => v
 function AssistantBubble({ m }: { m: ChatMessage }) {
   return (
     <li className="flex flex-col items-start gap-1" data-testid="chat-assistant">
-      <span className="sr-only">{m.simulated ? 'Assistente (simulação):' : 'Assistente:'}</span>
+      <span className="sr-only">{m.simulated ? 'Assistente (simulação):' : m.providerLabel ? `Assistente (${m.providerLabel}):` : 'Assistente:'}</span>
       <div className="max-w-[90%] rounded-2xl rounded-bl-md border bg-card px-3.5 py-2.5 text-sm">
         {m.simulated && (
           <Badge variant="warn" className="mb-1.5">
             <FlaskConical aria-hidden /> Simulação
           </Badge>
         )}
+        {!m.simulated && m.providerLabel && (
+          <Badge variant="outline" className="mb-1.5" data-testid="chat-remote-badge">
+            <Cloud aria-hidden /> {m.providerLabel}
+            {m.modelId ? ` · ${m.modelId}` : ''}
+          </Badge>
+        )}
         <p className="whitespace-pre-wrap break-words">{m.text}</p>
         {m.truncated && <p className="mt-1 text-xs text-muted-foreground">Resposta cortada no limite de tamanho.</p>}
         {m.simulated && <p className="mt-2 border-t pt-2 text-xs text-muted-foreground">{SIMULATED_REPLY_NOTE}</p>}
+        {!m.simulated && m.providerLabel && <p className="mt-2 border-t pt-2 text-xs text-muted-foreground">{REMOTE_REPLY_NOTE}</p>}
       </div>
     </li>
   );
 }
 
-export function Conversation({ messages, running, onRetry, onSuggestion }: { messages: ChatMessage[]; running: boolean; onRetry: (id: string) => void; onSuggestion: (t: string) => void }) {
+export function Conversation({
+  messages,
+  running,
+  runningLabel,
+  onRetry,
+  onSuggestion,
+}: {
+  messages: ChatMessage[];
+  running: boolean;
+  runningLabel?: string;
+  onRetry: (id: string) => void;
+  onSuggestion: (t: string) => void;
+}) {
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ block: 'nearest' });
@@ -90,7 +112,7 @@ export function Conversation({ messages, running, onRetry, onSuggestion }: { mes
       </ol>
       {running && (
         <p className="mt-4 flex items-center gap-2 text-sm text-muted-foreground" role="status" data-testid="chat-running">
-          <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> Gerando resposta simulada…
+          <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> {runningLabel ?? 'Gerando resposta simulada…'}
         </p>
       )}
       <div ref={endRef} />

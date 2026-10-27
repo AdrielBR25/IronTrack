@@ -2,7 +2,7 @@
 // finalidade, pergunta, categorias e os dados exatos) antes de qualquer execução.
 // Todo texto é renderizado como texto (React escapa): nada de HTML vindo dos dados.
 import { useRef } from 'react';
-import { AlertTriangle, FlaskConical, Loader2, RefreshCw, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, Cloud, FlaskConical, Loader2, RefreshCw, ShieldCheck } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -141,6 +141,7 @@ export function SharePreviewDialog({
   const noData = p?.context.excluded.filter((x) => x.reason === 'no_data').map((x) => x.category) ?? [];
   const notSelected = ASSISTANT_CATEGORIES.filter((c) => !preview?.selected.includes(c));
   const busy = !!preview?.verifying;
+  const remote = !!provider && provider.kind !== 'simulated';
 
   return (
     <Dialog open={!!preview} onOpenChange={(o) => !o && onCancel()}>
@@ -167,19 +168,37 @@ export function SharePreviewDialog({
                 </DialogDescription>
               </DialogHeader>
 
-              <div className="flex gap-2 rounded-xl border border-warn/40 bg-warn/10 p-3 text-sm" role="note" data-testid="preview-simulated-note">
-                <FlaskConical className="mt-0.5 h-4 w-4 shrink-0 text-warn" aria-hidden />
-                <p>
-                  <strong>Modo de demonstração — respostas simuladas.</strong> A execução usa um provedor simulado no próprio aparelho: nada sai do aparelho e a resposta é
-                  fictícia.
-                </p>
-              </div>
+              {remote ? (
+                <div className="flex gap-2 rounded-xl border border-destructive/50 bg-destructive/10 p-3 text-sm" role="note" data-testid="preview-remote-note">
+                  <Cloud className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden />
+                  <p>
+                    <strong>Compartilhamento externo.</strong> Ao autorizar, o conteúdo exato abaixo sai do aparelho: vai ao gateway <strong>{p.destination ?? provider?.destination}</strong>{' '}
+                    e é processado pelo provedor {provider?.displayName}, conforme as políticas dele. Nada além disso é enviado, e o gateway não pode pedir outros dados.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex gap-2 rounded-xl border border-warn/40 bg-warn/10 p-3 text-sm" role="note" data-testid="preview-simulated-note">
+                  <FlaskConical className="mt-0.5 h-4 w-4 shrink-0 text-warn" aria-hidden />
+                  <p>
+                    <strong>Modo de demonstração — respostas simuladas.</strong> A execução usa um provedor simulado no próprio aparelho: nada sai do aparelho e a resposta é
+                    fictícia.
+                  </p>
+                </div>
+              )}
 
               <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm">
                 <dt className="text-muted-foreground">Provedor</dt>
                 <dd className="min-w-0 break-words" data-testid="preview-provider">
-                  {provider?.displayName ?? p.providerId} {provider?.kind === 'simulated' && <Badge variant="warn">simulado</Badge>}
+                  {provider?.displayName ?? p.providerId} {provider?.kind === 'simulated' ? <Badge variant="warn">simulado</Badge> : <Badge variant="destructive">remoto</Badge>}
                 </dd>
+                {remote && (
+                  <>
+                    <dt className="text-muted-foreground">Destino</dt>
+                    <dd className="min-w-0 break-words font-medium text-destructive" data-testid="preview-destination">
+                      {p.destination}
+                    </dd>
+                  </>
+                )}
                 <dt className="text-muted-foreground">Modelo</dt>
                 <dd className="min-w-0 break-words" data-testid="preview-model">
                   {model?.displayName ?? p.modelId}
@@ -283,7 +302,7 @@ export function SharePreviewDialog({
                 </Button>
               ) : (
                 <Button onClick={onAuthorize} aria-disabled={busy} data-testid="preview-authorize">
-                  {busy ? <Loader2 className="animate-spin" aria-hidden /> : <ShieldCheck aria-hidden />} {busy ? 'Conferindo dados…' : 'Autorizar e executar'}
+                  {busy ? <Loader2 className="animate-spin" aria-hidden /> : <ShieldCheck aria-hidden />} {busy ? 'Conferindo dados…' : remote ? 'Autorizar e enviar' : 'Autorizar e executar'}
                 </Button>
               )}
             </DialogFooter>

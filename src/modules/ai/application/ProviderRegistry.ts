@@ -19,6 +19,9 @@ function validProvider(p: AIProvider): boolean {
   if (!p || typeof p.id !== 'string' || !PROVIDER_ID.test(p.id)) return false;
   if (typeof p.displayName !== 'string' || !p.displayName.trim() || !KINDS.includes(p.kind) || typeof p.generate !== 'function') return false;
   if (!Array.isArray(p.models) || p.models.length === 0 || !p.models.every(validModel)) return false;
+  // Quem envia dados para fora do aparelho precisa declarar o destino (mostrado na prévia e assinado).
+  if (p.kind !== 'simulated' && !(typeof p.destination === 'string' && p.destination.trim())) return false;
+  if (p.destination !== undefined && (typeof p.destination !== 'string' || p.destination.length > 200)) return false;
   return new Set(p.models.map((m) => m.id)).size === p.models.length;
 }
 
@@ -27,6 +30,7 @@ const describe = (p: AIProvider): AIProviderDescriptor => ({
   displayName: p.displayName,
   kind: p.kind,
   models: p.models.map((m) => ({ id: m.id, displayName: m.displayName, capabilities: { ...m.capabilities } })),
+  ...(p.destination ? { destination: p.destination } : {}),
 });
 
 export class ProviderRegistry {
@@ -37,6 +41,11 @@ export class ProviderRegistry {
     if (!validProvider(provider)) throw new AIError('provider_invalid');
     if (this.providers.has(provider.id)) throw new AIError('provider_duplicate', provider.id);
     this.providers.set(provider.id, provider);
+  }
+
+  /** Remove um provedor (ex.: ao desconectar o gateway). Solicitações já preparadas para ele deixam de executar. */
+  unregister(id: string): boolean {
+    return this.providers.delete(id);
   }
 
   has(id: string): boolean {

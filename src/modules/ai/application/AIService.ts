@@ -52,6 +52,8 @@ export interface PreparedAIRequest {
   readonly requestId: string;
   readonly providerId: string;
   readonly modelId: string;
+  /** Destino declarado pelo provedor (null = simulado, nada sai do aparelho). Assinado. */
+  readonly destination: string | null;
   readonly purpose: AIPurpose;
   readonly categories: readonly AIContextCategory[];
   readonly context: AIContext;
@@ -109,12 +111,13 @@ function deepFreeze<T>(o: T): T {
 }
 
 /** Texto canônico do que será enviado; a assinatura da autorização é o SHA-256 dele. */
-function bindingText(p: Pick<PreparedAIRequest, 'requestId' | 'providerId' | 'modelId' | 'purpose' | 'categories' | 'request'>): string {
+function bindingText(p: Pick<PreparedAIRequest, 'requestId' | 'providerId' | 'modelId' | 'destination' | 'purpose' | 'categories' | 'request'>): string {
   return JSON.stringify([
-    'irontrack.ai.binding.v1',
+    'irontrack.ai.binding.v2',
     p.requestId,
     p.providerId,
     p.modelId,
+    p.destination ?? null,
     p.purpose,
     [...p.categories],
     p.request.modelId,
@@ -222,6 +225,7 @@ export class AIService {
       requestId: this.randomId(),
       providerId: provider.id,
       modelId: model.id,
+      destination: provider.destination ?? null,
       purpose: input.purpose,
       categories,
       context,
@@ -243,6 +247,8 @@ export class AIService {
       if (options.signal?.aborted) throw new AIError('cancelled', providerId || undefined);
       await this.authorize(prepared, consent);
       const { provider, model } = this.registry.resolve(providerId, modelId, prepared.request.responseFormat.type === 'json' ? ['textGeneration', 'structuredOutput'] : ['textGeneration']);
+      // O destino autorizado é o destino atual: reconectar a outro gateway invalida a autorização.
+      if ((provider.destination ?? null) !== (prepared.destination ?? null)) throw new AIError('permission_denied', provider.id);
       if (provider.isAvailable && !(await provider.isAvailable())) throw new AIError('provider_unavailable', provider.id);
       log('execute_start');
 

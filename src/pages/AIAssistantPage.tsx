@@ -1,7 +1,8 @@
-// Assistente IA (IronTrack 2.0 F01/P05): conversa em memória com o provedor SIMULADO, seleção de
-// dados, prévia do conteúdo efetivo e autorização por solicitação. Só leitura dos dados locais.
+// Assistente IA (IronTrack 2.0 F01/P05–P06): conversa em memória, seleção de dados, prévia do
+// conteúdo efetivo e autorização por solicitação. Modo simulado (padrão, offline) ou remoto via
+// gateway seguro, com provedor e modelo escolhidos explicitamente. Só leitura dos dados locais.
 import { useRef } from 'react';
-import { ChevronDown, FlaskConical, Loader2, Lock, Send, Square } from 'lucide-react';
+import { ChevronDown, Cloud, FlaskConical, Loader2, Lock, Send, Square } from 'lucide-react';
 import { PageHeader } from '@/components/AppLayout';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,8 +15,10 @@ import { CATEGORY_HINT, CATEGORY_LABEL, MAX_QUESTION_CHARS } from '@/features/as
 import { useAssistant, type AssistantDeps } from '@/features/assistant/useAssistant';
 import { Conversation } from '@/features/assistant/Conversation';
 import { SharePreviewDialog } from '@/features/assistant/SharePreviewDialog';
+import { GatewayPanel, ModeSelector } from '@/features/assistant/RemoteSetup';
 
 export const DEMO_TITLE = 'Modo de demonstração — respostas simuladas';
+export const REMOTE_TITLE = 'Modo remoto — compartilhamento externo';
 
 function DataSelector({ a }: { a: ReturnType<typeof useAssistant> }) {
   const count = a.categories.length;
@@ -75,6 +78,7 @@ export default function AIAssistantPage({ deps }: { deps?: Partial<AssistantDeps
   const running = a.phase === 'running';
   const preparing = a.phase === 'preparing';
   const over = a.draft.trim().length > MAX_QUESTION_CHARS;
+  const remote = a.mode === 'remote';
 
   return (
     <div className="space-y-4">
@@ -82,24 +86,49 @@ export default function AIAssistantPage({ deps }: { deps?: Partial<AssistantDeps
         title="Assistente IA"
         subtitle="Pergunte sobre seus registros escolhendo o que pode ser usado."
         action={
-          <Badge variant="warn" className="shrink-0" data-testid="demo-badge">
-            <FlaskConical aria-hidden /> Simulado
-          </Badge>
+          remote ? (
+            <Badge variant="destructive" className="shrink-0" data-testid="remote-badge">
+              <Cloud aria-hidden /> Remoto
+            </Badge>
+          ) : (
+            <Badge variant="warn" className="shrink-0" data-testid="demo-badge">
+              <FlaskConical aria-hidden /> Simulado
+            </Badge>
+          )
         }
       />
 
-      <Card className="flex gap-3 border-warn/40 bg-warn/10 p-3.5" role="note" data-testid="demo-banner">
-        <FlaskConical className="mt-0.5 h-5 w-5 shrink-0 text-warn" aria-hidden />
-        <div className="min-w-0 text-sm">
-          <p className="font-semibold">{DEMO_TITLE}</p>
-          <p className="mt-0.5 text-muted-foreground">
-            Nenhuma IA real é usada e nada sai do aparelho. As respostas são fictícias: não analisam seus treinos nem suas avaliações e não são orientação de treino, médica
-            ou nutricional. A conversa some ao sair ou recarregar a página.
-          </p>
-        </div>
-      </Card>
+      {remote ? (
+        <Card className="flex gap-3 border-destructive/40 bg-destructive/10 p-3.5" role="note" data-testid="remote-banner">
+          <Cloud className="mt-0.5 h-5 w-5 shrink-0 text-destructive" aria-hidden />
+          <div className="min-w-0 text-sm">
+            <p className="font-semibold">{REMOTE_TITLE}</p>
+            <p className="mt-0.5 text-muted-foreground">
+              Ao autorizar uma pergunta, o conteúdo mostrado na prévia sai do aparelho: vai ao gateway e é repassado ao provedor escolhido, que o processa conforme as
+              políticas dele. Nada é enviado sem a sua autorização, e só o que você selecionar. As respostas não são orientação médica ou nutricional. A conversa some ao
+              sair ou recarregar a página.
+            </p>
+          </div>
+        </Card>
+      ) : (
+        <Card className="flex gap-3 border-warn/40 bg-warn/10 p-3.5" role="note" data-testid="demo-banner">
+          <FlaskConical className="mt-0.5 h-5 w-5 shrink-0 text-warn" aria-hidden />
+          <div className="min-w-0 text-sm">
+            <p className="font-semibold">{DEMO_TITLE}</p>
+            <p className="mt-0.5 text-muted-foreground">
+              Nenhuma IA real é usada e nada sai do aparelho. As respostas são fictícias: não analisam seus treinos nem suas avaliações e não são orientação de treino, médica
+              ou nutricional. A conversa some ao sair ou recarregar a página.
+            </p>
+          </div>
+        </Card>
+      )}
 
-      <Conversation messages={a.messages} running={running} onRetry={a.retry} onSuggestion={(t) => {
+      <Card className="space-y-3 p-3.5">
+        <ModeSelector a={a} />
+      </Card>
+      {remote && <GatewayPanel a={a} />}
+
+      <Conversation messages={a.messages} running={running} runningLabel={remote ? `Aguardando a resposta de ${a.provider?.displayName ?? 'provedor remoto'}…` : undefined} onRetry={a.retry} onSuggestion={(t) => {
         a.setDraft(t);
         inputRef.current?.focus();
       }} />
@@ -152,6 +181,7 @@ export default function AIAssistantPage({ deps }: { deps?: Partial<AssistantDeps
             </div>
           </div>
 
+          {!remote && (
           <div className="grid gap-2 sm:grid-cols-2">
             <div className="space-y-1">
               <label htmlFor="ai-model" className="text-xs font-medium text-muted-foreground">
@@ -178,6 +208,7 @@ export default function AIAssistantPage({ deps }: { deps?: Partial<AssistantDeps
               </NativeSelect>
             </div>
           </div>
+          )}
 
           <div className="flex gap-2">
             {running ? (
