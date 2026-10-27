@@ -40,7 +40,7 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,woff2,json}'],
+        globPatterns: ['**/*.{js,mjs,css,html,svg,png,woff2,json}'],
         globIgnores: ['**/*cyrillic*', '**/*greek*', '**/*vietnamese*'],
         navigateFallback: 'index.html',
         cleanupOutdatedCaches: true,

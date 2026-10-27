@@ -139,6 +139,22 @@ export interface BodyEntry {
   abdomenCm?: number | null;
   armCm?: number | null;
   thighCm?: number | null;
+  hipCm?: number | null;
+  heightM?: number | null;
+  bmi?: number | null;
+  fatMassKg?: number | null;
+  leanMassKg?: number | null;
+  leanPct?: number | null;
+  waistHipRatio?: number | null;
+  bodyDensity?: number | null;
+  skinfoldSumMm?: number | null;
+  armMuscleArea?: number | null;
+  armFatArea?: number | null;
+  /** dobras cutâneas (mm), pelo nome do relatório */
+  skinfolds?: Record<string, number>;
+  /** outras circunferências (cm) sem campo próprio */
+  circumferences?: Record<string, number>;
+  source?: 'pdf' | 'manual' | 'json';
   notes?: string;
   createdAt: number;
 }

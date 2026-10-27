@@ -1,10 +1,11 @@
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipProps } from 'recharts';
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipProps } from 'recharts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 // Gráficos de série única: cor de destaque, marcas finas, grade discreta e tooltip.
 
 const PRIMARY = 'hsl(var(--primary))';
 const GRID = 'hsl(var(--border))';
+const WARN = 'hsl(var(--warn))';
 const AXIS = 'hsl(var(--muted-foreground))';
 const compactFmt = new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 1 });
 const compact = (v: number) => compactFmt.format(v);
@@ -116,6 +117,97 @@ export function BarsChart<T extends object>({
           <YAxis stroke={AXIS} fontSize={11} tickLine={false} axisLine={false} width={48} allowDecimals={false} tickFormatter={compact} />
           <Tooltip content={<Tip fmt={fmt} labelFmt={xFmt} />} cursor={{ fill: 'hsl(var(--accent))' }} />
           <Bar dataKey={y} fill={PRIMARY} radius={[4, 4, 0, 0]} maxBarSize={28} isAnimationActive={false} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+export interface StackDatum {
+  t: string;
+  a: number;
+  b: number;
+}
+
+/** Barras empilhadas de duas partes (ex.: massa magra + massa gorda = peso). */
+export function StackChart({
+  data,
+  aLabel,
+  bLabel,
+  fmt,
+  xFmt,
+  height = 220,
+}: {
+  data: StackDatum[];
+  aLabel: string;
+  bLabel: string;
+  fmt: (v: number) => string;
+  xFmt: (v: string | number) => string;
+  height?: number;
+}) {
+  if (data.length < 2) return <Empty text="Precisa de pelo menos 2 avaliações com composição corporal." />;
+  return (
+    <div>
+      <div className="mb-2 flex gap-4 text-xs text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-sm" style={{ background: PRIMARY }} /> {aLabel}
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-sm" style={{ background: WARN }} /> {bLabel}
+        </span>
+      </div>
+      <div style={{ height }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data} margin={{ top: 8, right: 8, left: -12, bottom: 0 }} barCategoryGap="22%">
+            <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
+            <XAxis dataKey="t" tickFormatter={xFmt} stroke={AXIS} fontSize={11} tickLine={false} axisLine={false} />
+            <YAxis stroke={AXIS} fontSize={11} tickLine={false} axisLine={false} width={48} tickFormatter={compact} />
+            <Tooltip
+              cursor={{ fill: 'hsl(var(--accent))' }}
+              content={({ active, payload, label }) =>
+                active && payload?.length ? (
+                  <div className="rounded-xl border bg-popover px-3 py-2 text-sm shadow-xl">
+                    <p className="text-xs text-muted-foreground">{xFmt(label)}</p>
+                    <p className="tabular">
+                      <span className="text-primary">●</span> {aLabel}: <b>{fmt(Number(payload[0]?.payload.a))}</b>
+                    </p>
+                    <p className="tabular">
+                      <span style={{ color: WARN }}>●</span> {bLabel}: <b>{fmt(Number(payload[0]?.payload.b))}</b>
+                    </p>
+                  </div>
+                ) : null
+              }
+            />
+            <Bar dataKey="a" stackId="s" fill={PRIMARY} maxBarSize={36} isAnimationActive={false}>
+              <LabelList dataKey="a" position="center" fontSize={10} fill="hsl(var(--primary-foreground))" formatter={(v: number) => compact(v)} />
+            </Bar>
+            <Bar dataKey="b" stackId="s" fill={WARN} radius={[4, 4, 0, 0]} maxBarSize={36} isAnimationActive={false}>
+              <LabelList dataKey="b" position="center" fontSize={10} fill="hsl(var(--primary-foreground))" formatter={(v: number) => compact(v)} />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+/** Barras horizontais pelo tamanho da variação: verde quando ela é boa, laranja quando não é. */
+export function DeltaBars({ data, fmt, goodWhenNegative = true }: { data: { name: string; v: number }[]; fmt: (v: number) => string; goodWhenNegative?: boolean }) {
+  if (!data.length) return <Empty />;
+  const rows = data.map((d) => ({ ...d, size: Math.abs(d.v) }));
+  return (
+    <div style={{ height: Math.max(120, rows.length * 32) }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={rows} layout="vertical" margin={{ top: 0, right: 48, left: 0, bottom: 0 }} barCategoryGap={6}>
+          <XAxis type="number" hide domain={[0, 'dataMax']} />
+          <YAxis type="category" dataKey="name" stroke={AXIS} fontSize={12} tickLine={false} axisLine={false} width={96} />
+          <Tooltip cursor={{ fill: 'hsl(var(--accent))' }} content={({ active, payload }) => (active && payload?.length ? <div className="rounded-xl border bg-popover px-3 py-2 text-sm shadow-xl tabular">{fmt(Number(payload[0].payload.v))}</div> : null)} />
+          <Bar dataKey="size" radius={4} maxBarSize={20} isAnimationActive={false}>
+            {rows.map((d) => (
+              <Cell key={d.name} fill={(d.v < 0) === goodWhenNegative ? PRIMARY : WARN} />
+            ))}
+            <LabelList dataKey="v" position="right" fontSize={11} fill={AXIS} formatter={fmt} />
+          </Bar>
         </BarChart>
       </ResponsiveContainer>
     </div>
