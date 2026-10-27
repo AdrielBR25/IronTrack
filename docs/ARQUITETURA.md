@@ -1,6 +1,6 @@
 # Arquitetura
 
-IronTrack 2.0 · Fase 01 · Prompt 03 (atualizado nos Prompts 04–06 com o módulo de IA e o gateway). Descreve a organização do
+IronTrack 2.0 · Fase 01 · Prompt 03 (atualizado nos Prompts 04–07 com o módulo de IA e o gateway). Descreve a organização do
 código depois da modularização incremental, as dependências permitidas e as que os testes bloqueiam. O
 módulo de IA tem documento próprio: [IA_ARQUITETURA.md](IA_ARQUITETURA.md). As regras automáticas estão em
 `tests/unit/architecture.test.ts`; a compatibilidade dos imports antigos, em `tests/unit/api-compat.test.ts`.
@@ -127,6 +127,9 @@ src/
 services/
   ai-gateway/              gateway de IA opcional (P06): node:http, sem dependências, bloqueado por padrão
                            (src/, providers/, tests/, config/*.example.json; ver IA_GATEWAY.md)
+                           P07: credenciais com keyId/expiração/revogação e recarregamento sem reinício,
+                           métricas sem dados pessoais, scripts/token.ts (rotação atômica) e
+                           scripts/homologate.ts (homologação manual travada); ver IA_HOMOLOGACAO.md
 ```
 
 ## 3. Responsabilidades dos domínios
@@ -242,7 +245,8 @@ Nada disto existe ainda; estes são os lugares previstos, sem interfaces antecip
   persistência em `src/db/nutrition.ts`; nova tabela só com uma nova versão do Dexie e migração
   (ver [MIGRACOES.md](MIGRACOES.md)) e nova versão do backup se entrar no arquivo.
 - **IA multiprovedor**: a fundação existe em `src/modules/ai` (Prompt 04), a interface do assistente desde o
-  Prompt 05 e o modo remoto via gateway seguro desde o Prompt 06 ([IA_GATEWAY.md](IA_GATEWAY.md)). Adaptadores reais entram em `src/modules/ai/adapters/`, registrados
+  Prompt 05 e o modo remoto via gateway seguro desde o Prompt 06 ([IA_GATEWAY.md](IA_GATEWAY.md)), endurecido
+  no Prompt 07 ([IA_HOMOLOGACAO.md](IA_HOMOLOGACAO.md); o gateway roda como **uma única instância**). Adaptadores reais entram em `src/modules/ai/adapters/`, registrados
   pela raiz de composição `src/integrations/ai/assistantService.ts`; a tela
   entrega ao `AIService` resumos calculados com funções puras dos domínios (ex.: `metricChanges`) e nunca
   dados lidos pelo módulo de IA no Dexie. Provedores remotos com chave privada dependem de uma estratégia de

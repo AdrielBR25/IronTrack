@@ -10,6 +10,11 @@ autentica quem pode usá-lo e aplica limites de uso.
 > gateway foi publicado e nenhuma credencial real existe no repositório. A homologação com cada provedor
 > real está **pendente** (ver seção 13.4).
 
+> **Prompt 07 (endurecimento):** auditoria de segurança, rotação/revogação/expiração de credenciais com
+> recarregamento sem reinício, acerto de cotas em falhas, limite total de simultaneidade, bloqueio de
+> redirecionamentos, contratos revisados, métricas sem dados pessoais, encerramento gracioso e roteiro de
+> homologação externa. Detalhes, achados e riscos em **[IA_HOMOLOGACAO.md](IA_HOMOLOGACAO.md)**.
+
 Arquitetura do módulo de IA no app: [IA_ARQUITETURA.md](IA_ARQUITETURA.md) (seção 18 para o modo remoto).
 
 ## 1. Arquitetura do gateway
@@ -56,12 +61,15 @@ Arquivos:
 | --- | --- |
 | `src/gateway.ts` | Servidor HTTP e ordem das proteções. |
 | `src/config.ts` | Esquema e validação da configuração (erros apontam só o campo). |
-| `src/auth.ts` | Credenciais de acesso (hash SHA-256, comparação em tempo constante). |
-| `src/limits.ts` | `UsageStore` (requisições/min, simultaneidade, cota diária) e implementação em memória. |
+| `src/auth.ts` | Credenciais de acesso (hash SHA-256, comparação em tempo constante, expiração, revogação). |
+| `src/credentials.ts` | Emitir, revogar, rotacionar e listar credenciais (funções puras sobre o JSON). |
+| `src/limits.ts` | `UsageStore` (requisições/min em janela deslizante, simultaneidade, cota diária) e implementação em memória. |
+| `src/metrics.ts` | Métricas agregadas em memória, sem dados pessoais. |
 | `src/protocol.ts` | Contrato HTTP e validação do corpo. |
 | `src/providers/*.ts` | Adaptadores OpenAI, Anthropic e Gemini; leitura limitada das respostas. |
-| `src/main.ts` | Entrada local (lê `AI_GATEWAY_CONFIG` e variáveis de ambiente). |
-| `scripts/token.ts` | Emite credenciais de acesso. |
+| `src/main.ts` | Entrada local (lê `AI_GATEWAY_CONFIG`; recarrega com SIGHUP/monitoramento; encerramento gracioso). |
+| `scripts/token.ts` | `issue`/`rotate`/`revoke`/`list` de credenciais, com gravação atômica do arquivo. |
+| `scripts/homologate.ts` | Homologação externa manual e travada (uma solicitação por provedor). |
 | `config/*.example.json`, `.env.example` | Exemplos sem segredos (desligados). |
 
 Escolhas: `node:http` puro (Node 22.18+ executa TypeScript nativamente), sem framework e sem dependências,
@@ -82,7 +90,11 @@ configurado, o IronTrack funciona igual e o modo simulado continua offline**.
 - **CORS não é autenticação.** `allowedOrigins` só controla quais páginas o navegador deixa ler a
   resposta. Origem desconhecida → 403; ausência de origem (curl, servidor) ainda exige o token.
 - **Autorização por titular**: cada titular tem cota própria (`dailyTokenBudget`), limite de requisições e
-  de simultaneidade. Revogar = `enabled: false` ou remover o hash.
+  de simultaneidade.
+- **Credenciais (P07)**: cada titular pode ter várias, cada uma com `keyId` não secreto, `expiresAt` opcional e
+  `revokedAt`. Revogar/rotacionar com `npm run gateway:token`; o gateway aplica no **recarregamento** (imediato
+  com SIGHUP, ou em até 2 s pelo monitoramento do arquivo) e interrompe requisições em andamento com a credencial
+  revogada. Ver [IA_HOMOLOGACAO.md](IA_HOMOLOGACAO.md), seções 2–4.
 - O IronTrack não ganhou login: o token só é necessário para quem escolhe o modo remoto.
 
 No app, o endereço e o token são digitados na tela do assistente, ficam **só na memória** (nunca em
@@ -97,7 +109,8 @@ IndexedDB, localStorage, backup ou logs) e somem ao recarregar ou sair da págin
 | Hash do token | Configuração do gateway (arquivo ignorado pelo git). | Em exemplos versionados. |
 
 Proteções testadas: a chave vai só ao provedor certo, no cabeçalho (`Authorization`, `x-api-key` ou
-`x-goog-api-key`), nunca na URL; corpos de erro dos provedores (que podem ecoar parte da chave) nunca são
+`x-goog-api-key`), nunca na URL; **redirecionamentos do provedor não são seguidos** (P07: antes, um 307/308
+reenviava prompt e `x-api-key`/`x-goog-api-key` a outro destino); corpos de erro dos provedores (que podem ecoar parte da chave) nunca são
 repassados; antes de responder, o gateway confere que nenhuma chave configurada aparece no corpo — se
 aparecer, devolve `internal_error`. `.gitignore` bloqueia `.env*` e `services/ai-gateway/config/*.json`
 (exceto `*.example.json`). `apiKeyEnv` começando com `VITE_` é recusado. Os testes geram tokens e chaves
@@ -126,13 +139,16 @@ Configuráveis em `limits` (padrões do código; os exemplos usam valores iguais
 | `maxMessages` | 6 | 413. |
 | `maxInputChars` | 24.000 (e o do modelo) | 413. |
 | `maxOutputTokens` | 1.024 (e o do modelo) | 400 se pedir mais; texto acima de `maxOutputTokens × 4` caracteres é cortado e marcado `length`. |
-| `requestsPerMinute` | 10 por titular | 429 `rate_limited` + `Retry-After: 60`. |
+| `requestsPerMinute` | 10 por titular (janela deslizante) | 429 `rate_limited` + `Retry-After: 60`. |
 | `maxConcurrentPerClient` | 2 | 429. |
-| `dailyTokenBudget` | 50.000 por titular (dia UTC) | Reserva `entrada estimada + maxOutputTokens` antes da chamada; 429 `quota_exceeded` se ultrapassar; depois troca a reserva pelo consumo real. Falhas mantêm a reserva (o provedor pode ter cobrado). |
-| `upstreamTimeoutMs` | 30 s | 504 `timeout`; a chamada ao provedor é abortada. |
+| `maxConcurrentTotal` | 8 (todos os titulares) | 429. |
+| `dailyTokenBudget` | 50.000 por titular (dia UTC) | Reserva `entrada estimada + maxOutputTokens` antes da chamada; 429 `quota_exceeded` se ultrapassar; depois acerta: uso real no sucesso; devolve tudo se nada saiu ou se o provedor respondeu erro HTTP; cobra o uso informado em 2xx inaproveitável; mantém a reserva em tempo limite/cancelamento após o envio. |
+| `upstreamTimeoutMs` | 30 s | 504 `timeout`; cobre a leitura do corpo e a chamada ao provedor, que é abortada. |
 | `maxUpstreamResponseBytes` | 256 KiB | 502 `invalid_response`. |
 
-O servidor HTTP também limita cabeçalhos (10 s) e a duração da requisição.
+O servidor HTTP também limita cabeçalhos (10 s) e a duração da requisição. Valores acima dos tetos de
+`MAX_LIMITS` tornam a configuração inválida. Concorrência, reservas e a diferença entre limite local, global e
+de gasto no provedor: [IA_HOMOLOGACAO.md](IA_HOMOLOGACAO.md), seção 5.
 
 **Implantação distribuída:** `MemoryUsageStore` vale para **uma instância**. Com várias instâncias, cada
 uma teria contadores próprios (limites multiplicados) e reinícios zerariam as cotas. Antes de qualquer
@@ -143,9 +159,11 @@ memória **não** é proteção suficiente nesse cenário.
 ## 6. Privacidade
 
 - O gateway **não persiste** nada: sem banco, sem arquivos, sem histórico (testado no código-fonte).
-- **Logs só com metadados**: horário, ID aleatório da requisição, rota, status, código de erro, titular,
-  provedor, modelo, duração e tokens. Nunca prompt, resposta, dados corporais, cabeçalhos, token ou chave
-  (testado com marcadores).
+- **Logs só com metadados**: horário, ID aleatório da requisição, rota (rótulo fixo; caminhos desconhecidos
+  viram `outra`), status, código de erro, `keyId` da credencial (P07: não mais o titular), provedor, modelo,
+  duração, tokens, origem do uso e limite atingido. Nunca prompt, resposta, dados corporais, cabeçalhos,
+  token ou chave (testado com marcadores). `AI_GATEWAY_ACCESS_LOG=off` desliga. Métricas agregadas só em
+  memória (SIGUSR2), sem envio a terceiros.
 - Respostas com `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`.
 - OpenAI: `store: false` (a Responses API guarda respostas por padrão).
 - **Limitação inevitável:** mesmo com o gateway, **o provedor remoto recebe o conteúdo que o usuário
@@ -218,8 +236,11 @@ Messages API, conforme a referência oficial consultada em 27/10/2026
 - A documentação atual do Google também apresenta a nova **Interactions API**; o `generateContent`
   continua documentado como API principal. Rever na homologação.
 
-Erros HTTP dos três provedores: 401/403 → `provider_unavailable` (chave recusada); 413 → `payload_too_large`;
-400, 404, 429, 5xx, 529 e falha de rede → `provider_failure`. **Sem nova tentativa automática.**
+Erros HTTP dos três provedores: 401/403 → `provider_unavailable` (chave recusada); 429 →
+`provider_rate_limited` (P07; limite/cota da conta no provedor); 413 → `payload_too_large`; 3xx, 400, 404,
+5xx, 529, queda no meio do corpo e falha de rede → `provider_failure`. **Sem nova tentativa automática.**
+Revisão dos contratos no P07 (raciocínio, recusas, parciais, uso do Gemini com `thoughtsTokenCount`):
+[IA_HOMOLOGACAO.md](IA_HOMOLOGACAO.md), seção 7.
 
 ## 11. Limitações de Ollama
 
@@ -243,7 +264,8 @@ Requisitos: Node 22.18+ (TypeScript nativo). Nenhuma dependência extra.
 
 ```bash
 cp services/ai-gateway/config/development.example.json services/ai-gateway/config/development.json
-npm run gateway:token -- meu-celular        # guarde o token; cole o trecho em "clients"
+npm run gateway:token -- issue meu-celular --expires-in 90d --config services/ai-gateway/config/development.json
+                                             # guarde o token (mostrado uma vez); o arquivo recebe só o hash
 # edite development.json: "enabled": true, habilite UM provedor e o ID do modelo correto
 export AI_GATEWAY_CONFIG=services/ai-gateway/config/development.json
 export ANTHROPIC_API_KEY=...                 # só no shell do gateway; nunca VITE_*
@@ -263,7 +285,7 @@ Observação: o app publicado (HTTPS) não consegue usar um gateway `http://` de
 
 | Suíte | Comando | Conteúdo |
 | --- | --- | --- |
-| Gateway | `npm run test:gateway` | 76 testes (`services/ai-gateway/tests`): os 18 cenários obrigatórios, adaptadores, configuração e integração com provedores simulados em sockets locais. |
+| Gateway | `npm run test:gateway` | 157 testes (`services/ai-gateway/tests`; 76 no P06): os 18 cenários obrigatórios, adaptadores, configuração e integração com provedores simulados em sockets locais. P07: `hardening` (credenciais, reload, concorrência, reservas, redirecionamentos, SSRF, encerramento, métricas), `contracts` (respostas realistas dos três provedores), `credentials` (ciclo de vida e utilitário atômico), `homologation` (roteiro travado e ensaio local) e `process` (processo real: revogação sem reinício, SIGHUP, SIGTERM). |
 | Unitários do app | `npm test` | Provedor remoto, Ollama, transporte, tela no modo remoto, arquitetura (rede só no transporte, sem redirect/cookies, gateway independente). |
 | E2E | `npm run test:e2e` | `e2e/assistant-gateway.spec.ts`: o **gateway real** sobe dentro do teste com um provedor simulado local; celular 360 px e desktop. |
 
@@ -293,7 +315,12 @@ gasto no painel do provedor, configuração local com só aquele provedor e um m
 **sem dados pessoais** e conferência de: resposta, `finishReason`, uso de tokens, erro com chave inválida e
 tempo limite. Registrar o resultado aqui. Até lá, a integração real **não é considerada homologada**.
 
+P07: o roteiro reproduzível agora existe (`npm run gateway:homologate`, manual e travado) e a tabela de
+evidências fica em [IA_HOMOLOGACAO.md](IA_HOMOLOGACAO.md), seção 9. Continua **PENDENTE**.
+
 ## 14. Estratégia de implantação futura
+
+Requisitos mínimos atualizados no P07: [IA_HOMOLOGACAO.md](IA_HOMOLOGACAO.md), seção 12.
 
 Nada foi implantado. Antes de expor o gateway fora do aparelho do desenvolvedor:
 
@@ -315,12 +342,12 @@ Nada foi implantado. Antes de expor o gateway fora do aparelho do desenvolvedor:
 | Risco | Mitigação atual | Pendência |
 | --- | --- | --- |
 | Uso anônimo da chave | Token obrigatório; CORS não autentica; bloqueado por padrão. | — |
-| Token vazado | Cota diária e limite por titular; revogação por `enabled: false`; token não é persistido no app. | Rotação; tokens de curta duração com login. |
+| Token vazado | Cota diária e limite por titular; expiração; revogação e rotação com recarregamento sem reinício (P07); token não é persistido no app e é esquecido se recusado. | Tokens de curta duração com login. |
 | Consumo ilimitado | Reserva de cota antes da chamada; limites de entrada/saída; simultaneidade. | Teto no painel do provedor. |
-| Várias instâncias | — | `UsageStore` compartilhado obrigatório. |
+| Várias instâncias | Restrição explícita a uma instância (P07). | `UsageStore` compartilhado obrigatório antes de escalar. |
 | Requisições excessivas | Limite por minuto, corpo máximo, tempo limite, limites do servidor HTTP. | Limite por IP na borda (proxy). |
 | Endpoints arbitrários / SSRF | Rotas fixas; endereços oficiais fixos no código; `baseUrl` só pelo operador (https ou loopback); corpo estrito. | — |
-| Vazamento de credenciais | Chaves só no ambiente do servidor; corpo de erro do provedor descartado; checagem final da resposta; logs sem cabeçalhos. | — |
+| Vazamento de credenciais | Chaves só no ambiente do servidor; corpo de erro do provedor descartado; checagem final da resposta; logs sem cabeçalhos; redirecionamentos não seguidos (P07). | — |
 | Respostas enormes | Limite de bytes no gateway e no app; corte por `maxOutputTokens`. | — |
 | Dados pessoais no provedor | Prévia, consentimento por solicitação, minimização, aviso explícito. | Depende das políticas de cada provedor. |
 | Redirecionamento para outro destino | App usa `redirect: 'error'`, `credentials: 'omit'`, `no-referrer`. | — |

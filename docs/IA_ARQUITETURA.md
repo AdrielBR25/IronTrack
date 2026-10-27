@@ -490,3 +490,18 @@ Interface:
 Compatibilidade: Dexie continua v2, sem tabelas novas; backups v0/v1/v2 inalterados; conversas, token,
 endereço e autorizações não são persistidos; fórmulas de treino e evolução corporal intocadas.
 
+
+## 19. Endurecimento do gateway (Prompt 07)
+
+Mudanças concentradas em `services/ai-gateway` (detalhes em [IA_HOMOLOGACAO.md](IA_HOMOLOGACAO.md)); no app:
+
+| Arquivo | Mudança |
+| --- | --- |
+| `src/modules/ai/adapters/GatewayAIProvider.ts` | Código novo do gateway `provider_rate_limited` (limite/cota da conta no provedor) → `rate_limited`. |
+| `src/modules/ai/domain/errors.ts` | `access_denied` explica que o token pode estar errado, revogado ou expirado. |
+| `src/features/assistant/useAssistant.ts` | Token recusado **durante** uma execução remota (revogado/expirado no servidor) → o gateway é desconectado na hora, o token é esquecido e a interface pede nova conexão (`TOKEN_REJECTED_MESSAGE`). Sem nova tentativa. |
+
+Inalterado e reconfirmado: simulado como padrão e offline; nenhuma conexão automática; token só em memória e
+nunca em URL, storage, backup ou log; destino explícito e assinado; prévia completa; consentimento por
+solicitação; invalidação ao trocar/desconectar o gateway; cancelamento; sem login obrigatório; sem persistência
+de conversas ou tokens. Dexie continua v2 e backups v0/v1/v2 não mudaram.
