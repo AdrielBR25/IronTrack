@@ -1,13 +1,14 @@
 # Arquitetura
 
-IronTrack 2.0 · Fase 01 · Prompt 03 (atualizado no Prompt 04 com o módulo de IA). Descreve a organização do
+IronTrack 2.0 · Fase 01 · Prompt 03 (atualizado nos Prompts 04–06 com o módulo de IA e o gateway). Descreve a organização do
 código depois da modularização incremental, as dependências permitidas e as que os testes bloqueiam. O
 módulo de IA tem documento próprio: [IA_ARQUITETURA.md](IA_ARQUITETURA.md). As regras automáticas estão em
 `tests/unit/architecture.test.ts`; a compatibilidade dos imports antigos, em `tests/unit/api-compat.test.ts`.
 
 ## 1. Visão geral
 
-O IronTrack é um PWA offline-first, sem backend: React 18 + TypeScript (estrito), Vite, Dexie
+O IronTrack é um PWA offline-first, sem backend obrigatório (o gateway de IA opcional do P06 vive à parte,
+em `services/ai-gateway`, e o app funciona sem ele): React 18 + TypeScript (estrito), Vite, Dexie
 (IndexedDB), Zod, Recharts e vite-plugin-pwa, publicado no GitHub Pages. Todo dado mora no
 navegador e pertence ao perfil local (ver [PERFIL_LOCAL.md](PERFIL_LOCAL.md)).
 
@@ -29,7 +30,7 @@ flowchart TD
   subgraph Domínios["src/modules (regras puras)"]
     training["training"]
     body["body"]
-    ai["ai (contratos, consentimento, serviço; ainda sem uso)"]
+    ai["ai (contratos, consentimento, serviço, adaptadores simulado/gateway)"]
   end
   shared["src/lib compartilhado (validation, dates, units, utils)"]
   safety["src/lib dados (profile, integrity, merge, backupFormat, types)"]
@@ -54,6 +55,8 @@ flowchart TD
   body --> shared
   safety --> shared
   ai --> shared
+  gateway["services/ai-gateway (opcional, separado; HTTPS + token)"]
+  features -. "modo remoto, após autorização" .-> gateway
 ```
 
 `training` e `body` não se conhecem. Nenhum domínio importa React, Dexie, `src/db`, hooks ou telas. O módulo
@@ -103,8 +106,9 @@ src/
     alerts.ts, install.ts  APIs do navegador (som, vibração, notificação, instalação do PWA)
     session.ts, rotation.ts, … (11 arquivos)  reexportações @deprecated dos módulos (compatibilidade)
   integrations/
-    ai/                    raiz de composição do assistente (P05; ver IA_ARQUITETURA.md, seção 17)
-      assistantService.ts  ÚNICO ponto que registra um adaptador (MockAIProvider) e monta o AIService
+    ai/                    raiz de composição do assistente (P05/P06; ver IA_ARQUITETURA.md, seções 17 e 18)
+      assistantService.ts  ÚNICO ponto que registra adaptadores (simulado; remotos ao conectar o gateway)
+      gatewayTransport.ts  ÚNICO fetch de IA do app: rotas fixas do gateway, sem redirect/cookies (P06)
       contextSources.ts    leitura mínima (só leitura) das categorias escolhidas + observação de mudanças
   db/
     db.ts                  esquema Dexie v2, migração v1 → v2, perfil, hooks de dono, configurações,
@@ -116,10 +120,13 @@ src/
     data.ts                configurações, perfil, rotinas, sessões, rotação e agenda (useLiveQuery)
     useBody.ts             avaliações e fotos
     useUnits.ts            exibição de pesos na unidade escolhida
-  features/                workout/, routines/, body/, backup/, assistant/ (conversa, prévia, useAssistant)
+  features/                workout/, routines/, body/, backup/, assistant/ (conversa, prévia, modo remoto, useAssistant)
   components/              ui/ (botões, diálogos…), charts.tsx, AppLayout, SortableList…
   pages/                   Início, Treinos, Editor, Treino ativo, Histórico, Detalhe, Progresso, Assistente IA,
                            Configurações
+services/
+  ai-gateway/              gateway de IA opcional (P06): node:http, sem dependências, bloqueado por padrão
+                           (src/, providers/, tests/, config/*.example.json; ver IA_GATEWAY.md)
 ```
 
 ## 3. Responsabilidades dos domínios
@@ -191,7 +198,10 @@ timestamp em ms. Descansos em segundos.
 - `modules/ai/domain` → só o próprio `domain`; `modules/ai/application` → `domain`, `application` e
   `lib/dates`; `modules/ai/adapters` → só `domain` (contratos).
 - `integrations/ai` → `@/modules/ai`, funções de **leitura** de `src/db`, `lib`, domínios, `dexie`
-  (`liveQuery`); só `integrations/ai/assistantService.ts` importa `modules/ai/adapters/MockAIProvider`.
+  (`liveQuery`); só `integrations/ai/assistantService.ts` importa adaptadores (`MockAIProvider`,
+  `GatewayAIProvider`; lista `ADAPTER_IMPORTS` no teste). `integrations/ai/gatewayTransport.ts` é o único
+  arquivo do assistente com rede e só é usado pela raiz de composição.
+- `services/ai-gateway` não importa `src/` e `src/` não importa `services/` (implantações independentes).
 - `features/assistant` e `pages/AIAssistantPage.tsx` → `@/modules/ai`, `integrations/ai`, componentes e `lib`.
 
 ## 8. Dependências proibidas (testadas)
@@ -231,8 +241,8 @@ Nada disto existe ainda; estes são os lugares previstos, sem interfaces antecip
 - **Novo domínio** (ex.: nutrição): `src/modules/nutrition/` com `types.ts`, regras puras e `index.ts`;
   persistência em `src/db/nutrition.ts`; nova tabela só com uma nova versão do Dexie e migração
   (ver [MIGRACOES.md](MIGRACOES.md)) e nova versão do backup se entrar no arquivo.
-- **IA multiprovedor**: a fundação existe em `src/modules/ai` (Prompt 04) e a interface do assistente, com o
-  provedor simulado, desde o Prompt 05. Adaptadores reais entram em `src/modules/ai/adapters/`, registrados
+- **IA multiprovedor**: a fundação existe em `src/modules/ai` (Prompt 04), a interface do assistente desde o
+  Prompt 05 e o modo remoto via gateway seguro desde o Prompt 06 ([IA_GATEWAY.md](IA_GATEWAY.md)). Adaptadores reais entram em `src/modules/ai/adapters/`, registrados
   pela raiz de composição `src/integrations/ai/assistantService.ts`; a tela
   entrega ao `AIService` resumos calculados com funções puras dos domínios (ex.: `metricChanges`) e nunca
   dados lidos pelo módulo de IA no Dexie. Provedores remotos com chave privada dependem de uma estratégia de

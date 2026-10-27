@@ -33,7 +33,7 @@ No PC (Chrome/Edge), use o ícone de instalar na barra de endereço.
 - **Evolução corporal**: peso, % de gordura (estimado), cintura, abdômen, braço, coxa e fotos opcionais; importação via JSON.
 - **Backup** completo em JSON com validação estrutural e de integridade, migração de versão, prévia antes de gravar (adicionados, duplicatas, conflitos e ignorados), mesclar sem sobrescrever ou substituir de forma atômica. Detalhes em [docs/BACKUP_RESTAURACAO.md](docs/BACKUP_RESTAURACAO.md), [docs/INTEGRIDADE_DADOS.md](docs/INTEGRIDADE_DADOS.md) e [docs/MIGRACOES.md](docs/MIGRACOES.md).
 - **Perfil local**: identidade estável dos dados neste navegador (sem login nem conta), dono explícito dos registros e backups v2 que registram o perfil. Detalhes em [docs/PERFIL_LOCAL.md](docs/PERFIL_LOCAL.md).
-- **Assistente IA (modo de demonstração)**: conversa com um provedor **simulado** que roda no aparelho, sem rede e sem chave. Você escolhe quais dados podem ser usados (nenhum vem marcado), revisa na prévia exatamente o que seria compartilhado e autoriza cada pergunta separadamente. As respostas são fictícias e a conversa não é guardada. Detalhes em [docs/IA_ARQUITETURA.md](docs/IA_ARQUITETURA.md).
+- **Assistente IA**: por padrão conversa com um provedor **simulado** que roda no aparelho, sem rede e sem chave. Opcionalmente, o **modo remoto** usa OpenAI, Anthropic Claude ou Google Gemini por meio de um **gateway seguro** (chaves só no servidor, token de acesso, limites de uso), com provedor e modelo escolhidos por você. Em qualquer modo, você escolhe quais dados podem ser usados (nenhum vem marcado), revisa na prévia exatamente o que será compartilhado e com qual destino, e autoriza cada pergunta separadamente. A conversa não é guardada. Detalhes em [docs/IA_ARQUITETURA.md](docs/IA_ARQUITETURA.md) e [docs/IA_GATEWAY.md](docs/IA_GATEWAY.md).
 
 > Os dados ficam só neste navegador/aparelho. Não há sincronização entre dispositivos. Limpar os dados do site no navegador apaga os registros — por isso exporte backups.
 
@@ -45,7 +45,19 @@ npm run dev          # http://localhost:5173/IronTrack/
 npm test             # testes unitários (Vitest)
 npm run build        # gera dist/
 npx playwright test  # testes end-to-end (sobe o preview automaticamente)
+npm run typecheck    # TypeScript (app, e2e e gateway)
+npm run test:gateway # testes do gateway de IA (provedores simulados, sem rede externa)
 ```
+
+Gateway de IA (opcional, só desenvolvimento local; nunca publicado por este repositório):
+
+```bash
+npm run gateway:token -- <titular>   # emite um token de acesso (guarde-o; o servidor fica só com o hash)
+AI_GATEWAY_CONFIG=services/ai-gateway/config/development.json npm run gateway:dev
+```
+
+Sem configuração válida o gateway sobe bloqueado. Chaves de provedores vão só em variáveis de ambiente do
+gateway (nunca `VITE_*`). Passo a passo e riscos em [docs/IA_GATEWAY.md](docs/IA_GATEWAY.md).
 
 Stack: React 18 + TypeScript + Vite, Tailwind CSS + componentes no estilo shadcn/ui (Radix), Lucide, Framer Motion,
 Dexie (IndexedDB), Zod, Recharts, vite-plugin-pwa, Vitest e Playwright.
@@ -60,6 +72,8 @@ src/db/         banco Dexie e operações de persistência (por domínio)
 src/hooks/      consultas reativas para as telas
 src/features/   componentes por funcionalidade (execução do treino, rotinas, corpo, backup)
 src/pages/      telas
+src/integrations/ai/  raiz de composição do assistente de IA e transporte até o gateway
+services/ai-gateway/  gateway de IA opcional (servidor separado, sem dependências)
 tests/unit/     testes unitários   ·   e2e/   testes Playwright (celular 360 px e desktop)
 ```
 

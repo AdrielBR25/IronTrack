@@ -1,9 +1,11 @@
 # Arquitetura de IA
 
-IronTrack 2.0 · Fase 01 · Prompts 04 e 05. Fundação técnica para usar provedores de inteligência artificial
-com privacidade por padrão (P04) e a primeira interface do assistente (P05), que usa **somente o provedor
-simulado**: não há chamada real a OpenAI, Anthropic, Gemini ou Ollama, nem configuração de chave. O app continua
-100% offline. A interface está descrita na [seção 17](#17-interface-do-assistente-prompt-05).
+IronTrack 2.0 · Fase 01 · Prompts 04, 05 e 06. Fundação técnica para usar provedores de inteligência artificial
+com privacidade por padrão (P04), a primeira interface do assistente (P05) e a integração com provedores
+reais **por meio de um gateway seguro** (P06). O modo **simulado continua o padrão** e funciona 100% offline;
+o modo remoto só existe quando o usuário conecta um gateway e escolhe provedor e modelo. A interface está na
+[seção 17](#17-interface-do-assistente-prompt-05) e o modo remoto na [seção 18](#18-modo-remoto-via-gateway-prompt-06).
+O gateway em si (autenticação, limites, adaptadores OpenAI/Anthropic/Gemini) está em [IA_GATEWAY.md](IA_GATEWAY.md).
 
 Código: `src/modules/ai`. Testes: `tests/unit/ai-*.test.ts` e o bloco "arquitetura do módulo de IA" de
 `tests/unit/architecture.test.ts`. Regras gerais de camadas: [ARQUITETURA.md](ARQUITETURA.md).
@@ -45,7 +47,8 @@ flowchart LR
     end
     subgraph adapters["adapters"]
       mock["MockAIProvider (simulado, offline)"]
-      futuros["OpenAI · Anthropic · Gemini · Ollama (futuros)"]
+      gateway["GatewayAIProvider (remoto, P06) → services/ai-gateway → OpenAI · Anthropic · Gemini"]
+      futuros["OllamaProvider (contrato local, não ativado)"]
     end
   end
   dominios["modules/training, modules/body (funções puras)"]
@@ -59,6 +62,7 @@ flowchart LR
   service --> perms
   registry --> contracts
   mock --> contracts
+  gateway --> contracts
   futuros -.-> contracts
   ui -.->|"calcula resumos com"| dominios
 ```
@@ -221,7 +225,10 @@ usuário é a tela mostrar a prévia antes do botão (ver seção 17.3).
 
 ## 9. Segurança das credenciais
 
-Nesta etapa **não há armazenamento de chaves**. Não existem credenciais no código, em JSON, no backup, no
+> P06: as chaves dos provedores existem só no servidor do gateway ([IA_GATEWAY.md](IA_GATEWAY.md), seção 3).
+> O app guarda apenas, **em memória**, o endereço do gateway e o token de acesso que o usuário digitou.
+
+Até o P05 **não havia armazenamento de chaves**. Não existem credenciais no código, em JSON, no backup, no
 IndexedDB, no localStorage, nos logs ou nos testes, e nenhuma variável `VITE_*` com segredo. Os testes de
 arquitetura bloqueiam no módulo de IA: URLs `http(s)://`, `import.meta.env`, `VITE_`, `process.env`,
 padrões de chave (`sk-…`, `AIza…`, `Bearer`), além de SDKs de provedores no `package.json` e variáveis
@@ -238,12 +245,11 @@ O IronTrack é servido como arquivos estáticos pelo GitHub Pages. Tudo o que o 
 - chamar provedores remotos direto do navegador com chave privada embutida **não será feito**;
 - um proxy aberto (sem autenticação e limite) também não: viraria um repasse gratuito para terceiros.
 
-Provedores remotos que exigem credencial privada precisarão de uma **estratégia de execução segura** decidida
-numa etapa própria, por exemplo: um backend autorizado (função serverless com autenticação do usuário,
-limite de uso e chave guardada no servidor) ou um fluxo em que o próprio provedor emita credenciais de curta
-duração com escopo restrito. Até lá, só o simulado existe.
+Provedores remotos que exigem credencial privada precisam de uma **estratégia de execução segura**. Decisão
+do P06: um **gateway separado** (`services/ai-gateway`), com credencial de acesso verificada no servidor,
+allowlist, limites de uso e chaves só no servidor. Ver [IA_GATEWAY.md](IA_GATEWAY.md).
 
-## 11. Estratégia futura: OpenAI
+## 11. Estratégia: OpenAI (implementada no gateway no P06 — ver IA_GATEWAY.md, seção 8)
 
 - Adaptador `adapters/OpenAIProvider.ts` implementando `AIProvider`, `kind: 'remote'`.
 - Configuração explícita de modelo e de **endpoint autorizado** (vindo do backend seguro, não fixo no código).
@@ -254,7 +260,7 @@ duração com escopo restrito. Até lá, só o simulado existe.
   `timeout`; 429 e 5xx → `provider_failure` (sem repetir); corpo fora do contrato → `invalid_response`.
 - Sem SDK no navegador; a chamada real passa pelo backend autorizado.
 
-## 12. Estratégia futura: Anthropic
+## 12. Estratégia: Anthropic (implementada no gateway no P06 — ver IA_GATEWAY.md, seção 9)
 
 - Adaptador `adapters/AnthropicProvider.ts`, `kind: 'remote'`.
 - Particularidades da API Claude: a instrução de sistema é um campo separado (não uma mensagem com papel
@@ -264,7 +270,7 @@ duração com escopo restrito. Até lá, só o simulado existe.
   motivo de parada (fim normal → `stop`, limite de tokens → `length`).
 - Credencial só no backend autorizado; nada de chave no navegador.
 
-## 13. Estratégia futura: Google Gemini
+## 13. Estratégia: Google Gemini (implementada no gateway no P06 — ver IA_GATEWAY.md, seção 10)
 
 - Adaptador `adapters/GeminiProvider.ts`, `kind: 'remote'`.
 - Mapeamento de mensagens: papéis `user`/`model` (o `assistant` do contrato vira `model`) e instrução de
@@ -274,7 +280,7 @@ duração com escopo restrito. Até lá, só o simulado existe.
 - Filtros de segurança do provedor podem bloquear a resposta: mapear para `invalid_response` com mensagem fixa.
 - Credencial só no backend autorizado.
 
-## 14. Estratégia futura: Ollama
+## 14. Estratégia futura: Ollama (contrato preparado no P06, não ativado — ver IA_GATEWAY.md, seção 11)
 
 - Adaptador `adapters/OllamaProvider.ts`, `kind: 'local'`, para um servidor **explicitamente configurado pelo
   usuário** (endereço digitado por ele; nenhum endereço padrão ativo no código).
@@ -291,8 +297,9 @@ duração com escopo restrito. Até lá, só o simulado existe.
 
 ## 15. Limites da implementação atual
 
-- A interface (P05) usa só o provedor simulado; não há configuração de chaves nem provedores reais.
-- Nenhum adaptador real; nenhum SDK; nenhuma chamada de rede.
+- Simulado é o padrão; provedores reais só via gateway conectado pelo usuário (P06). Nenhum SDK no app.
+- A única rede de IA do app está em `src/integrations/ai/gatewayTransport.ts` (testado), por ação do usuário.
+- Homologação com provedores reais **pendente** (sem credenciais disponíveis; validado com simulações).
 - Sem streaming, sem entrada de imagens, sem execução de ferramentas, sem agentes, sem repetição automática.
 - Fotos bloqueadas em qualquer caso.
 - O corte de saída usa a aproximação de 4 caracteres por token (não há tokenizador).
@@ -310,10 +317,12 @@ duração com escopo restrito. Até lá, só o simulado existe.
    `AIProviderResult` e lance `AIError` com o código adequado (o serviço transforma qualquer outro erro em
    `provider_failure`, sem a mensagem original).
 4. Não acesse IndexedDB, storage, banco, hooks ou telas; o adaptador só recebe o `AIRequest`.
-5. Credenciais e endpoints nunca no código: venha pela estratégia segura da seção 10.
+5. Credenciais e endpoints nunca no código: provedores remotos passam pelo gateway (o adaptador do app é
+   o `GatewayAIProvider`; o mapeamento para a API do provedor fica em `services/ai-gateway/src/providers`).
+   Provedores `remote`/`local` precisam declarar `destination` (o registro recusa sem ele).
 6. Registre o adaptador na raiz de composição `src/integrations/ai/assistantService.ts`, não nas telas; a
-   interface usa só `AIService` e os descritores. O teste de arquitetura só permite import de
-   `modules/ai/adapters` nesse arquivo; um adaptador novo exige ampliar essa exceção conscientemente.
+   interface usa só `AIService` e os descritores. O teste de arquitetura só permite imports de
+   `modules/ai/adapters` listados em `ADAPTER_IMPORTS`; um adaptador novo exige ampliar essa lista conscientemente.
 7. Escreva testes com o adaptador simulando as respostas da API (sem rede) e rode os testes de arquitetura.
 
 ## 17. Interface do assistente (Prompt 05)
@@ -443,3 +452,41 @@ na v2, sem tabelas novas; backups v0/v1/v2 inalterados. As únicas mudanças em 
 - Se a conversa passar a enviar histórico, cada mensagem anterior incluída precisa aparecer na prévia.
 - Respostas reais podem conter Markdown/links: renderizar só com um conversor seguro e sem ações automáticas.
 - Logs de produção continuam sem conteúdo; cobrança, limites de uso e erros HTTP mapeados para `AIError`.
+
+## 18. Modo remoto via gateway (Prompt 06)
+
+Arquivos novos ou alterados:
+
+| Arquivo | Papel |
+| --- | --- |
+| `src/modules/ai/adapters/GatewayAIProvider.ts` | Adaptador `remote`: catálogo do gateway → provedores/modelos; `AIRequest` → `POST /v1/generate`; erros do gateway → `AIError`. Não faz rede: recebe um `transport`. |
+| `src/modules/ai/adapters/OllamaProvider.ts` | Contrato local (só loopback, endereço digitado). **Não registrado.** |
+| `src/integrations/ai/gatewayTransport.ts` | Único arquivo com `fetch` de IA: rotas fixas, `redirect: 'error'`, `credentials: 'omit'`, `no-referrer`, resposta ≤ 256 KiB; valida endereço (HTTPS ou HTTP loopback). |
+| `src/integrations/ai/assistantService.ts` | `connectGateway` (busca só o catálogo) e `disconnectGateway`; token só na closure. |
+| `src/features/assistant/RemoteSetup.tsx` | Escolha do modo, conexão, seleção de provedor e modelo. |
+| `useAssistant.ts`, `SharePreviewDialog.tsx`, `Conversation.tsx`, `AIAssistantPage.tsx` | Modo, destino na prévia, avisos e rótulos remotos. |
+
+Mudanças no núcleo:
+
+- `AIProvider.destination` (obrigatório para `remote`/`local`) aparece nos descritores e na prévia.
+- `PreparedAIRequest.destination` entra na assinatura (`irontrack.ai.binding.v2`); `execute` confere que o
+  destino atual do provedor é o assinado (reconectar a outro gateway → `permission_denied`).
+- `ProviderRegistry.unregister` (desconectar remove os provedores remotos; pedido preparado não executa).
+- Novos códigos: `access_denied`, `rate_limited`, `quota_exceeded`, `gateway_unreachable`, `content_blocked`.
+
+Interface:
+
+- **Simulado (padrão)**: nenhuma chamada externa; tudo como no P05, inclusive offline.
+- **Remoto via gateway**: faixa vermelha "Modo remoto — compartilhamento externo"; formulário de endereço e
+  token (campo de senha, limpo após conectar); provedores e modelos do catálogo **sem pré-seleção**;
+  provedor sem chave no servidor aparece desabilitado; escolher modelo não envia nada.
+- Prévia remota: selo "remoto", linha **Destino** (`<origem do gateway> → <provedor>`), aviso de
+  compartilhamento externo, conteúdo exato, botão "Autorizar e enviar".
+- Respostas remotas com selo do provedor/modelo e aviso de que podem conter erros; texto puro.
+- Tempo limite remoto de 45 s (o gateway encerra antes, em 30 s); cancelar aborta a requisição, e o gateway
+  aborta a chamada ao provedor.
+- Sair ou recarregar a página esquece o gateway e o token e volta ao modo simulado.
+
+Compatibilidade: Dexie continua v2, sem tabelas novas; backups v0/v1/v2 inalterados; conversas, token,
+endereço e autorizações não são persistidos; fórmulas de treino e evolução corporal intocadas.
+
