@@ -12,7 +12,7 @@ import { ConfirmDialog } from '@/components/ui/confirm';
 import { useCurrentProfile, useSettings } from '@/hooks/data';
 import { renameProfile } from '@/db/profiles';
 import { PROFILE_NAME_MAX } from '@/lib/profile';
-import { db, requestPersistentStorage, saveSettings } from '@/db/db';
+import { clearLocalData, requestPersistentStorage, saveSettings } from '@/db/db';
 import type { Equipment, Settings } from '@/lib/types';
 import { GOAL_LABEL } from '@/lib/defaults';
 import { EQUIPMENT_LABEL } from '@/modules/training';
@@ -470,9 +470,7 @@ export default function SettingsPage() {
         description="Rotinas, histórico, avaliações, fotos e configurações deste aparelho serão apagados. O perfil local (nome e identificador) é mantido. Exporte um backup antes, se quiser guardar."
         confirmLabel="Apagar tudo"
         onConfirm={async () => {
-          await db.transaction('rw', [db.settings, db.routines, db.sessions, db.rotations, db.overrides, db.bodyEntries, db.photos], async () => {
-            await Promise.all([db.settings, db.routines, db.sessions, db.rotations, db.overrides, db.bodyEntries, db.photos].map((t) => t.clear()));
-          });
+          await clearLocalData();
           toast('Dados apagados');
         }}
       />

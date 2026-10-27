@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Flag, Trash2, Trophy, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useActiveSession, useCompletedSessions, useNow, useSettings } from '@/hooks/data';
-import { completeSession, discardSession, saveSession } from '@/db/repo';
+import { completeSession, discardSession, getRoutine, saveSession } from '@/db/repo';
 import {
   addSet,
   carryForwardWeight,
@@ -17,6 +17,7 @@ import {
   skipExercise,
   skipSet,
   substituteExercise,
+  substituteOptions,
   undoSet,
   updateSet,
   type SetRef,
@@ -41,7 +42,6 @@ import { Input, Textarea } from '@/components/ui/input';
 import { ConfirmDialog } from '@/components/ui/confirm';
 import { useUnits } from '@/hooks/useUnits';
 import { fmtClock, fmtDuration } from '@/lib/utils';
-import { db } from '@/db/db';
 import { cn } from '@/lib/utils';
 
 function useWakeLock(enabled: boolean) {
@@ -369,11 +369,7 @@ function SubstituteDialog({ session, exId, onClose, onPick }: { session: Workout
     if (!ex) return;
     setName('');
     void (async () => {
-      const routine = await db.routines.get(session.routineId);
-      const tpl = routine?.workouts.flatMap((w) => w.exercises).find((t) => t.id === ex.templateId);
-      const fromTpl = tpl?.substitutes ?? [];
-      const sameGroup = (routine?.workouts.flatMap((w) => w.exercises) ?? []).filter((t) => t.muscleGroup === ex.muscleGroup && t.name !== ex.name).map((t) => t.name);
-      setOptions([...new Set([...fromTpl, ...sameGroup])].slice(0, 8));
+      setOptions(substituteOptions(await getRoutine(session.routineId), ex));
     })();
   }, [ex?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   return (

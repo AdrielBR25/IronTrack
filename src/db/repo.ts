@@ -1,7 +1,11 @@
 import { db, getSettings, saveSettings } from './db';
-import type { BodyEntry, DayOverride, ProgressPhoto, Routine, RotationState, Workout, WorkoutSession } from '@/lib/types';
+import type { DayOverride, Routine, RotationState, Workout, WorkoutSession } from '@/lib/types';
 import { uid } from '@/lib/utils';
 import { buildSession, finishSession, indexAfter, normIndex, shouldAdvance, skipIndex } from '@/modules/training';
+
+// Persistência do domínio de treinamento (rotinas, rotação e sessões). As regras ficam em
+// src/modules/training; aqui só se coordena leitura, regra pura e gravação em transação.
+// As funções de evolução corporal estão em ./body e são reexportadas no fim (compatibilidade).
 
 // ---------- Rotinas ----------
 
@@ -51,6 +55,10 @@ export async function duplicateRoutine(id: string): Promise<Routine | undefined>
 
 export async function setActiveRoutine(id: string) {
   await saveSettings({ activeRoutineId: id });
+}
+
+export async function getRoutine(id: string): Promise<Routine | undefined> {
+  return db.routines.get(id);
 }
 
 // ---------- Rotação ----------
@@ -121,6 +129,19 @@ export async function completeSession(s: WorkoutSession, notes?: string, now = D
   });
 }
 
+/**
+ * Marca como avisado o descanso que termina em `endsAt`. Devolve false (sem gravar) se o
+ * descanso já foi avisado ou mudou; assim o aviso dispara uma única vez, mesmo com várias abas.
+ */
+export async function markRestNotified(sessionId: string, endsAt: number, now = Date.now()): Promise<boolean> {
+  return db.transaction('rw', db.sessions, async () => {
+    const fresh = await db.sessions.get(sessionId);
+    if (!fresh?.rest || fresh.rest.notified || fresh.rest.endsAt !== endsAt) return false;
+    await db.sessions.update(sessionId, { 'rest.notified': true, updatedAt: now } as never);
+    return true;
+  });
+}
+
 export async function discardSession(id: string) {
   await db.sessions.delete(id);
 }
@@ -138,35 +159,6 @@ export async function completedSessions(): Promise<WorkoutSession[]> {
   return db.sessions.where('status').equals('completed').sortBy('startedAt');
 }
 
-// ---------- Corpo ----------
-
-export async function saveBodyEntry(e: BodyEntry) {
-  await db.bodyEntries.put(e);
-}
-
-/** Grava a avaliação e suas fotos juntas: ou tudo é salvo, ou nada (sem fotos órfãs ou faltando). */
-export async function saveBodyEntryWithPhotos(e: BodyEntry, photoDataUrls: string[], now = Date.now()) {
-  await db.transaction('rw', db.bodyEntries, db.photos, async () => {
-    await db.bodyEntries.put(e);
-    if (photoDataUrls.length) await db.photos.bulkAdd(photoDataUrls.map((dataUrl) => ({ id: uid(), entryId: e.id, dataUrl, createdAt: now })));
-  });
-}
-
-export async function deleteBodyEntry(id: string) {
-  await db.transaction('rw', db.bodyEntries, db.photos, async () => {
-    await db.bodyEntries.delete(id);
-    await db.photos.where('entryId').equals(id).delete();
-  });
-}
-
-export async function addPhoto(p: ProgressPhoto) {
-  await db.photos.put(p);
-}
-
-export async function deletePhoto(id: string) {
-  await db.photos.delete(id);
-}
-
 export { normIndex };
 
 /** Salva a rotina preservando qual treino é o próximo da rotação (ao reordenar/excluir treinos). */
@@ -182,3 +174,6 @@ export async function saveRoutineKeepPointer(next: Routine) {
     if (idx !== rot.nextIndex) await db.rotations.put({ routineId: next.id, nextIndex: idx, updatedAt: Date.now() });
   });
 }
+
+/** @deprecated Compatibilidade: importe de '@/db/body'. */
+export * from './body';

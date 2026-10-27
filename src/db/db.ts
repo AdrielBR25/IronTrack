@@ -197,6 +197,19 @@ export function setDb(next: IronTrackDB) {
   db = next;
 }
 
+/** Tabelas de dados do app (tudo menos `profiles`): o conteúdo do backup e o que "apagar tudo" limpa. */
+export function dataTables() {
+  return [db.settings, db.routines, db.sessions, db.rotations, db.overrides, db.bodyEntries, db.photos];
+}
+
+/** Apaga todos os dados do app numa única transação. O perfil local (nome e ID) é mantido. */
+export async function clearLocalData(): Promise<void> {
+  const tables = dataTables();
+  await db.transaction('rw', tables, async () => {
+    await Promise.all(tables.map((t) => t.clear()));
+  });
+}
+
 export async function getSettings(): Promise<Settings> {
   const s = await db.settings.get('settings');
   return mergeSettings(s);

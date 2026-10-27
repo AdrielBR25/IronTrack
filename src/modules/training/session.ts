@@ -283,3 +283,16 @@ export function finishSession(session: WorkoutSession, now = Date.now(), notes?:
     updatedAt: now,
   };
 }
+
+/**
+ * Sugestões para substituir um exercício durante o treino: primeiro os substitutos
+ * cadastrados no modelo do exercício, depois outros exercícios da rotina do mesmo grupo
+ * muscular. Sem repetições, no máximo 8.
+ */
+export function substituteOptions(routine: Routine | undefined, ex: Pick<SessionExercise, 'templateId' | 'muscleGroup' | 'name'>): string[] {
+  const templates = routine?.workouts.flatMap((w) => w.exercises) ?? [];
+  const tpl = templates.find((t) => t.id === ex.templateId);
+  const fromTpl = tpl?.substitutes ?? [];
+  const sameGroup = templates.filter((t) => t.muscleGroup === ex.muscleGroup && t.name !== ex.name).map((t) => t.name);
+  return [...new Set([...fromTpl, ...sameGroup])].slice(0, 8);
+}

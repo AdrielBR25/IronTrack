@@ -1,9 +1,8 @@
-import { useLiveQuery } from 'dexie-react-hooks';
 import { useRef, useState } from 'react';
 import { ArrowDownRight, ArrowUpRight, Camera, FileJson, FileText, Info, Loader2, Minus, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { db } from '@/db/db';
-import { deleteBodyEntry, deletePhoto, saveBodyEntry, saveBodyEntryWithPhotos } from '@/db/repo';
+import { deleteBodyEntry, deletePhoto, importBodyEvaluations, saveBodyEntry, saveBodyEntryWithPhotos } from '@/db/body';
+import { useBodyEntries, useProgressPhotos } from '@/hooks/useBody';
 import type { BodyEntry } from '@/lib/types';
 import {
   parseBodyJson,
@@ -14,9 +13,7 @@ import {
   skinfoldChanges,
   type BodyMetricKey,
   type MetricChange,
-  evaluationToEntry,
   extractPdfItems,
-  newMonthsOnly,
   parseAnthropometricItems,
 } from '@/modules/body';
 import { fmtNum, parseNum, readFileText, uid } from '@/lib/utils';
@@ -185,8 +182,8 @@ function ChangeTile({ c, value }: { c: MetricChange; value: (k: BodyMetricKey, v
 }
 
 export function BodySection() {
-  const entries = useLiveQuery(() => db.bodyEntries.orderBy('date').toArray(), []);
-  const photos = useLiveQuery(() => db.photos.toArray(), []);
+  const entries = useBodyEntries();
+  const photos = useProgressPhotos();
   const { unit, show } = useUnits();
   const [metric, setMetric] = useState<BodyMetricKey>('bodyFatPct');
   const [open, setOpen] = useState(false);
@@ -228,9 +225,7 @@ export function BodySection() {
         toast.error('Não consegui ler este PDF', { id, description: r.error, duration: 10000 });
         return;
       }
-      const { fresh, skipped } = newMonthsOnly(r.evaluations, await db.bodyEntries.toArray());
-      const now = Date.now();
-      await db.bodyEntries.bulkPut(fresh.map((e) => evaluationToEntry(e, now)));
+      const { fresh, skipped } = await importBodyEvaluations(r.evaluations);
       const months = (xs: { date: string }[]) => xs.map((x) => monthLabel(x.date)).join(', ');
       if (!fresh.length) {
         toast.info('Nada novo neste PDF', { id, description: `Os meses ${months(skipped)} já estão no app.`, duration: 8000 });

@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { ArrowLeft, Copy, Pencil, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { db, saveSettings } from '@/db/db';
+import { saveSettings } from '@/db/db';
 import { saveRoutineKeepPointer } from '@/db/repo';
-import { useSettings } from '@/hooks/data';
+import { useRoutine, useSettings } from '@/hooks/data';
 import { useUnits } from '@/hooks/useUnits';
 import type { Equipment, ExerciseCategory, ExerciseTemplate, Routine, Workout } from '@/lib/types';
 import { cn, fmtClock, parseNum, uid } from '@/lib/utils';
@@ -234,7 +233,7 @@ function ExerciseDialog({
 export default function WorkoutEditorPage() {
   const { routineId, workoutId } = useParams();
   const navigate = useNavigate();
-  const routine = useLiveQuery(() => (routineId ? db.routines.get(routineId) : undefined), [routineId]);
+  const routine = useRoutine(routineId);
   const workout = routine?.workouts.find((w) => w.id === workoutId);
   const [editing, setEditing] = useState<{ open: boolean; ex: ExerciseTemplate | null }>({ open: false, ex: null });
   const [toDelete, setToDelete] = useState<ExerciseTemplate | null>(null);

@@ -1,11 +1,9 @@
 import { useNavigate, useParams } from 'react-router-dom';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Trash2, Trophy } from 'lucide-react';
 import { toast } from 'sonner';
-import { db } from '@/db/db';
 import { deleteSession, updateSessionNotes } from '@/db/repo';
-import { useCompletedSessions } from '@/hooks/data';
+import { useCompletedSessions, useSession } from '@/hooks/data';
 import { useUnits } from '@/hooks/useUnits';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -19,7 +17,7 @@ import { cn, fmtDuration } from '@/lib/utils';
 export default function SessionDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const session = useLiveQuery(() => (id ? db.sessions.get(id) : undefined), [id]);
+  const session = useSession(id);
   const all = useCompletedSessions();
   const { fmtW, fmtVol } = useUnits();
   const [notes, setNotes] = useState('');

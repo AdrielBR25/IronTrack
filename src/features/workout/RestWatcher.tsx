@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
-import { db } from '@/db/db';
+import { markRestNotified } from '@/db/repo';
 import { useActiveSession, useSettings } from '@/hooks/data';
 import { isPaused, remainingMs } from '@/modules/training';
 import { playBeep, showLocalNotification, vibrate } from '@/lib/alerts';
@@ -32,9 +32,7 @@ export function RestWatcher() {
     let cancelled = false;
     const fire = async () => {
       if (cancelled) return;
-      const fresh = await db.sessions.get(session.id);
-      if (!fresh?.rest || fresh.rest.notified || fresh.rest.endsAt !== rest.endsAt) return;
-      await db.sessions.update(session.id, { 'rest.notified': true, updatedAt: Date.now() } as never);
+      if (!(await markRestNotified(session.id, rest.endsAt))) return;
       if (settings.sound) playBeep();
       if (settings.vibration) vibrate();
       if (settings.notifications && document.visibilityState === 'hidden') {

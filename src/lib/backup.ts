@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { db, mergeSettings } from '@/db/db';
+import { dataTables, db, mergeSettings } from '@/db/db';
 import { OWNED_COLLECTIONS, type CollectionName, type DataSnapshot, type LocalProfile } from './types';
 import { formatZodError, parseJsonText, type ParseResult } from './validation';
 import { checkIntegrity, snapshotFingerprint, type IntegrityIssue, type IntegrityReport, type OwnershipContext } from './integrity';
@@ -191,7 +191,7 @@ export function parseBackup(text: string): ParseResult<BackupFile> {
   return { ok: true, value };
 }
 
-const ALL_TABLES = () => [db.settings, db.routines, db.sessions, db.rotations, db.overrides, db.bodyEntries, db.photos];
+const ALL_TABLES = dataTables;
 
 /**
  * Lê todas as tabelas numa única transação de leitura: o retrato é consistente

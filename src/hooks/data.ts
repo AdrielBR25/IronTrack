@@ -38,6 +38,16 @@ export function useActiveRoutine(): { routine: Routine | null | undefined; setti
   return { routine, settings };
 }
 
+/** Rotina pelo ID (undefined enquanto carrega ou se não existe). */
+export function useRoutine(id: string | undefined): Routine | undefined {
+  return useLiveQuery(() => (id ? db.routines.get(id) : undefined), [id]);
+}
+
+/** Sessão pelo ID (undefined enquanto carrega ou se não existe). */
+export function useSession(id: string | undefined): WorkoutSession | undefined {
+  return useLiveQuery(() => (id ? db.sessions.get(id) : undefined), [id]);
+}
+
 export function useActiveSession(): WorkoutSession | null | undefined {
   return useLiveQuery(async () => (await db.sessions.where('status').equals('active').first()) ?? null, []);
 }
