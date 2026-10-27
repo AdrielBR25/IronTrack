@@ -1,9 +1,9 @@
 # Arquitetura de IA
 
-IronTrack 2.0 · Fase 01 · Prompt 04. Fundação técnica para usar provedores de inteligência artificial
-no futuro, com privacidade por padrão. **Nesta etapa não existe assistente de IA para o usuário**: não há
-chat, botão, configuração de chave nem chamada real a provedor. O app continua 100% offline e funciona
-igual sem nenhuma IA configurada.
+IronTrack 2.0 · Fase 01 · Prompts 04 e 05. Fundação técnica para usar provedores de inteligência artificial
+com privacidade por padrão (P04) e a primeira interface do assistente (P05), que usa **somente o provedor
+simulado**: não há chamada real a OpenAI, Anthropic, Gemini ou Ollama, nem configuração de chave. O app continua
+100% offline. A interface está descrita na [seção 17](#17-interface-do-assistente-prompt-05).
 
 Código: `src/modules/ai`. Testes: `tests/unit/ai-*.test.ts` e o bloco "arquitetura do módulo de IA" de
 `tests/unit/architecture.test.ts`. Regras gerais de camadas: [ARQUITETURA.md](ARQUITETURA.md).
@@ -27,9 +27,9 @@ Princípios:
 
 ```mermaid
 flowchart LR
-  subgraph Futuro["Futuro (não existe ainda)"]
-    ui["Tela de IA: escolha de provedor/modelo, prévia do que será enviado, botão Autorizar"]
-    root["Raiz de composição: registra adaptadores"]
+  subgraph App["Assistente (P05)"]
+    ui["pages/AIAssistantPage + features/assistant: seleção, prévia, botão Autorizar"]
+    root["integrations/ai/assistantService: registra o adaptador simulado"]
   end
   subgraph AI["src/modules/ai"]
     subgraph domain["domain (puro)"]
@@ -126,7 +126,7 @@ se o escolhido falhar, devolve o erro, sem tentar outro e sem repetir.
 
 ```mermaid
 sequenceDiagram
-  participant T as Tela (futura)
+  participant T as Tela (assistente)
   participant S as AIService
   participant C as ContextBuilder
   participant R as ProviderRegistry
@@ -202,7 +202,7 @@ categorias, mensagens ou limite invalida; preparar de novo o mesmo pedido gera o
 
 `createConsent(prepared, { grantedAt, id })` só deve ser chamado pela interface **depois** que o usuário viu
 a prévia e confirmou. O consentimento é um contrato de código: o que garante que ele reflete a vontade do
-usuário é a tela futura mostrar a prévia antes do botão.
+usuário é a tela mostrar a prévia antes do botão (ver seção 17.3).
 
 ## 8. Política de privacidade
 
@@ -291,14 +291,15 @@ duração com escopo restrito. Até lá, só o simulado existe.
 
 ## 15. Limites da implementação atual
 
-- Não há interface de IA, chat, botões, seleção de modelo ou configuração de chaves.
+- A interface (P05) usa só o provedor simulado; não há configuração de chaves nem provedores reais.
 - Nenhum adaptador real; nenhum SDK; nenhuma chamada de rede.
 - Sem streaming, sem entrada de imagens, sem execução de ferramentas, sem agentes, sem repetição automática.
 - Fotos bloqueadas em qualquer caso.
 - O corte de saída usa a aproximação de 4 caracteres por token (não há tokenizador).
 - O vínculo da autorização usa `crypto.subtle` (SHA-256); sem Web Crypto, o serviço recusa preparar.
 - O registro e as autorizações usadas vivem na memória da página: recarregar zera tudo (proposital).
-- Nenhum código do app importa o módulo de IA ainda; ele não entra no bundle de produção.
+- Só o assistente importa o módulo de IA; ele vai num pedaço de JavaScript carregado sob demanda pela rota
+  `#/assistente` (e pré-armazenado pelo service worker para funcionar offline).
 
 ## 16. Orientações para adicionar provedores
 
@@ -310,7 +311,135 @@ duração com escopo restrito. Até lá, só o simulado existe.
    `provider_failure`, sem a mensagem original).
 4. Não acesse IndexedDB, storage, banco, hooks ou telas; o adaptador só recebe o `AIRequest`.
 5. Credenciais e endpoints nunca no código: venha pela estratégia segura da seção 10.
-6. Registre o adaptador numa raiz de composição (prevista em `src/integrations/ai/`), não nas telas; a
-   interface usa só `AIService` e `listProviders()`. Hoje o teste de arquitetura proíbe qualquer import de
-   `modules/ai/adapters` fora do módulo; ao criar essa raiz, abra uma exceção só para ela.
+6. Registre o adaptador na raiz de composição `src/integrations/ai/assistantService.ts`, não nas telas; a
+   interface usa só `AIService` e os descritores. O teste de arquitetura só permite import de
+   `modules/ai/adapters` nesse arquivo; um adaptador novo exige ampliar essa exceção conscientemente.
 7. Escreva testes com o adaptador simulando as respostas da API (sem rede) e rode os testes de arquitetura.
+
+## 17. Interface do assistente (Prompt 05)
+
+Rota `#/assistente`, item **Assistente IA** na navegação (no celular o rótulo visível é "IA", com nome
+acessível "Assistente IA"). Arquivos:
+
+| Arquivo | Papel |
+| --- | --- |
+| `src/integrations/ai/assistantService.ts` | Raiz de composição: registra o `MockAIProvider` (atraso de 1,5 s), monta o `AIService` sem logger, expõe os descritores (modelos `mock-text` e `mock-tiny`) e o cenário da demonstração. Um serviço novo por tela. |
+| `src/integrations/ai/contextSources.ts` | Lê do banco **só** as categorias escolhidas e converte em resumos mínimos; impressão digital do contexto; observação de mudanças com `liveQuery`. Só leitura. |
+| `src/features/assistant/useAssistant.ts` | Estado e fluxo: rascunho, categorias, modelo, prévia, autorização, execução, cancelamento. |
+| `src/features/assistant/SharePreviewDialog.tsx` | Prévia de compartilhamento (diálogo acessível). |
+| `src/features/assistant/Conversation.tsx` | Conversa (texto puro), estado vazio, processamento. |
+| `src/features/assistant/assistantModel.ts` | Validação da pergunta, finalidade, rótulos, mensagens de erro, tipo `ChatMessage`. |
+| `src/pages/AIAssistantPage.tsx` | Página: aviso do modo simulado, conversa, seleção de dados, campo da pergunta. |
+
+### 17.1 Fluxo da interface
+
+```mermaid
+sequenceDiagram
+  participant U as Usuário
+  participant T as Tela (useAssistant)
+  participant F as integrations/ai (leitura)
+  participant S as AIService
+  U->>T: escreve a pergunta, escolhe categorias, toca "Revisar e enviar"
+  T->>T: validateQuestion (vazia / > 2.000 caracteres → aviso)
+  T->>F: loadContextSources(categorias)  (só as escolhidas)
+  T->>S: prepare(provedor, modelo, finalidade, pergunta, categorias, fontes)
+  S-->>T: PreparedAIRequest (mensagens exatas + SHA-256)
+  T->>F: watchContextSources(categorias)  (enquanto a prévia está aberta)
+  T-->>U: prévia com o conteúdo efetivo
+  alt Cancelar / Esc / fechar
+    T->>T: descarta a solicitação preparada (nada executado)
+  else Autorizar e executar
+    T->>F: relê as categorias e compara a impressão digital
+    T->>S: execute(prepared, createConsent(prepared), {signal, timeoutMs: 30 s})
+    S-->>T: AIResponse simulada (ou AIError)
+  end
+```
+
+Mensagens (`ChatMessage`): ID temporário, papel (`user`/`assistant`), texto, estado (`sending`, `sent`,
+`failed`, `cancelled`, `done`), marca `simulated` nas respostas, categorias autorizadas e motivo da falha.
+A pergunta só entra na conversa depois da autorização.
+
+### 17.2 Seleção de contexto
+
+- Categorias oferecidas: resumo de treinos, histórico de treinos, medidas corporais, evolução corporal,
+  preferências do perfil. Fotos de progresso aparecem como indisponíveis (sem caixa de seleção).
+- **Nenhuma vem marcada.** Sem categorias, só a pergunta é usada.
+- Leitura mínima por categoria, sem varrer o banco a cada renderização (só ao preparar, ao conferir no
+  clique e quando o `liveQuery` detecta mudança): resumo = treinos concluídos dos últimos 28 dias (índice
+  `startedAt`) + dias de treino; histórico = 12 treinos concluídos mais recentes; medidas = 12 avaliações
+  mais recentes; evolução = `metricChanges` sobre as avaliações; preferências = unidade, dias, objetivo.
+- Os registros viram fontes tipadas campo a campo (sem `id`, `profileId`, nome, observações, dobras avulsas,
+  fotos ou data URLs) e o `ContextBuilder` do P04 aplica os limites e a higienização de novo.
+- Categoria sem registros: nada é preenchido; a prévia mostra "Categorias sem dados" com uma frase amigável.
+- Fórmulas de treino e de evolução corporal são as dos domínios, sem alteração.
+
+### 17.3 Prévia de compartilhamento e consentimento
+
+A prévia mostra o que o serviço **preparou**, não uma descrição genérica: provedor (com selo "simulado"),
+modelo, finalidade, pergunta, categorias autorizadas, dados efetivamente incluídos (legíveis por categoria),
+categorias sem dados, categorias excluídas (não selecionadas, fotos bloqueadas, campos nunca incluídos), o
+aviso do modo simulado e, em "Ver o conteúdo exato da solicitação", o texto integral de cada mensagem.
+
+- **Cancelar** (botão, Esc ou fechar): descarta a solicitação preparada; nada é executado; a pergunta fica no campo.
+- **Autorizar e executar**: só então `createConsent` é chamado, para aquela solicitação; a autorização é
+  passada a uma única chamada de `execute` e o serviço a marca como usada.
+- Não existe autorização global nem reaproveitada: cada pergunta exige nova prévia e novo clique.
+- Alterar a pergunta, as categorias ou o modelo descarta a prévia e qualquer preparação em andamento.
+- A prévia vale 5 minutos (validade padrão da autorização); depois disso, "Preparar novamente".
+
+### 17.4 Alterações de dados entre a prévia e a confirmação
+
+Política: **o pedido autorizado é exatamente o que foi mostrado; se os dados mudaram, nada é executado**.
+
+1. Ao preparar, guarda-se a impressão digital do contexto (o JSON que o `ContextBuilder` monta).
+2. Enquanto a prévia está aberta, `liveQuery` observa só as tabelas lidas para as categorias escolhidas. O
+   Dexie propaga gravações entre abas do mesmo navegador, então uma mudança feita em outra aba também chega.
+   Se a impressão digital mudar, a prévia é marcada como desatualizada e o botão vira "Preparar novamente".
+3. No clique de autorizar, as categorias são lidas de novo e comparadas (proteção mesmo se a observação
+   falhar ou atrasar). Diferente → desatualizada, sem executar.
+4. Dados novos nunca são acrescentados depois do consentimento: a solicitação preparada é congelada e
+   assinada (SHA-256); uma nova leitura só gera uma nova prévia.
+
+### 17.5 Cancelamento e erros
+
+- `AbortController` por execução: botão "Cancelar solicitação"; sair da página cancela também.
+- Tempo limite de 30 s; a mensagem nunca fica presa em "Enviando…" (sempre termina em enviada, cancelada
+  ou não respondida, com "Editar e reenviar").
+- Falha do provedor, resposta inválida, tempo esgotado, falha na preparação e prévia expirada mostram frases
+  fixas (`AIError`) ou genéricas; a mensagem original de exceções nunca aparece e nada é registrado em log.
+- O seletor "Cenário da demonstração" permite simular falha, resposta inválida e demora, para validar esses
+  caminhos sem rede.
+
+### 17.6 Ausência de persistência
+
+Conversa, prévia, autorizações e respostas vivem só no estado do componente: nada vai para IndexedDB,
+localStorage, sessionStorage, backup ou logs. Recarregar ou sair da página perde a conversa. Dexie continua
+na v2, sem tabelas novas; backups v0/v1/v2 inalterados. As únicas mudanças em `src/db` são funções de leitura.
+
+### 17.7 Segurança e acessibilidade
+
+- Respostas e dados renderizados como texto (sem `dangerouslySetInnerHTML`, sem Markdown/HTML interpretado,
+  sem execução de código); a resposta não aciona nenhuma ação do app.
+- Teste de arquitetura impede rede, storage, HTML bruto, `console.*`, escrita no banco e chaves no assistente.
+- Diálogo Radix: foco preso no diálogo, Esc fecha, foco volta ao botão de envio; conversa com `role="log"`
+  (`aria-live="polite"`), processamento com `role="status"`, avisos com `role="alert"`; rótulos explícitos;
+  layout sem rolagem horizontal em 360 px; campo de texto rolado para o centro ao receber foco (teclado virtual).
+
+### 17.8 Limitações do modo simulado
+
+- A resposta é um texto fixo do `MockAIProvider` (modelo, número de mensagens, tamanho da entrada e uma
+  assinatura): não analisa dados e não é orientação de treino, médica ou nutricional. A tela repete esse aviso.
+- O modelo "sem mensagem de sistema" tem limite de entrada de 4.000 caracteres e de saída de 64 tokens: com
+  muitos dados a preparação é recusada, e a resposta pode vir cortada (sinalizado).
+- Sem streaming, sem histórico enviado ao provedor (cada pergunta vai sozinha) e sem respostas estruturadas.
+
+### 17.9 Cuidados futuros com provedores reais
+
+- A prévia deve mostrar o **destino real** (provedor remoto, região/endpoint autorizado) com destaque diferente
+  do simulado, e o texto "nada sai do aparelho" deve sumir.
+- Credenciais só pela estratégia segura da seção 10; nunca no navegador.
+- Rever o `liveQuery` e a releitura no clique para provedores lentos: a autorização continua valendo só para
+  o conteúdo congelado.
+- Se a conversa passar a enviar histórico, cada mensagem anterior incluída precisa aparecer na prévia.
+- Respostas reais podem conter Markdown/links: renderizar só com um conversor seguro e sem ações automáticas.
+- Logs de produção continuam sem conteúdo; cobrança, limites de uso e erros HTTP mapeados para `AIError`.

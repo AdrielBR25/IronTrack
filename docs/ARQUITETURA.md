@@ -57,7 +57,8 @@ flowchart TD
 ```
 
 `training` e `body` não se conhecem. Nenhum domínio importa React, Dexie, `src/db`, hooks ou telas. O módulo
-`ai` não é importado por nenhuma outra parte do app nesta etapa e não importa `training` nem `body`.
+`ai` não importa `training` nem `body`; desde o Prompt 05 ele é usado só pela funcionalidade de assistente
+(`src/integrations/ai`, `src/features/assistant` e `src/pages/AIAssistantPage.tsx`).
 
 ## 2. Estrutura atual
 
@@ -101,19 +102,24 @@ src/
     backup.ts              operações de backup no banco (transações); reexporta backupFormat
     alerts.ts, install.ts  APIs do navegador (som, vibração, notificação, instalação do PWA)
     session.ts, rotation.ts, … (11 arquivos)  reexportações @deprecated dos módulos (compatibilidade)
+  integrations/
+    ai/                    raiz de composição do assistente (P05; ver IA_ARQUITETURA.md, seção 17)
+      assistantService.ts  ÚNICO ponto que registra um adaptador (MockAIProvider) e monta o AIService
+      contextSources.ts    leitura mínima (só leitura) das categorias escolhidas + observação de mudanças
   db/
     db.ts                  esquema Dexie v2, migração v1 → v2, perfil, hooks de dono, configurações,
                            dataTables(), clearLocalData()
-    repo.ts                persistência de treinamento (rotinas, rotação, sessões)
-    body.ts                persistência de evolução corporal (avaliações, fotos, importação do PDF)
+    repo.ts                persistência de treinamento (rotinas, rotação, sessões; leituras recentes p/ o assistente)
+    body.ts                persistência de evolução corporal (avaliações, fotos, importação do PDF; leituras)
     profiles.ts            acesso ao perfil local
   hooks/
     data.ts                configurações, perfil, rotinas, sessões, rotação e agenda (useLiveQuery)
     useBody.ts             avaliações e fotos
     useUnits.ts            exibição de pesos na unidade escolhida
-  features/                workout/, routines/, body/, backup/
+  features/                workout/, routines/, body/, backup/, assistant/ (conversa, prévia, useAssistant)
   components/              ui/ (botões, diálogos…), charts.tsx, AppLayout, SortableList…
-  pages/                   Início, Treinos, Editor, Treino ativo, Histórico, Detalhe, Progresso, Configurações
+  pages/                   Início, Treinos, Editor, Treino ativo, Histórico, Detalhe, Progresso, Assistente IA,
+                           Configurações
 ```
 
 ## 3. Responsabilidades dos domínios
@@ -184,6 +190,9 @@ timestamp em ms. Descansos em segundos.
 - `lib/types.ts` → `modules/*/types.ts` (agregador de tipos, só tipos).
 - `modules/ai/domain` → só o próprio `domain`; `modules/ai/application` → `domain`, `application` e
   `lib/dates`; `modules/ai/adapters` → só `domain` (contratos).
+- `integrations/ai` → `@/modules/ai`, funções de **leitura** de `src/db`, `lib`, domínios, `dexie`
+  (`liveQuery`); só `integrations/ai/assistantService.ts` importa `modules/ai/adapters/MockAIProvider`.
+- `features/assistant` e `pages/AIAssistantPage.tsx` → `@/modules/ai`, `integrations/ai`, componentes e `lib`.
 
 ## 8. Dependências proibidas (testadas)
 
@@ -201,10 +210,19 @@ timestamp em ms. Descansos em segundos.
 9. Módulo de IA (bloco "arquitetura do módulo de IA"): domínio de IA importando qualquer coisa fora de
    `domain/` (React, Dexie…); aplicação importando adaptadores, banco ou interface; adaptadores importando
    algo além dos contratos ou tocando `src/db`, hooks, `src/lib` ou Dexie; `training`/`body` importando o
-   módulo de IA; qualquer arquivo fora do módulo importando adaptadores ou internals; interface, hooks,
-   banco e `src/lib` usando o módulo nesta etapa; IndexedDB, storage, cookies, Cache Storage, `fetch`, XHR,
+   módulo de IA; qualquer arquivo fora do módulo importando adaptadores ou internals (exceto a raiz de
+   composição `integrations/ai/assistantService.ts`); hooks, banco, `src/lib` e as outras telas usando o
+   módulo (só o assistente pode); IndexedDB, storage, cookies, Cache Storage, `fetch`, XHR,
    WebSocket, EventSource ou beacon no módulo; URLs, `import.meta.env`, `VITE_`, `process.env` ou padrões
    de chave no módulo; SDKs de provedores de IA no `package.json`; segredos `VITE_*` em arquivos `.env`.
+
+10. Assistente (bloco "arquitetura do assistente de IA", P05): tela do assistente importando `src/db`,
+    `dexie` ou adaptadores; a integração importando da persistência algo além das funções de leitura
+    (`getSettings`, `completedSessionsSince`, `recentCompletedSessions`, `listBodyEntries`,
+    `recentBodyEntries`) ou chamando métodos de escrita do Dexie; `dangerouslySetInnerHTML`, `innerHTML`,
+    `eval`, `new Function`, `localStorage`, `sessionStorage`, `indexedDB`, `fetch`, XHR, WebSocket, beacon,
+    cookies, Cache Storage ou `console.*` no assistente; URLs, variáveis de ambiente ou chaves; rota do
+    assistente que não seja carregada sob demanda ou que substitua outra.
 
 ## 9. Pontos de extensão futuros
 
@@ -213,8 +231,9 @@ Nada disto existe ainda; estes são os lugares previstos, sem interfaces antecip
 - **Novo domínio** (ex.: nutrição): `src/modules/nutrition/` com `types.ts`, regras puras e `index.ts`;
   persistência em `src/db/nutrition.ts`; nova tabela só com uma nova versão do Dexie e migração
   (ver [MIGRACOES.md](MIGRACOES.md)) e nova versão do backup se entrar no arquivo.
-- **IA multiprovedor**: a fundação existe em `src/modules/ai` (Prompt 04). Adaptadores reais entram em
-  `src/modules/ai/adapters/`, registrados por uma raiz de composição futura (`src/integrations/ai/`); a tela
+- **IA multiprovedor**: a fundação existe em `src/modules/ai` (Prompt 04) e a interface do assistente, com o
+  provedor simulado, desde o Prompt 05. Adaptadores reais entram em `src/modules/ai/adapters/`, registrados
+  pela raiz de composição `src/integrations/ai/assistantService.ts`; a tela
   entrega ao `AIService` resumos calculados com funções puras dos domínios (ex.: `metricChanges`) e nunca
   dados lidos pelo módulo de IA no Dexie. Provedores remotos com chave privada dependem de uma estratégia de
   execução segura (ver [IA_ARQUITETURA.md](IA_ARQUITETURA.md), seção 10).

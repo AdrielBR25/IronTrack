@@ -33,6 +33,7 @@ No PC (Chrome/Edge), use o ícone de instalar na barra de endereço.
 - **Evolução corporal**: peso, % de gordura (estimado), cintura, abdômen, braço, coxa e fotos opcionais; importação via JSON.
 - **Backup** completo em JSON com validação estrutural e de integridade, migração de versão, prévia antes de gravar (adicionados, duplicatas, conflitos e ignorados), mesclar sem sobrescrever ou substituir de forma atômica. Detalhes em [docs/BACKUP_RESTAURACAO.md](docs/BACKUP_RESTAURACAO.md), [docs/INTEGRIDADE_DADOS.md](docs/INTEGRIDADE_DADOS.md) e [docs/MIGRACOES.md](docs/MIGRACOES.md).
 - **Perfil local**: identidade estável dos dados neste navegador (sem login nem conta), dono explícito dos registros e backups v2 que registram o perfil. Detalhes em [docs/PERFIL_LOCAL.md](docs/PERFIL_LOCAL.md).
+- **Assistente IA (modo de demonstração)**: conversa com um provedor **simulado** que roda no aparelho, sem rede e sem chave. Você escolhe quais dados podem ser usados (nenhum vem marcado), revisa na prévia exatamente o que seria compartilhado e autoriza cada pergunta separadamente. As respostas são fictícias e a conversa não é guardada. Detalhes em [docs/IA_ARQUITETURA.md](docs/IA_ARQUITETURA.md).
 
 > Os dados ficam só neste navegador/aparelho. Não há sincronização entre dispositivos. Limpar os dados do site no navegador apaga os registros — por isso exporte backups.
 
