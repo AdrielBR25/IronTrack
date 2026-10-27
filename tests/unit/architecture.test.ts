@@ -145,3 +145,74 @@ describe('arquitetura', () => {
     expect(bad.map(fmt)).toEqual([]);
   });
 });
+
+// Fundação de IA (IronTrack 2.0 F01/P04). Regras e motivos em docs/IA_ARQUITETURA.md.
+describe('arquitetura do módulo de IA', () => {
+  const AI = 'modules/ai';
+  const aiFiles = files.map(rel).filter((f) => inDir(f, AI));
+  /** Código sem comentários (os comentários podem citar o que é proibido). */
+  const source = (f: string) => readFileSync(join(ROOT, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+  it('o módulo existe com camadas domain, application e adapters', () => {
+    expect(aiFiles).toEqual(expect.arrayContaining([`${AI}/index.ts`, `${AI}/domain/contracts.ts`, `${AI}/application/AIService.ts`, `${AI}/adapters/MockAIProvider.ts`]));
+  });
+
+  it('domínio de IA não importa React, Dexie nem nada fora de domain/', () => {
+    const bad = edges.filter((e) => inDir(e.from, `${AI}/domain`) && (!e.target || !inDir(e.target, `${AI}/domain`)));
+    expect(bad.map(fmt)).toEqual([]);
+  });
+
+  it('aplicação de IA depende só do domínio de IA e de lib/dates (nunca de adaptadores, banco ou interface)', () => {
+    const bad = edges.filter((e) => inDir(e.from, `${AI}/application`) && (!e.target || !(inDir(e.target, `${AI}/domain`, `${AI}/application`) || e.target === 'lib/dates.ts')));
+    expect(bad.map(fmt)).toEqual([]);
+  });
+
+  it('adaptadores dependem só dos contratos do domínio de IA', () => {
+    const bad = edges.filter((e) => inDir(e.from, `${AI}/adapters`) && (!e.target || !inDir(e.target, `${AI}/domain`)));
+    expect(bad.map(fmt)).toEqual([]);
+  });
+
+  it('treinamento e evolução corporal não importam o módulo de IA nem adaptadores', () => {
+    const bad = edges.filter((e) => inDir(e.from, 'modules/training', 'modules/body') && e.target && inDir(e.target, AI));
+    expect(bad.map(fmt)).toEqual([]);
+  });
+
+  it('fora do módulo, ninguém importa adaptadores nem internals de provedores', () => {
+    const bad = edges.filter((e) => !inDir(e.from, AI) && e.target && inDir(e.target, AI) && e.target !== `${AI}/index.ts`);
+    expect(bad.map(fmt)).toEqual([]);
+    expect(source(`${AI}/index.ts`)).not.toMatch(/adapters/);
+  });
+
+  it('nesta etapa, interface, hooks, banco e backup não usam o módulo de IA', () => {
+    const bad = edges.filter((e) => inDir(e.from, ...UI, 'hooks', 'db', 'lib') && e.target && inDir(e.target, AI));
+    expect(bad.map(fmt)).toEqual([]);
+  });
+
+  it('o módulo de IA não persiste nem acessa rede: sem IndexedDB, storage, fetch, XHR, WebSocket ou beacon', () => {
+    const FORBIDDEN = /\b(indexedDB|localStorage|sessionStorage|fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|document\.cookie|caches\.)/;
+    const bad = aiFiles.filter((f) => FORBIDDEN.test(source(f)));
+    expect(bad).toEqual([]);
+  });
+
+  it('adaptadores não modificam dados persistidos (sem banco, backup, repositórios ou Dexie)', () => {
+    const bad = edges.filter((e) => inDir(e.from, `${AI}/adapters`) && (e.spec.startsWith('dexie') || (e.target && inDir(e.target, 'db', 'hooks', 'lib'))));
+    expect(bad.map(fmt)).toEqual([]);
+  });
+
+  it('sem endpoints, variáveis de ambiente ou credenciais no módulo de IA', () => {
+    const bad = aiFiles.filter((f) => /https?:\/\/|import\.meta\.env|VITE_|process\.env|api[_-]?key\s*[:=]|Bearer\s|sk-[A-Za-z0-9]{8,}|AIza[0-9A-Za-z_-]{10,}/i.test(source(f)));
+    expect(bad).toEqual([]);
+  });
+
+  it('nenhum SDK de provedor de IA instalado nesta etapa', () => {
+    const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8')) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+    const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
+    expect(deps.filter((d) => /openai|anthropic|@google\/(genai|generative-ai)|ollama|langchain|@ai-sdk|^ai$/.test(d))).toEqual([]);
+  });
+
+  it('sem segredos de IA em variáveis VITE_ do projeto', () => {
+    const envFiles = readdirSync(process.cwd()).filter((f) => f.startsWith('.env'));
+    const bad = envFiles.filter((f) => /VITE_[A-Z_]*(KEY|TOKEN|SECRET|OPENAI|ANTHROPIC|GEMINI)/.test(readFileSync(resolve(process.cwd(), f), 'utf8')));
+    expect(bad).toEqual([]);
+  });
+});
