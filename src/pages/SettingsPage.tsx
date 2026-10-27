@@ -17,6 +17,8 @@ import { EQUIPMENT_LABEL } from '@/lib/units';
 import { cn, downloadJson, fmtNum, parseNum, readFileText } from '@/lib/utils';
 import { weekdayShort } from '@/lib/dates';
 import { audioAvailable, notificationState, playBeep, requestNotificationPermission, showLocalNotification, unlockAudio, vibrate, vibrationAvailable, type NotifState } from '@/lib/alerts';
+import { useInstallAvailable } from '@/components/InstallBanner';
+import { promptInstall } from '@/lib/install';
 import { exportBackup, parseBackup, restoreBackupMerge, restoreBackupReplace, type BackupFile } from '@/lib/backup';
 
 function Row({ label, hint, children }: { label: string; hint?: React.ReactNode; children: React.ReactNode }) {
@@ -71,11 +73,6 @@ function Section({ icon: Icon, title, description, children }: { icon: typeof Be
   );
 }
 
-interface BIPEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: string }>;
-}
-
 export default function SettingsPage() {
   const s = useSettings();
   const set = (p: Partial<Settings>) => void saveSettings(p);
@@ -86,19 +83,13 @@ export default function SettingsPage() {
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [confirmWipe, setConfirmWipe] = useState(false);
   const [newGroup, setNewGroup] = useState('');
-  const [installEvt, setInstallEvt] = useState<BIPEvent | null>(null);
+  const installAvailable = useInstallAvailable();
   const fileRef = useRef<HTMLInputElement>(null);
   const standalone = typeof window !== 'undefined' && window.matchMedia?.('(display-mode: standalone)').matches;
 
   useEffect(() => {
     void navigator.storage?.persisted?.().then(setPersisted).catch(() => setPersisted(null));
     void navigator.storage?.estimate?.().then((e) => setUsage(e.usage != null ? `${fmtNum((e.usage ?? 0) / 1024 / 1024, 1)} MB usados` : null));
-    const h = (e: Event) => {
-      e.preventDefault();
-      setInstallEvt(e as BIPEvent);
-    };
-    window.addEventListener('beforeinstallprompt', h);
-    return () => window.removeEventListener('beforeinstallprompt', h);
   }, []);
 
   return (
@@ -390,14 +381,8 @@ export default function SettingsPage() {
         <div className="space-y-2 py-3 text-sm">
           {standalone ? (
             <p className="text-primary">O IronTrack está instalado e funciona offline.</p>
-          ) : installEvt ? (
-            <Button
-              className="w-full"
-              onClick={async () => {
-                await installEvt.prompt();
-                setInstallEvt(null);
-              }}
-            >
+          ) : installAvailable ? (
+            <Button className="w-full" onClick={() => void promptInstall()}>
               <Smartphone /> Instalar IronTrack
             </Button>
           ) : (

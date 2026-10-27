@@ -83,11 +83,11 @@ export function useOnline() {
   return online;
 }
 
-export function OfflineBadge() {
+export function OfflineBadge({ className }: { className?: string }) {
   const online = useOnline();
   if (online) return null;
   return (
-    <div className="flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-1 text-xs text-muted-foreground" role="status">
+    <div className={cn('flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-1 text-xs text-muted-foreground', className)} role="status">
       <WifiOff className="h-3.5 w-3.5" /> Offline · dados salvos no aparelho
     </div>
   );

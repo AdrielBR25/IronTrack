@@ -11,6 +11,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { LogoMark } from '@/components/Logo';
+import { InstallBanner } from '@/components/InstallBanner';
 import { addDays, fmtDateLong, fmtDateShort, startOfWeek, tsToISODate, weekday, weekdayShort } from '@/lib/dates';
 import { consistency, exerciseSeries, weekStats } from '@/lib/stats';
 import { sessionProgress } from '@/lib/session';
@@ -308,6 +309,8 @@ export default function HomePage() {
           <p className="text-sm text-muted-foreground">{fmtDateLong(new Date()).replace(/^./, (c) => c.toUpperCase())}</p>
         </div>
       </header>
+
+      <InstallBanner />
 
       {routine === undefined ? (
         <Card className="h-56 animate-pulse" />

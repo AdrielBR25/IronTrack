@@ -4,6 +4,9 @@ import '@fontsource-variable/inter';
 import '@fontsource-variable/space-grotesk';
 import './index.css';
 import App from './App';
+import { initInstallCapture } from './lib/install';
+
+initInstallCapture();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
