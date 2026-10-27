@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bell, Database, Download, HardDrive, ShieldCheck, Palette, Plus, Smartphone, Target, Timer, TrendingUp, Upload, Vibrate, Volume2, X, Dumbbell, RotateCw } from 'lucide-react';
+import { Bell, Database, Download, HardDrive, ShieldCheck, Palette, Plus, Smartphone, Target, Timer, TrendingUp, Upload, Vibrate, Volume2, X, Dumbbell, RotateCw, Fingerprint } from 'lucide-react';
 import { toast } from 'sonner';
 import { PageHeader } from '@/components/AppLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,7 +9,9 @@ import { Segmented } from '@/components/ui/segmented';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/ui/confirm';
-import { useSettings } from '@/hooks/data';
+import { useCurrentProfile, useSettings } from '@/hooks/data';
+import { renameProfile } from '@/db/profiles';
+import { PROFILE_NAME_MAX } from '@/lib/profile';
 import { db, requestPersistentStorage, saveSettings } from '@/db/db';
 import type { Equipment, Settings } from '@/lib/types';
 import { GOAL_LABEL } from '@/lib/defaults';
@@ -75,6 +77,44 @@ function Section({ icon: Icon, title, description, children }: { icon: typeof Be
   );
 }
 
+/** Identidade local: nome editável, ID fixo. Sem troca, criação ou exclusão de perfis nesta versão. */
+function LocalProfileSection() {
+  const profile = useCurrentProfile();
+  if (!profile) return null;
+  return (
+    <Section icon={Fingerprint} title="Perfil local" description="Seus dados ficam armazenados apenas neste navegador, neste aparelho. Não há conta online nem sincronização.">
+      <div className="space-y-1.5 py-3">
+        <Label htmlFor="profile-name">Nome do perfil</Label>
+        <Input
+          id="profile-name"
+          data-testid="profile-name"
+          maxLength={PROFILE_NAME_MAX}
+          defaultValue={profile.displayName}
+          key={profile.displayName}
+          onBlur={async (e) => {
+            const v = e.target.value;
+            if (v.trim() === profile.displayName) return;
+            try {
+              await renameProfile(profile.id, v);
+              toast.success('Nome do perfil atualizado');
+            } catch (err) {
+              e.target.value = profile.displayName;
+              toast.error(err instanceof Error ? err.message : String(err));
+            }
+          }}
+        />
+      </div>
+      <div className="space-y-1 py-3">
+        <p className="text-sm font-medium">Identificador local</p>
+        <p className="select-all break-all font-mono text-xs text-muted-foreground" data-testid="profile-id">
+          {profile.id}
+        </p>
+        <p className="text-xs text-muted-foreground">Gerado aleatoriamente uma única vez. Não muda ao renomear o perfil, atualizar o app ou restaurar backups.</p>
+      </div>
+    </Section>
+  );
+}
+
 export default function SettingsPage() {
   const s = useSettings();
   const set = (p: Partial<Settings>) => void saveSettings(p);
@@ -114,6 +154,8 @@ export default function SettingsPage() {
           </div>
         </div>
       </Section>
+
+      <LocalProfileSection />
 
       <Section icon={Dumbbell} title="Treino">
         <Row label="Unidade de peso" hint="Os dados são guardados em kg e convertidos na tela.">
@@ -425,7 +467,7 @@ export default function SettingsPage() {
         onOpenChange={setConfirmWipe}
         destructive
         title="Apagar todos os dados?"
-        description="Rotinas, histórico, avaliações, fotos e configurações deste aparelho serão apagados. Exporte um backup antes, se quiser guardar."
+        description="Rotinas, histórico, avaliações, fotos e configurações deste aparelho serão apagados. O perfil local (nome e identificador) é mantido. Exporte um backup antes, se quiser guardar."
         confirmLabel="Apagar tudo"
         onConfirm={async () => {
           await db.transaction('rw', [db.settings, db.routines, db.sessions, db.rotations, db.overrides, db.bodyEntries, db.photos], async () => {

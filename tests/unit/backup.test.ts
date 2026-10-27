@@ -8,6 +8,8 @@ import {
   exportBackup,
   parseBackup,
   previewRestore,
+  assignOwner,
+  readLocalState,
   readSnapshot,
   restoreBackupMerge,
   restoreBackupReplace,
@@ -50,15 +52,18 @@ const sorted = (d: DataSnapshot) => ({
   photos: [...d.photos].sort((a, b) => a.id.localeCompare(b.id)),
 });
 
+/** Registros do backup como ficam após a atribuição explícita ao perfil local (backup legado). */
+const own = (d: DataSnapshot) => assignOwner(d, db.currentProfileId!);
+
 beforeEach(freshDb);
 afterEach(() => vi.restoreAllMocks());
 
 describe('exportação', () => {
-  it('exporta todas as tabelas em formato v1 legível e reimportável', async () => {
+  it('exporta todas as tabelas em formato v2 legível e reimportável, com o perfil proprietário', async () => {
     await seedDb(snapshot());
     const b = await exportBackup();
-    expect(b).toMatchObject({ app: 'irontrack', kind: 'backup', schemaVersion: 1 });
-    expect(sorted(b.data)).toEqual(sorted(snapshot()));
+    expect(b).toMatchObject({ app: 'irontrack', kind: 'backup', schemaVersion: 2, profile: { id: db.currentProfileId, displayName: 'Meu perfil' } });
+    expect(sorted(b.data)).toEqual(sorted(own(snapshot())));
     expect(parseBackup(JSON.stringify(b, null, 2)).ok).toBe(true);
   });
 
@@ -85,12 +90,13 @@ describe('exportação', () => {
 });
 
 describe('leitura e validação do arquivo', () => {
-  it('importa backup v0 (tabelas na raiz) migrando para v1', () => {
+  it('importa backup v0 (tabelas na raiz) migrando até v2 como legado sem perfil', () => {
     const d = snapshot();
     const r = parseBackup(JSON.stringify({ app: 'irontrack', exportedAt: '2025-01-01T00:00:00.000Z', ...d }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.value.schemaVersion).toBe(1);
+    expect(r.value.schemaVersion).toBe(2);
+    expect(r.value.profile).toBeNull();
     expect(r.value.data.sessions).toHaveLength(2);
     expect(r.value.data.photos).toHaveLength(2);
   });
@@ -103,7 +109,7 @@ describe('leitura e validação do arquivo', () => {
   });
 
   it('rejeita versão futura', () => {
-    const r = parseBackup(JSON.stringify({ ...backupOf(snapshot()), schemaVersion: 2 }));
+    const r = parseBackup(JSON.stringify({ ...backupOf(snapshot()), schemaVersion: 3 }));
     expect(!r.ok && r.errors[0]).toMatch(/versão mais nova/);
   });
 
@@ -139,7 +145,7 @@ describe('restauração por substituição', () => {
     const d = snapshot();
     const sum = await restoreBackupReplace(parse(backupOf(d)));
     expect(sum).toMatchObject({ routines: 1, sessions: 2, bodyEntries: 2, photos: 2 });
-    expect(sorted(await readSnapshot())).toEqual(sorted(d));
+    expect(sorted(await readSnapshot())).toEqual(sorted(own(d)));
   });
 
   it('backup com erro de integridade não altera nada', async () => {
@@ -176,7 +182,7 @@ describe('restauração por mesclagem', () => {
     const inc = snapshot();
     inc.sessions[0] = { ...inc.sessions[0], notes: 'editado em outro aparelho' };
     inc.bodyEntries[0] = { ...inc.bodyEntries[0], weightKg: 77 };
-    const plan = planMerge(await readSnapshot(), inc);
+    const plan = planMerge(await readSnapshot(), own(inc));
     expect(plan.counts.sessions.conflict).toBe(1);
     expect(plan.counts.bodyEntries.conflict).toBe(1);
     expect(plan.items.filter((i) => i.code === 'ID_CONFLICT').map((i) => i.id)).toEqual(['s1', 'b1']);
@@ -218,7 +224,7 @@ describe('restauração por mesclagem', () => {
     await seedDb(snapshot());
     const twin = session('s1-gemea');
     twin.exercises[0].sets[0].weight = 70;
-    const plan = planMerge(await readSnapshot(), snapshot({ sessions: [twin] }));
+    const plan = planMerge(await readSnapshot(), own(snapshot({ sessions: [twin] })));
     expect(plan.items.find((i) => i.code === 'SIMILAR_SESSION')?.id).toBe('s1-gemea');
     const sum = await restoreBackupMerge(parse(backupOf(snapshot({ sessions: [twin] }))));
     expect(sum.sessions).toBe(1);
@@ -229,7 +235,7 @@ describe('restauração por mesclagem', () => {
     await seedDb(snapshot());
     const twin = entry('b1-gemea', { bodyFatPct: 15, notes: 'medida com outra balança' });
     const inc = snapshot({ bodyEntries: [twin], photos: [photo('pt', 'b1-gemea')] });
-    const plan = planMerge(await readSnapshot(), inc);
+    const plan = planMerge(await readSnapshot(), own(inc));
     expect(plan.items.find((i) => i.code === 'SIMILAR_BODY_ENTRY')?.id).toBe('b1-gemea');
     const sum = await restoreBackupMerge(parse(backupOf(inc)));
     expect(sum).toMatchObject({ bodyEntries: 1, photos: 1 });
@@ -243,7 +249,7 @@ describe('restauração por mesclagem', () => {
       bodyEntries: [{ ...entry('b1'), weightKg: 70 }],
       photos: [photo('nova', 'b1'), photo('orfa', 'sumiu')],
     });
-    const plan = planMerge(await readSnapshot(), inc);
+    const plan = planMerge(await readSnapshot(), own(inc));
     expect(plan.items.find((i) => i.code === 'PHOTO_ENTRY_CONFLICT')?.id).toBe('nova');
     expect(plan.items.find((i) => i.code === 'PHOTO_ORPHAN')?.id).toBe('orfa');
     await restoreBackupMerge(parse(backupOf(inc)), { acceptPartial: true });
@@ -345,7 +351,7 @@ describe('revisão corretiva: conflitos e prévia', () => {
     // edição de nota: mesma contagem, mesmo plano (a assinatura antiga não detectava)
     await db.sessions.update('so-local', { notes: 'editado após a prévia' });
     const changed = await readSnapshot();
-    expect(planMerge(changed, b.data).totals).toEqual(planMerge(before, b.data).totals);
+    expect(planMerge(changed, own(b.data)).totals).toEqual(planMerge(before, own(b.data)).totals);
     await expect(restoreBackupMerge(b, { expectedLocalFingerprint: p.localFingerprint })).rejects.toThrow(/mudaram desde a prévia/);
     expect(await readSnapshot()).toEqual(changed);
   });
@@ -395,7 +401,7 @@ describe('revisão corretiva: conflitos e prévia', () => {
   it('registros ignorados são informados com motivo e contados como não restaurados', async () => {
     await seedDb(snapshot({ sessions: [session('ativo', { status: 'active' })], settings: settings({ weightStep: 5 }) }));
     const inc = snapshot({ sessions: [session('ativo-2', { status: 'active', startedAt: 1_800_000_000_000 })], settings: settings({ weightStep: 1 }) });
-    const plan = planMerge(await readSnapshot(), inc);
+    const plan = planMerge(await readSnapshot(), own(inc));
     expect(plan.items.filter((i) => i.kind === 'skipped').map((i) => i.code)).toEqual(['ACTIVE_SESSION_CONFLICT']);
     expect(plan.items.find((i) => i.code === 'SETTINGS_KEPT')?.kind).toBe('kept-local');
     expect(plan.notRestored).toBe(2);
@@ -409,7 +415,7 @@ describe('revisão corretiva: conflitos e prévia', () => {
     const r = routine();
     const changed = { ...r, workouts: [r.workouts[0]] }; // backup tem só o treino A
     const inc = snapshot({ routines: [changed], rotations: [rotation('r1', 0)], overrides: [{ routineId: 'r1', date: '2026-04-01', kind: 'workout', workoutId: 'r1-A' }] });
-    const plan = planMerge(await readSnapshot(), inc);
+    const plan = planMerge(await readSnapshot(), own(inc));
     expect(plan.counts.routines.conflict).toBe(1);
     expect(plan.items.filter((i) => i.code === 'ROUTINE_CONFLICT_DEPENDENT').map((i) => i.collection)).toEqual(['rotations', 'overrides']);
     await restoreBackupMerge(parse(backupOf(inc)), { acceptPartial: true });
@@ -443,7 +449,7 @@ describe('revisão corretiva: conflitos e prévia', () => {
   it('dados históricos locais preservados: nenhuma sessão ou avaliação local é alterada', async () => {
     const local = snapshot();
     await seedDb(local);
-    const inc = snapshot({ sessions: local.sessions.map((s) => ({ ...s, notes: 'versão do backup' })), bodyEntries: [], photos: [] });
+    const inc = snapshot({ sessions: snapshot().sessions.map((s) => ({ ...s, notes: 'versão do backup' })), bodyEntries: [], photos: [] });
     await restoreBackupMerge(parse(backupOf(inc)), { acceptPartial: true });
     const after = await readSnapshot();
     expect(sorted(after).sessions).toEqual(sorted(local).sessions);
@@ -466,6 +472,7 @@ describe('revisão corretiva: conflitos e prévia', () => {
     vi.spyOn(db.bodyEntries, 'bulkAdd').mockRejectedValueOnce(new Error('falha simulada'));
     await expect(restoreBackupMerge(b, { expectedLocalFingerprint: p.localFingerprint, acceptPartial: true })).rejects.toThrow(/falha simulada/);
     expect(await readSnapshot()).toEqual(before);
-    expect(snapshotFingerprint(await readSnapshot())).toBe(p.localFingerprint);
+    const state = await readLocalState();
+    expect(snapshotFingerprint(state.data, state.profiles)).toBe(p.localFingerprint);
   });
 });

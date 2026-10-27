@@ -1,4 +1,5 @@
-import type { CollectionName, DataSnapshot } from './types';
+import { OWNED_COLLECTIONS, type CollectionName, type DataSnapshot } from './types';
+import { isValidProfileId } from './profile';
 
 // Verificação de integridade dos dados em memória (sem acesso ao banco nem à interface).
 // Usada antes de qualquer restauração de backup e para diagnosticar o banco local.
@@ -33,12 +34,33 @@ export type IssueCode =
   | 'SESSION_MULTIPLE_ACTIVE'
   | 'PHOTO_ORPHAN'
   | 'PHOTO_INVALID_DATA'
-  | 'SETTINGS_ACTIVE_ROUTINE_MISSING';
+  | 'SETTINGS_ACTIVE_ROUTINE_MISSING'
+  | 'PROFILE_INVALID_ID'
+  | 'PROFILE_DEFAULT_MISSING'
+  | 'PROFILE_DEFAULT_DUPLICATE'
+  | 'RECORD_UNOWNED'
+  | 'RECORD_PROFILE_UNKNOWN'
+  | 'CROSS_PROFILE_REFERENCE';
+
+/** Coleções citadas nos problemas: as do retrato e a tabela de perfis. */
+export type IssueCollection = CollectionName | 'profiles';
+
+/**
+ * Contexto de propriedade para a verificação (ver docs/PERFIL_LOCAL.md):
+ *  - local: banco deste aparelho; `profiles` = tabela de perfis;
+ *  - backup: arquivo v2; `profiles` = [perfil do arquivo]; todo registro precisa de dono;
+ *  - legacy: backup v0/v1, sem perfil; nenhum registro pode declarar dono.
+ * Sem contexto, as regras de perfil não são aplicadas (compatível com o Prompt 01).
+ */
+export interface OwnershipContext {
+  scope: 'local' | 'backup' | 'legacy';
+  profiles: { id: string; isDefault?: boolean }[];
+}
 
 export interface IntegrityIssue {
   code: IssueCode;
   severity: IssueSeverity;
-  collection: CollectionName;
+  collection: IssueCollection;
   id?: string;
   message: string;
   action: string;
@@ -116,9 +138,9 @@ const BODY_NUMERIC_FIELDS = [
   'armFatArea',
 ] as const;
 
-export function checkIntegrity(d: DataSnapshot): IntegrityReport {
+export function checkIntegrity(d: DataSnapshot, ownership?: OwnershipContext): IntegrityReport {
   const issues: IntegrityIssue[] = [];
-  const add = (severity: IssueSeverity, code: IssueCode, collection: CollectionName, id: string | undefined, message: string, action: string) =>
+  const add = (severity: IssueSeverity, code: IssueCode, collection: IssueCollection, id: string | undefined, message: string, action: string) =>
     issues.push({ severity, code, collection, id, message, action });
 
   // ---- IDs: vazios e duplicados em cada coleção ----
@@ -280,9 +302,70 @@ export function checkIntegrity(d: DataSnapshot): IntegrityReport {
   if (active_ && !routines.has(active_))
     add('warning', 'SETTINGS_ACTIVE_ROUTINE_MISSING', 'settings', 'settings', 'A rotina ativa configurada não existe.', 'O app usa a primeira rotina disponível; escolha a rotina ativa em Treinos.');
 
+  if (ownership) checkOwnership(d, ownership, add);
+
   const counts = { error: 0, warning: 0, info: 0 };
   for (const i of issues) counts[i.severity]++;
   return { ok: counts.error === 0, issues, counts };
+}
+
+type AddIssue = (severity: IssueSeverity, code: IssueCode, collection: IssueCollection, id: string | undefined, message: string, action: string) => void;
+
+/** Regras de propriedade dos registros (perfil local). */
+function checkOwnership(d: DataSnapshot, ctx: OwnershipContext, add: AddIssue) {
+  const known = new Set<string>();
+  for (const p of ctx.profiles) {
+    if (!isValidProfileId(p?.id)) add('error', 'PROFILE_INVALID_ID', 'profiles', undefined, 'Perfil com identificador inválido (esperado UUID v4).', ctx.scope === 'local' ? 'Exporte um backup; o perfil não é alterado automaticamente.' : 'O arquivo foi alterado manualmente; use um backup original.');
+    else known.add(p.id);
+  }
+  if (ctx.scope === 'local') {
+    const defaults = ctx.profiles.filter((p) => p.isDefault === true && isValidProfileId(p.id));
+    if (!defaults.length) add('error', 'PROFILE_DEFAULT_MISSING', 'profiles', undefined, 'Nenhum perfil principal encontrado.', 'Recarregue o app: o perfil principal é recriado ou restabelecido ao abrir, sem apagar dados.');
+    if (defaults.length > 1)
+      add('warning', 'PROFILE_DEFAULT_DUPLICATE', 'profiles', defaults.map((p) => p.id).join(', '), `${defaults.length} perfis marcados como principal; o app usa o mais antigo.`, 'Nenhum perfil é apagado automaticamente; exporte um backup antes de qualquer correção.');
+  }
+
+  const owners = new Map<string, Map<string, string | undefined>>();
+  for (const c of OWNED_COLLECTIONS) {
+    const map = new Map<string, string | undefined>();
+    owners.set(c, map);
+    for (const r of (d[c] ?? []) as { id?: unknown; profileId?: unknown }[]) {
+      if (!isNonEmptyId(r?.id)) continue;
+      const id = r.id as string;
+      const pid = r.profileId;
+      const missing = pid === undefined || pid === null || pid === '';
+      map.set(id, missing ? undefined : String(pid));
+      if (ctx.scope === 'legacy') {
+        if (!missing) add('error', 'RECORD_PROFILE_UNKNOWN', c, id, 'Backup sem perfil contém registro com perfil proprietário declarado.', 'O arquivo foi alterado manualmente; use um backup original.');
+        continue;
+      }
+      if (missing) {
+        if (ctx.scope === 'local') add('warning', 'RECORD_UNOWNED', c, id, 'Registro ainda sem perfil proprietário (dado legado não migrado).', 'Recarregue o app: registros sem dono são atribuídos ao perfil principal ao abrir.');
+        else add('error', 'RECORD_UNOWNED', c, id, 'Registro sem perfil proprietário num backup que identifica o perfil.', 'O arquivo foi alterado manualmente; use um backup original.');
+      } else if (!isValidProfileId(pid)) add('error', 'PROFILE_INVALID_ID', c, id, 'Registro com identificador de perfil inválido.', 'O registro é preservado; não é atribuído a nenhum perfil automaticamente.');
+      else if (!known.has(pid)) add('error', 'RECORD_PROFILE_UNKNOWN', c, id, 'Registro pertence a um perfil que não existe.', 'O registro é preservado e não é associado a outro perfil automaticamente.');
+    }
+  }
+
+  // Referências diretas entre registros devem ficar dentro do mesmo perfil.
+  // Rotações e agenda não têm dono próprio: herdam o da rotina (sem verificação cruzada possível).
+  const routines = owners.get('routines')!;
+  const entries = owners.get('bodyEntries')!;
+  for (const s of d.sessions ?? []) {
+    const a = owners.get('sessions')!.get(s?.id);
+    const b = routines.get(s?.routineId);
+    // Rotina excluída: referência histórica legítima, o treino mantém o próprio dono.
+    if (a && b && a !== b) add('error', 'CROSS_PROFILE_REFERENCE', 'sessions', s.id, 'Treino aponta para uma rotina de outro perfil.', 'Nenhum dado é reatribuído automaticamente; restaure um backup consistente.');
+  }
+  for (const p of d.photos ?? []) {
+    const a = owners.get('photos')!.get(p?.id);
+    const b = entries.get(p?.entryId);
+    if (a && b && a !== b) add('error', 'CROSS_PROFILE_REFERENCE', 'photos', p.id, 'Foto ligada a uma avaliação de outro perfil.', 'Nenhum dado é reatribuído automaticamente; restaure um backup consistente.');
+  }
+  const activeOwner = d.settings?.activeRoutineId ? routines.get(d.settings.activeRoutineId) : undefined;
+  const def = ctx.scope === 'local' ? ctx.profiles.find((p) => p.isDefault === true)?.id : ctx.profiles[0]?.id;
+  if (activeOwner && def && activeOwner !== def)
+    add('warning', 'CROSS_PROFILE_REFERENCE', 'settings', 'settings', 'A rotina ativa pertence a outro perfil.', 'Escolha a rotina ativa em Treinos.');
 }
 
 // ---------- Impressão digital dos dados ----------
@@ -305,8 +388,10 @@ function hash64(s: string): string {
  * É síncrona para poder rodar dentro de uma transação do IndexedDB (que não aceita
  * aguardar promessas externas, como crypto.subtle).
  */
-export function snapshotFingerprint(d: DataSnapshot): string {
+export function snapshotFingerprint(d: DataSnapshot, profiles?: unknown[]): string {
   const parts: string[] = [`settings=${d.settings ? hash64(stableStringify(d.settings)) : '-'}`];
+  // Identidade local: qualquer mudança nos perfis (criação, nome, principal) também invalida a prévia.
+  if (profiles) parts.push(`profiles=${profiles.length}:${hash64(profiles.map((p) => stableStringify(p)).sort().join('\n'))}`);
   for (const c of ['routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos'] as const) {
     const list = (d[c] ?? []) as unknown[];
     const entries = list

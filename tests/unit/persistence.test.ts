@@ -117,11 +117,17 @@ describe('backup', () => {
     const file = await exportBackup();
     const text = JSON.stringify(file);
 
+    // Outro aparelho/instalação: perfil local diferente. Substituir exige transferência explícita
+    // e mantém o ID do perfil local.
     await freshDb();
+    const localId = db.currentProfileId;
     const parsed = parseBackup(text);
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    const sum = await restoreBackupReplace(parsed.value);
+    await expect(restoreBackupReplace(parsed.value)).rejects.toThrow(/outro perfil/);
+    const sum = await restoreBackupReplace(parsed.value, { acceptProfileTransfer: true });
+    expect(db.currentProfileId).toBe(localId);
+    expect((await db.sessions.toArray()).every((x) => x.profileId === localId)).toBe(true);
     expect(sum).toMatchObject({ routines: 1, sessions: 1, bodyEntries: 1 });
     expect(await db.sessions.count()).toBe(1);
     expect((await getRotation(r.id)).nextIndex).toBe(1);

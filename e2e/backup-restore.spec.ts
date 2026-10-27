@@ -43,7 +43,8 @@ test('backup: prévia, cancelar, mesclar, substituir, recarregar', async ({ page
   // 1. Exportar
   const file = info.outputPath('backup.json');
   const backup = await exportBackup(page, file);
-  expect(backup).toMatchObject({ app: 'irontrack', kind: 'backup', schemaVersion: 1 });
+  expect(backup).toMatchObject({ app: 'irontrack', kind: 'backup', schemaVersion: 2 });
+  expect(backup.profile.id).toMatch(/^[0-9a-f-]{36}$/);
   expect(backup.data.sessions).toHaveLength(1);
 
   // 2–4. Importar o mesmo arquivo: prévia mostra só duplicatas; cancelar não altera nada
@@ -64,7 +65,7 @@ test('backup: prévia, cancelar, mesclar, substituir, recarregar', async ({ page
   const s0 = backup.data.sessions[0];
   const extra = structuredClone(backup);
   extra.data.sessions.push({ ...s0, id: 'e2e-sessao-extra', startedAt: s0.startedAt - 86_400_000, finishedAt: s0.finishedAt - 86_400_000 });
-  extra.data.bodyEntries.push({ id: 'e2e-avaliacao', date: '2026-01-10', weightKg: 80, createdAt: 1 });
+  extra.data.bodyEntries.push({ id: 'e2e-avaliacao', profileId: backup.profile.id, date: '2026-01-10', weightKg: 80, createdAt: 1 });
   await chooseBackup(page, extra);
   await expect(page.getByTestId('merge-summary')).toContainText('2 a adicionar');
   await page.getByTestId('backup-merge').click();

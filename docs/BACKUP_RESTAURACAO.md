@@ -7,8 +7,9 @@ mesclagem). Interface em **Configurações › Dados e backup**.
 
 | Formato | Identificação | Situação |
 | ------- | ------------- | -------- |
-| Backup v1 (atual) | `{"app": "irontrack", "kind": "backup", "schemaVersion": 1, "exportedAt": "...", "data": {...}}` | Exportado e importado. |
-| Backup v0 (preliminar) | `{"app": "irontrack", ...tabelas na raiz}` sem `schemaVersion` | Importado; migrado em memória para v1. |
+| Backup v2 (atual) | `{"app": "irontrack", "kind": "backup", "schemaVersion": 2, "exportedAt": "...", "profile": {"id", "displayName", "createdAt"}, "data": {...}}`; registros de `routines`, `sessions`, `bodyEntries` e `photos` com `profileId` | Exportado e importado. |
+| Backup v1 | `{"app": "irontrack", "kind": "backup", "schemaVersion": 1, "exportedAt": "...", "data": {...}}` | Importado; migrado em memória para v2 com `profile: null` (legado sem dono). |
+| Backup v0 (preliminar) | `{"app": "irontrack", ...tabelas na raiz}` sem `schemaVersion` | Importado; migrado em memória v0 → v1 → v2. |
 | Ficha `irontrack.ficha` v1 | — | Não é backup: recusada com orientação para Treinos › Importar ficha. |
 | Avaliações `irontrack.avaliacoes` v1 | — | Importadas em Evolução › Corpo (contrato inalterado). |
 | `schemaVersion` maior que o suportado | — | Recusado: "Atualize o IronTrack antes de importar". |
@@ -28,10 +29,11 @@ Campos desconhecidos são preservados (`.passthrough()`), para que backups de ve
 1. Tamanho do arquivo conferido antes da leitura (limite de 100 MB).
 2. Interpretação do JSON.
 3. Identificação do formato e da versão.
-4. Migrações de formato (v0 → v1).
+4. Migrações de formato (v0 → v1 → v2).
 5. Validação estrutural com Zod e limites de complexidade.
-6. Verificação de integridade semântica (`checkIntegrity`); erros bloqueiam.
-7. Prévia (`previewRestore`): compara com os dados atuais e mostra o que acontecerá. **Cancelar não altera nada.**
+6. Verificação de integridade semântica (`checkBackupIntegrity`, inclui as regras de dono do formato); erros bloqueiam.
+7. Prévia (`previewRestore`): mostra a relação de identidade (mesmo perfil, legado ou outro perfil), compara com os
+   dados atuais e mostra o que acontecerá. **Cancelar não altera nada.**
 8. Confirmação → restauração em transação única.
 
 ### Limites
@@ -55,6 +57,19 @@ recusar arquivos absurdos com uma mensagem específica, em vez de travar o naveg
 | Confirmação | Prévia + segunda confirmação | Prévia |
 | Configurações | Vêm do backup | Locais mantidas (as do backup só entram se não houver locais) |
 | Garantia | Transação única: se algo falhar, tudo é desfeito | Transação única; só inserções (`add`), nunca `put` sobre registro existente |
+
+## Identidade do perfil
+
+Política completa em [PERFIL_LOCAL.md](PERFIL_LOCAL.md#backups-e-identidade).
+
+| Backup | Mesclar | Substituir |
+| ------ | ------- | ---------- |
+| Mesmo perfil | Normal | Normal |
+| Legado (v0/v1) | Registros atribuídos ao perfil local (informado na prévia) | Idem |
+| Outro perfil | Bloqueado (`PROFILE_MERGE_BLOCKED_MESSAGE`) | Exige `acceptProfileTransfer` (caixa na prévia); dados passam ao perfil local |
+
+O perfil local (ID e nome) nunca é alterado por uma restauração. A tabela `profiles` entra nas transações
+de restauração só para leitura e na impressão digital da prévia.
 
 ## Política de duplicidade e conflitos (mesclar)
 
@@ -122,10 +137,12 @@ mesmo se um treino for concluído durante a exportação. O JSON é indentado (l
    preservados e entram nos backups exportados.
 6. **App não abre os dados** (tela "IronTrack não conseguiu abrir seus dados"): **não limpe os dados do site**.
    Feche outras abas do IronTrack e recarregue; se o problema for de versão, atualize o app.
-7. **Aparelho novo:** instale o app, abra Configurações › Restaurar backup, confira a prévia e escolha "Substituir".
+7. **Aparelho novo:** instale o app, abra Configurações › Restaurar backup, confira a prévia, marque a confirmação
+   de que os dados do backup passarão ao perfil deste aparelho e escolha "Substituir".
 
 ## Limitações conhecidas
 
 - Sem compressão nem criptografia: o arquivo contém fotos e medidas em texto claro. Guarde-o em local privado.
 - Conflitos de mesmo ID não são resolvidos campo a campo; o registro local sempre vence na mesclagem.
+- Backups de outro perfil não podem ser mesclados nesta versão (só substituir).
 - O backup é lido inteiro na memória (até 100 MB); aparelhos com pouca memória podem ficar lentos perto do limite.

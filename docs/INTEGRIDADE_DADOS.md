@@ -6,17 +6,18 @@ relações entre elas, as regras de validação (`src/lib/integrity.ts`) e a pol
 Princípio: **nenhum registro é apagado ou alterado automaticamente para "corrigir" uma inconsistência**.
 O verificador apenas diagnostica; quem decide é o usuário.
 
-## Tabelas e chaves (esquema Dexie v1)
+## Tabelas e chaves (esquema Dexie v2)
 
 | Tabela        | Chave primária          | Índices                               | Conteúdo                                    |
 | ------------- | ----------------------- | ------------------------------------- | ------------------------------------------- |
 | `settings`    | `id` (sempre `settings`) | —                                     | Preferências (um único registro)            |
-| `routines`    | `id`                    | `updatedAt`                           | Rotinas com treinos e exercícios embutidos  |
-| `sessions`    | `id`                    | `status`, `startedAt`, `workoutId`, `routineId` | Treinos realizados (retrato completo) |
+| `profiles`    | `id` (UUID v4)          | —                                     | Perfil local (ver [PERFIL_LOCAL.md](PERFIL_LOCAL.md)) |
+| `routines`    | `id`                    | `updatedAt`, `profileId`              | Rotinas com treinos e exercícios embutidos  |
+| `sessions`    | `id`                    | `status`, `startedAt`, `workoutId`, `routineId`, `profileId` | Treinos realizados (retrato completo) |
 | `rotations`   | `routineId`             | —                                     | Ponteiro do próximo treino da rotina        |
 | `overrides`   | `[routineId+date]`      | `routineId`, `date`                   | Substituições de calendário (descanso/treino) |
-| `bodyEntries` | `id`                    | `date`                                | Avaliações corporais                        |
-| `photos`      | `id`                    | `entryId`                             | Fotos de progresso (data URL JPEG)          |
+| `bodyEntries` | `id`                    | `date`, `profileId`                   | Avaliações corporais                        |
+| `photos`      | `id`                    | `entryId`, `profileId`                | Fotos de progresso (data URL JPEG)          |
 
 ## Relações e classificação
 
@@ -31,6 +32,9 @@ O verificador apenas diagnostica; quem decide é o usuário.
 | `sessions.routineId/workoutId` (em andamento) | Opcional (tolerada)       | O treino pode ser concluído; só a rotação deixa de avançar. |
 | `settings.activeRoutineId → routines.id`  | Opcional                      | Se faltar, o app usa a primeira rotina disponível. |
 | `workouts[].id` e `exercises[].id` dentro da rotina | Devem ser únicos     | A rotação e o editor localizam treinos/exercícios por ID. |
+| `routines/sessions/bodyEntries/photos.profileId → profiles.id` | Obrigatória | Dono explícito do registro (legado sem dono é adotado ao abrir). |
+| `sessions.profileId = routines.profileId` (se a rotina existe) | Obrigatória | Um treino não aponta para rotina de outro perfil. Rotina excluída continua sendo referência histórica permitida. |
+| `photos.profileId = bodyEntries.profileId` (se a avaliação existe) | Obrigatória | Foto e avaliação do mesmo perfil. |
 
 ## Regras de validação
 
@@ -63,6 +67,15 @@ recomendada. As mensagens citam apenas coleção e ID — nunca nomes, medidas, 
 | `PHOTO_ORPHAN` | warning | Foto sem avaliação correspondente. |
 | `PHOTO_INVALID_DATA` | error | Foto que não é `data:image/...;base64,` (o app nunca carrega imagens externas). |
 | `SETTINGS_ACTIVE_ROUTINE_MISSING` | warning | Rotina ativa configurada não existe. |
+| `PROFILE_INVALID_ID` | error | Perfil ou `profileId` fora do formato UUID v4. |
+| `PROFILE_DEFAULT_MISSING` | error (local) | Nenhum perfil principal (o app restabelece ao abrir). |
+| `PROFILE_DEFAULT_DUPLICATE` | warning (local) | Mais de um perfil principal (o app usa o mais antigo). |
+| `RECORD_UNOWNED` | warning (local) / error (backup v2) | Registro sem `profileId`: legado não migrado no banco; arquivo adulterado no backup. |
+| `RECORD_PROFILE_UNKNOWN` | error | Dono inexistente; ou backup legado com `profileId` declarado. |
+| `CROSS_PROFILE_REFERENCE` | error (warning em `settings`) | Treino → rotina ou foto → avaliação de outro perfil; rotina ativa de outro perfil. |
+
+As regras de perfil só rodam com contexto (`checkIntegrity(d, { scope, profiles })`): `local` (banco),
+`backup` (arquivo v2) ou `legacy` (v0/v1). Nenhuma delas reatribui dados automaticamente.
 
 ## Política para inconsistências
 

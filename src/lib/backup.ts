@@ -1,21 +1,32 @@
 import { z } from 'zod';
 import { db, mergeSettings } from '@/db/db';
-import type { CollectionName, DataSnapshot } from './types';
+import { OWNED_COLLECTIONS, type CollectionName, type DataSnapshot, type LocalProfile } from './types';
 import { formatZodError, parseJsonText, type ParseResult } from './routineSchema';
-import { checkIntegrity, snapshotFingerprint, type IntegrityIssue, type IntegrityReport } from './integrity';
+import { checkIntegrity, snapshotFingerprint, type IntegrityIssue, type IntegrityReport, type OwnershipContext } from './integrity';
+import { pickDefaultProfile } from './profile';
 import { applyPlan, planMerge, type CollectionCounts, type MergeItem } from './merge';
 
 export const BACKUP_APP = 'irontrack';
-export const BACKUP_SCHEMA_VERSION = 1;
-
 // Versão do formato JSON do backup. Independente da versão do esquema IndexedDB (DB_SCHEMA_VERSION).
+// v0: tabelas na raiz · v1: { data } · v2: + perfil proprietário (`profile`) e `profileId` nos registros.
+export const BACKUP_SCHEMA_VERSION = 2;
+
 export type BackupData = DataSnapshot;
+
+/** Identidade do perfil gravada no backup v2 (o nome é só informativo). */
+export interface BackupProfile {
+  id: string;
+  displayName: string;
+  createdAt?: number;
+}
 
 export interface BackupFile {
   app: typeof BACKUP_APP;
   kind: 'backup';
   schemaVersion: number;
   exportedAt: string;
+  /** Perfil dono dos dados; null em backups legados (v0/v1), que não tinham perfil. */
+  profile: BackupProfile | null;
   data: BackupData;
 }
 
@@ -66,6 +77,7 @@ const backupSchema = z.object({
   kind: z.literal('backup', { errorMap: () => ({ message: 'este arquivo não é um backup completo (talvez seja uma ficha de treino?)' }) }),
   schemaVersion: z.number().int(),
   exportedAt: z.string(),
+  profile: z.object({ id: z.string(), displayName: z.string() }).passthrough().nullable(),
   data: z.object({
     settings: z.object({ id: z.literal('settings') }).passthrough().nullable(),
     routines: z.array(routineSchema),
@@ -99,6 +111,9 @@ const MIGRATIONS: Record<number, Migration> = {
       photos: raw.photos ?? [],
     },
   }),
+  // v1 não identificava o perfil: o arquivo vira "legado sem dono" (profile: null). A atribuição
+  // ao perfil local acontece só na restauração, de forma explícita (ver docs/PERFIL_LOCAL.md).
+  1: (raw) => ({ ...raw, schemaVersion: 2, profile: null }),
 };
 
 export function migrateBackup(raw: unknown): ParseResult<Record<string, unknown>> {
@@ -183,34 +198,91 @@ const ALL_TABLES = () => [db.settings, db.routines, db.sessions, db.rotations, d
  * mesmo com gravações simultâneas (ex.: concluir um treino durante a exportação).
  */
 export async function readSnapshot(): Promise<BackupData> {
-  return db.transaction('r', ALL_TABLES(), async () => {
-    const [settings, routines, sessions, rotations, overrides, bodyEntries, photos] = await Promise.all([
-      db.settings.get('settings'),
-      db.routines.toArray(),
-      db.sessions.toArray(),
-      db.rotations.toArray(),
-      db.overrides.toArray(),
-      db.bodyEntries.toArray(),
-      db.photos.toArray(),
-    ]);
-    return { settings: settings ?? null, routines, sessions, rotations, overrides, bodyEntries, photos };
-  });
+  return db.transaction('r', ALL_TABLES(), readTables);
+}
+
+/** Dados + perfis, lidos juntos (para prévia, restauração e diagnóstico). */
+export async function readLocalState(): Promise<{ data: BackupData; profiles: LocalProfile[] }> {
+  return db.transaction('r', [...ALL_TABLES(), db.profiles], async () => ({ data: await readTables(), profiles: await db.profiles.toArray() }));
+}
+
+async function readTables(): Promise<BackupData> {
+  const [settings, routines, sessions, rotations, overrides, bodyEntries, photos] = await Promise.all([
+    db.settings.get('settings'),
+    db.routines.toArray(),
+    db.sessions.toArray(),
+    db.rotations.toArray(),
+    db.overrides.toArray(),
+    db.bodyEntries.toArray(),
+    db.photos.toArray(),
+  ]);
+  return { settings: settings ?? null, routines, sessions, rotations, overrides, bodyEntries, photos };
+}
+
+function requireDefaultProfile(profiles: LocalProfile[]): LocalProfile {
+  const p = pickDefaultProfile(profiles);
+  if (!p) throw new BackupRestoreError('Perfil local não encontrado. Recarregue o app (o perfil é restabelecido ao abrir) e tente novamente. Nada foi alterado.');
+  return p;
 }
 
 export async function exportBackup(): Promise<BackupFile> {
-  const data = await readSnapshot();
+  const { data, profiles } = await readLocalState();
+  const p = requireDefaultProfile(profiles);
   return {
     app: BACKUP_APP,
     kind: 'backup',
     schemaVersion: BACKUP_SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
+    profile: { id: p.id, displayName: p.displayName, createdAt: p.createdAt },
     data,
   };
 }
 
+const localOwnership = (profiles: LocalProfile[]): OwnershipContext => ({ scope: 'local', profiles });
+const backupOwnership = (b: BackupFile): OwnershipContext => (b.profile ? { scope: 'backup', profiles: [b.profile] } : { scope: 'legacy', profiles: [] });
+
+/** Integridade do conteúdo do arquivo, incluindo as regras de propriedade do formato. */
+export function checkBackupIntegrity(b: BackupFile): IntegrityReport {
+  return checkIntegrity(b.data, backupOwnership(b));
+}
+
 /** Diagnóstico de integridade dos dados deste aparelho (somente leitura). */
 export async function checkLocalIntegrity(): Promise<IntegrityReport> {
-  return checkIntegrity(await readSnapshot());
+  const { data, profiles } = await readLocalState();
+  return checkIntegrity(data, localOwnership(profiles));
+}
+
+// ---------- Identidade do perfil na restauração ----------
+//
+//  backup do próprio perfil (mesmo ID)  → mesclar e substituir normalmente
+//  backup legado (v0/v1, sem perfil)    → registros atribuídos ao perfil local, informado na prévia
+//  backup de outro perfil (ID diferente) → mesclar BLOQUEADO (misturaria donos);
+//                                          substituir exige confirmação explícita de transferência
+// Em nenhum caso o ID ou o nome do perfil local são alterados por uma restauração.
+
+export type ProfileRelation = 'same' | 'legacy' | 'different';
+
+export interface RestoreIdentity {
+  relation: ProfileRelation;
+  backupProfile: BackupProfile | null;
+  localProfile: { id: string; displayName: string };
+}
+
+export function restoreIdentity(b: BackupFile, local: LocalProfile): RestoreIdentity {
+  const relation: ProfileRelation = !b.profile ? 'legacy' : b.profile.id === local.id ? 'same' : 'different';
+  return { relation, backupProfile: b.profile, localProfile: { id: local.id, displayName: local.displayName } };
+}
+
+export const PROFILE_MERGE_BLOCKED_MESSAGE =
+  'Este backup pertence a outro perfil. Mesclar misturaria dados de perfis diferentes e foi bloqueado. Nada foi gravado.';
+export const PROFILE_TRANSFER_REQUIRED_MESSAGE =
+  'Este backup pertence a outro perfil. Confirme explicitamente que os dados dele passarão a pertencer ao perfil local. Nada foi gravado.';
+
+/** Atribui explicitamente ao perfil local os registros com dono do backup (legado ou transferência confirmada). */
+export function assignOwner(d: BackupData, profileId: string): BackupData {
+  const out = { ...d };
+  for (const c of OWNED_COLLECTIONS) (out[c] as { profileId?: string }[]) = d[c].map((r) => (r.profileId === profileId ? r : { ...r, profileId }));
+  return out;
 }
 
 export interface ImportSummary {
@@ -238,6 +310,8 @@ export class BackupRestoreError extends Error {
 
 export interface RestorePreview {
   exportedAt: string;
+  /** Relação entre o perfil do backup e o perfil local. */
+  identity: RestoreIdentity;
   /** Integridade do conteúdo do backup. Erros impedem qualquer restauração. */
   integrity: IntegrityReport;
   blocked: boolean;
@@ -251,7 +325,11 @@ export interface RestorePreview {
     notRestored: number;
     /** Erros de integridade que a mesclagem criaria no resultado (bloqueiam a mesclagem). */
     newErrors: IntegrityIssue[];
+    /** Backup de outro perfil: mesclagem indisponível. */
+    profileBlocked: boolean;
   };
+  /** Substituir exige `acceptProfileTransfer` (backup de outro perfil). */
+  replaceRequiresProfileTransfer: boolean;
   /**
    * Impressão digital dos dados locais no momento da prévia. A restauração a confere
    * dentro da própria transação e é cancelada se qualquer registro local tiver mudado.
@@ -265,19 +343,22 @@ export interface RestoreConfirmation {
   expectedLocalFingerprint?: string;
   /** Obrigatório quando parte do backup não será restaurada (conflitos ou ignorados). */
   acceptPartial?: boolean;
+  /** Obrigatório para substituir pelos dados de um backup de outro perfil. */
+  acceptProfileTransfer?: boolean;
 }
 
 export const STALE_PREVIEW_MESSAGE = 'Os dados deste aparelho mudaram desde a prévia. Nada foi gravado; abra o backup novamente para ver a prévia atualizada.';
 
-function assertFresh(local: BackupData, opts: RestoreConfirmation) {
-  if (opts.expectedLocalFingerprint !== undefined && snapshotFingerprint(local) !== opts.expectedLocalFingerprint) throw new BackupRestoreError(STALE_PREVIEW_MESSAGE);
+function assertFresh(local: BackupData, profiles: LocalProfile[], opts: RestoreConfirmation) {
+  if (opts.expectedLocalFingerprint !== undefined && snapshotFingerprint(local, profiles) !== opts.expectedLocalFingerprint) throw new BackupRestoreError(STALE_PREVIEW_MESSAGE);
 }
 
 /** Erros de integridade presentes no resultado da mesclagem e ausentes nos dados locais. */
-function newMergeErrors(local: BackupData, merged: BackupData): IntegrityIssue[] {
+function newMergeErrors(local: BackupData, merged: BackupData, profiles: LocalProfile[]): IntegrityIssue[] {
   const key = (i: IntegrityIssue) => `${i.code}|${i.collection}|${i.id ?? ''}`;
-  const before = new Set(checkIntegrity(local).issues.filter((i) => i.severity === 'error').map(key));
-  return checkIntegrity(merged).issues.filter((i) => i.severity === 'error' && !before.has(key(i)));
+  const ctx = localOwnership(profiles);
+  const before = new Set(checkIntegrity(local, ctx).issues.filter((i) => i.severity === 'error').map(key));
+  return checkIntegrity(merged, ctx).issues.filter((i) => i.severity === 'error' && !before.has(key(i)));
 }
 
 const countOf = (d: BackupData): Record<CollectionName, number> => ({
@@ -292,22 +373,33 @@ const countOf = (d: BackupData): Record<CollectionName, number> => ({
 
 /** Analisa o backup contra os dados atuais sem gravar nada. */
 export async function previewRestore(b: BackupFile): Promise<RestorePreview> {
-  const integrity = checkIntegrity(b.data);
-  const local = await readSnapshot();
-  const plan = planMerge(local, b.data);
+  const integrity = checkBackupIntegrity(b);
+  const { data: local, profiles } = await readLocalState();
+  const identity = restoreIdentity(b, requireDefaultProfile(profiles));
+  const profileBlocked = identity.relation === 'different';
+  const plan = planMerge(local, assignOwner(b.data, identity.localProfile.id));
   return {
     exportedAt: b.exportedAt,
+    identity,
     integrity,
     blocked: !integrity.ok,
     incoming: countOf(b.data),
     local: countOf(local),
-    merge: { counts: plan.counts, totals: plan.totals, items: plan.items, notRestored: plan.notRestored, newErrors: integrity.ok ? newMergeErrors(local, applyPlan(local, plan)) : [] },
-    localFingerprint: snapshotFingerprint(local),
+    merge: {
+      counts: plan.counts,
+      totals: plan.totals,
+      items: plan.items,
+      notRestored: plan.notRestored,
+      newErrors: integrity.ok && !profileBlocked ? newMergeErrors(local, applyPlan(local, plan), profiles) : [],
+      profileBlocked,
+    },
+    replaceRequiresProfileTransfer: profileBlocked,
+    localFingerprint: snapshotFingerprint(local, profiles),
   };
 }
 
 function assertRestorable(b: BackupFile) {
-  const integrity = checkIntegrity(b.data);
+  const integrity = checkBackupIntegrity(b);
   if (!integrity.ok) {
     const errors = integrity.issues.filter((i) => i.severity === 'error');
     throw new BackupRestoreError(
@@ -323,10 +415,15 @@ function assertRestorable(b: BackupFile) {
  */
 export async function restoreBackupReplace(b: BackupFile, opts: RestoreConfirmation = {}): Promise<ImportSummary> {
   assertRestorable(b);
-  const d = b.data;
-  await db.transaction('rw', ALL_TABLES(), async () => {
+  const d0 = b.data;
+  // O perfil local entra só para leitura: substituir troca os dados, nunca a identidade local.
+  await db.transaction('rw', [...ALL_TABLES(), db.profiles], async () => {
+    const profiles = await db.profiles.toArray();
     // Não apagar dados que o usuário não viu na prévia (ex.: treino concluído em outra aba).
-    assertFresh(await readSnapshot(), opts);
+    assertFresh(await readTables(), profiles, opts);
+    const identity = restoreIdentity(b, requireDefaultProfile(profiles));
+    if (identity.relation === 'different' && !opts.acceptProfileTransfer) throw new BackupRestoreError(PROFILE_TRANSFER_REQUIRED_MESSAGE);
+    const d = assignOwner(d0, identity.localProfile.id);
     await Promise.all(ALL_TABLES().map((t) => t.clear()));
     if (d.settings) await db.settings.put(mergeSettings(d.settings));
     // bulkPut: cópias idênticas repetidas no arquivo (aviso DUPLICATE_ID_IDENTICAL) viram um registro;
@@ -338,7 +435,7 @@ export async function restoreBackupReplace(b: BackupFile, opts: RestoreConfirmat
     await db.bodyEntries.bulkPut(d.bodyEntries);
     await db.photos.bulkPut(d.photos);
   });
-  return { routines: d.routines.length, sessions: d.sessions.length, bodyEntries: d.bodyEntries.length, photos: d.photos.length, skipped: 0, duplicates: 0, conflicts: 0, notRestored: 0 };
+  return { routines: d0.routines.length, sessions: d0.sessions.length, bodyEntries: d0.bodyEntries.length, photos: d0.photos.length, skipped: 0, duplicates: 0, conflicts: 0, notRestored: 0 };
 }
 
 /**
@@ -351,16 +448,19 @@ export async function restoreBackupReplace(b: BackupFile, opts: RestoreConfirmat
  */
 export async function restoreBackupMerge(b: BackupFile, opts: RestoreConfirmation = {}): Promise<ImportSummary> {
   assertRestorable(b);
-  return db.transaction('rw', ALL_TABLES(), async () => {
-    const local = await readSnapshot();
-    assertFresh(local, opts);
-    const plan = planMerge(local, b.data);
+  return db.transaction('rw', [...ALL_TABLES(), db.profiles], async () => {
+    const profiles = await db.profiles.toArray();
+    const local = await readTables();
+    assertFresh(local, profiles, opts);
+    const identity = restoreIdentity(b, requireDefaultProfile(profiles));
+    if (identity.relation === 'different') throw new BackupRestoreError(PROFILE_MERGE_BLOCKED_MESSAGE);
+    const plan = planMerge(local, assignOwner(b.data, identity.localProfile.id));
     if (plan.notRestored > 0 && !opts.acceptPartial)
       throw new BackupRestoreError(
         `${plan.notRestored} registro(s) do backup não serão restaurados (conflitos ou ignorados). Confirme explicitamente para continuar. Nada foi gravado.`,
         plan.items.filter((i) => i.kind === 'conflict' || i.kind === 'kept-local' || i.kind === 'skipped').slice(0, 12).map((i) => `${i.collection} (${i.id}): ${i.message}`),
       );
-    const broken = newMergeErrors(local, applyPlan(local, plan));
+    const broken = newMergeErrors(local, applyPlan(local, plan), profiles);
     if (broken.length)
       throw new BackupRestoreError(
         'A mesclagem deixaria referências inconsistentes e foi cancelada. Nada foi gravado.',

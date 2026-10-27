@@ -3,9 +3,10 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/ui/confirm';
-import { BackupRestoreError, STALE_PREVIEW_MESSAGE, restoreBackupMerge, restoreBackupReplace, type BackupFile, type RestorePreview } from '@/lib/backup';
+import { BackupRestoreError, STALE_PREVIEW_MESSAGE, restoreBackupMerge, restoreBackupReplace, type BackupFile, type RestoreIdentity, type RestorePreview } from '@/lib/backup';
+import { shortProfileId } from '@/lib/profile';
 import type { CollectionCounts, MergeItem } from '@/lib/merge';
-import type { IntegrityIssue } from '@/lib/integrity';
+import type { IntegrityIssue, IssueCollection } from '@/lib/integrity';
 import type { CollectionName } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
@@ -19,6 +20,8 @@ export const COLLECTION_LABEL: Record<CollectionName, string> = {
   photos: 'Fotos',
 };
 
+const ISSUE_COLLECTION_LABEL: Record<IssueCollection, string> = { ...COLLECTION_LABEL, profiles: 'Perfil' };
+
 const SEVERITY_LABEL = { error: 'Erro', warning: 'Aviso', info: 'Info' } as const;
 
 export function IssueList({ issues, testId }: { issues: IntegrityIssue[]; testId?: string }) {
@@ -30,7 +33,7 @@ export function IssueList({ issues, testId }: { issues: IntegrityIssue[]; testId
           <span className={cn('font-semibold', i.severity === 'error' ? 'text-destructive' : i.severity === 'warning' ? 'text-warn' : 'text-muted-foreground')}>
             {SEVERITY_LABEL[i.severity]}
           </span>{' '}
-          · {COLLECTION_LABEL[i.collection]} · {i.message}
+          · {ISSUE_COLLECTION_LABEL[i.collection]} · {i.message}
           <span className="block text-muted-foreground">{i.action}</span>
         </li>
       ))}
@@ -90,6 +93,36 @@ function ItemGroup({ title, items, tone, testId }: { title: string; items: Merge
   );
 }
 
+/** Impacto da restauração sobre a identidade dos dados (perfil proprietário). */
+function IdentityNotice({ identity }: { identity: RestoreIdentity }) {
+  const local = (
+    <strong className="text-foreground">
+      “{identity.localProfile.displayName}” ({shortProfileId(identity.localProfile.id)})
+    </strong>
+  );
+  if (identity.relation === 'same')
+    return (
+      <p className="rounded-xl border p-3 text-xs text-muted-foreground" data-testid="restore-identity" data-relation="same">
+        Backup do perfil local {local}.
+      </p>
+    );
+  if (identity.relation === 'legacy')
+    return (
+      <p className="rounded-xl border p-3 text-xs text-muted-foreground" data-testid="restore-identity" data-relation="legacy">
+        Backup em formato anterior, sem identificação de perfil. Os dados restaurados serão atribuídos ao perfil local {local}.
+      </p>
+    );
+  return (
+    <div className="space-y-1 rounded-xl border border-warn/50 bg-warn/10 p-3 text-xs" data-testid="restore-identity" data-relation="different">
+      <p className="font-semibold text-warn">Este backup pertence a outro perfil</p>
+      <p className="break-words text-muted-foreground">
+        Perfil do backup: <strong className="text-foreground">“{identity.backupProfile?.displayName}” ({shortProfileId(identity.backupProfile?.id ?? '')})</strong>. Perfil deste aparelho: {local}.
+        Mesclar está bloqueado para não misturar dados de perfis diferentes. O identificador do perfil local nunca é trocado.
+      </p>
+    </div>
+  );
+}
+
 function errorText(e: unknown): { title: string; description: string } {
   if (e instanceof BackupRestoreError) return { title: e.message, description: e.details.join('\n') };
   return { title: 'A restauração falhou. Nenhum dado foi alterado.', description: e instanceof Error ? e.message : String(e) };
@@ -101,14 +134,20 @@ export function RestorePreviewDialog({ backup, preview, onClose }: { backup: Bac
   const [busy, setBusy] = useState(false);
   const p = preview;
   // Nova prévia = nova confirmação.
-  useEffect(() => setAcceptPartial(false), [preview]);
+  useEffect(() => {
+    setAcceptPartial(false);
+    setAcceptTransfer(false);
+  }, [preview]);
   const open = !!backup && !!p;
   const warnings = p ? p.integrity.issues.filter((i) => i.severity !== 'error') : [];
   const errors = p ? p.integrity.issues.filter((i) => i.severity === 'error') : [];
   const t = p?.merge.totals;
   const [acceptPartial, setAcceptPartial] = useState(false);
+  const [acceptTransfer, setAcceptTransfer] = useState(false);
   const partial = !!p && p.merge.notRestored > 0;
-  const mergeBlocked = !!p && p.merge.newErrors.length > 0;
+  const profileBlocked = !!p && p.merge.profileBlocked;
+  const mergeBlocked = !!p && (p.merge.newErrors.length > 0 || profileBlocked);
+  const needsTransfer = !!p && p.replaceRequiresProfileTransfer;
   const items = p?.merge.items ?? [];
   const kept = items.filter((i) => i.kind === 'conflict' || i.kind === 'kept-local');
   const skipped = items.filter((i) => i.kind === 'skipped');
@@ -129,6 +168,8 @@ export function RestorePreviewDialog({ backup, preview, onClose }: { backup: Bac
             </DialogDescription>
           </DialogHeader>
 
+          {p && <IdentityNotice identity={p.identity} />}
+
           {p?.blocked ? (
             <div className="space-y-2 rounded-xl border border-destructive/40 p-3" data-testid="restore-blocked">
               <p className="text-sm font-semibold text-destructive">Este backup tem {errors.length} problema(s) que impedem a restauração.</p>
@@ -140,18 +181,27 @@ export function RestorePreviewDialog({ backup, preview, onClose }: { backup: Bac
               <div className="space-y-3 text-sm">
                 <div className="space-y-2 rounded-xl border p-3" data-testid="merge-summary">
                   <p className="font-semibold">Mesclar com os dados atuais</p>
-                  <p className="text-muted-foreground">
-                    <strong className="text-foreground">{t.add}</strong> a adicionar · <strong className="text-foreground">{t.duplicate}</strong> duplicatas confirmadas ·{' '}
-                    <strong className={t.conflict ? 'text-warn' : 'text-foreground'}>{t.conflict}</strong> conflitos ·{' '}
-                    <strong className={t.skipped ? 'text-warn' : 'text-foreground'}>{t.skipped}</strong> ignorados
-                  </p>
-                  <MergeTable counts={p.merge.counts} />
-                  <ItemGroup testId="merge-kept" title="Mantidos como estão neste aparelho (conflitos)" items={kept} tone="warn" />
-                  <ItemGroup testId="merge-skipped" title="Não serão restaurados" items={skipped} tone="warn" />
-                  <ItemGroup testId="merge-added-warn" title="Serão adicionados, com aviso" items={addedWithWarning} />
-                  <ItemGroup testId="merge-dedup" title="Reconhecidos como duplicatas" items={dedup} />
-                  <p className="text-xs text-muted-foreground">Nada deste aparelho é sobrescrito ou apagado.</p>
-                  {mergeBlocked && (
+                  {!profileBlocked && (
+                    <>
+                      <p className="text-muted-foreground">
+                        <strong className="text-foreground">{t.add}</strong> a adicionar · <strong className="text-foreground">{t.duplicate}</strong> duplicatas confirmadas ·{' '}
+                        <strong className={t.conflict ? 'text-warn' : 'text-foreground'}>{t.conflict}</strong> conflitos ·{' '}
+                        <strong className={t.skipped ? 'text-warn' : 'text-foreground'}>{t.skipped}</strong> ignorados
+                      </p>
+                      <MergeTable counts={p.merge.counts} />
+                      <ItemGroup testId="merge-kept" title="Mantidos como estão neste aparelho (conflitos)" items={kept} tone="warn" />
+                      <ItemGroup testId="merge-skipped" title="Não serão restaurados" items={skipped} tone="warn" />
+                      <ItemGroup testId="merge-added-warn" title="Serão adicionados, com aviso" items={addedWithWarning} />
+                      <ItemGroup testId="merge-dedup" title="Reconhecidos como duplicatas" items={dedup} />
+                      <p className="text-xs text-muted-foreground">Nada deste aparelho é sobrescrito ou apagado.</p>
+                    </>
+                  )}
+                  {profileBlocked && (
+                    <p className="text-xs font-semibold text-destructive" data-testid="merge-profile-blocked">
+                      Mesclagem indisponível: o backup é de outro perfil. Use “Substituir” só se os dados deste aparelho puderem ser trocados pelos do backup.
+                    </p>
+                  )}
+                  {mergeBlocked && !profileBlocked && (
                     <div className="space-y-1" data-testid="merge-blocked">
                       <p className="text-xs font-semibold text-destructive">A mesclagem deixaria referências inconsistentes e está indisponível. Use “Substituir” ou corrija o arquivo.</p>
                       <IssueList issues={p.merge.newErrors} />
@@ -170,8 +220,16 @@ export function RestorePreviewDialog({ backup, preview, onClose }: { backup: Bac
                 <div className="rounded-xl border p-3" data-testid="replace-summary">
                   <p className="font-semibold">Substituir todos os dados</p>
                   <p className="text-muted-foreground">
-                    Apaga os {localTotal} registros deste aparelho e grava os {incomingTotal} do backup.
+                    Apaga os {localTotal} registros deste aparelho e grava os {incomingTotal} do backup. O perfil local é mantido.
                   </p>
+                  {needsTransfer && (
+                    <label className="mt-2 flex items-start gap-2 rounded-lg bg-warn/10 p-2.5 text-xs" data-testid="profile-transfer-warning">
+                      <input type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 accent-current" checked={acceptTransfer} onChange={(e) => setAcceptTransfer(e.target.checked)} data-testid="accept-profile-transfer" />
+                      <span>
+                        <strong className="text-warn">Os dados do outro perfil passarão a pertencer ao perfil local</strong> “{p.identity.localProfile.displayName}”. Entendo e quero substituir mesmo assim.
+                      </span>
+                    </label>
+                  )}
                 </div>
                 {warnings.length > 0 && (
                   <details data-testid="integrity-warnings">
@@ -219,7 +277,7 @@ export function RestorePreviewDialog({ backup, preview, onClose }: { backup: Bac
                 >
                   Mesclar com os dados atuais
                 </Button>
-                <Button size="lg" variant="outline" className="text-destructive" data-testid="backup-replace" disabled={busy} onClick={() => setConfirmReplace(true)}>
+                <Button size="lg" variant="outline" className="text-destructive" data-testid="backup-replace" disabled={busy || (needsTransfer && !acceptTransfer)} onClick={() => setConfirmReplace(true)}>
                   Substituir todos os dados
                 </Button>
               </>
@@ -243,7 +301,7 @@ export function RestorePreviewDialog({ backup, preview, onClose }: { backup: Bac
         onConfirm={async () => {
           if (!backup) return;
           try {
-            const r = await restoreBackupReplace(backup, { expectedLocalFingerprint: preview?.localFingerprint });
+            const r = await restoreBackupReplace(backup, { expectedLocalFingerprint: preview?.localFingerprint, acceptProfileTransfer: acceptTransfer });
             toast.success('Backup restaurado', { description: `${r.sessions} treinos, ${r.routines} rotinas, ${r.bodyEntries} avaliações` });
           } catch (e) {
             const m = errorText(e);

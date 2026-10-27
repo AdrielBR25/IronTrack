@@ -7,9 +7,23 @@ Implementação em `src/db/db.ts`; testes em `tests/unit/migrations.test.ts`.
 | Versão Dexie | Publicada em | Alterações |
 | ------------ | ------------ | ---------- |
 | 1 | Primeira versão do app | Tabelas `settings`, `routines`, `sessions`, `rotations`, `overrides`, `bodyEntries`, `photos` (ver [INTEGRIDADE_DADOS.md](INTEGRIDADE_DADOS.md)). |
+| 2 | IronTrack 2.0 F01/P02 | Tabela `profiles` (`id`) e índice `profileId` em `routines`, `sessions`, `bodyEntries`, `photos` (ver [PERFIL_LOCAL.md](PERFIL_LOCAL.md)). |
 
-A Fase 01 do IronTrack 2.0 **não alterou o esquema**: nenhuma mudança de tabela ou índice foi necessária,
-então a versão continua 1 (`DB_SCHEMA_VERSION = 1`). Foi criada a infraestrutura e os testes para as próximas.
+O Prompt 01 não alterou o esquema (só criou a infraestrutura). O Prompt 02 criou a versão 2 (`DB_SCHEMA_VERSION = 2`).
+
+## Migração v1 → v2 (perfil local)
+
+Declaração completa da v2 em `src/db/db.ts`; a v1 permanece idêntica. O upgrade, dentro da transação
+`versionchange` (atômica, offline, sem rede nem timers):
+
+1. procura um perfil principal em `profiles` (tabela nova, vazia) e, não havendo, cria **exatamente um**
+   ("Meu perfil", UUID v4 aleatório);
+2. atribui esse perfil a todo registro de `routines`, `sessions`, `bodyEntries` e `photos` que não tenha
+   `profileId` (`modify`, sem trocar IDs, sem apagar, sem tocar em `settings`, `rotations` e `overrides`).
+
+Instalação nova: o Dexie cria o banco direto na v2 (o upgrade não roda) e `ensureDefaultProfile`, executado
+em `db.on('ready')`, cria o perfil numa transação serializada entre abas. O mesmo `ensureDefaultProfile` roda em
+toda abertura e adota registros sem dono gravados por uma aba antiga (código v1) ainda aberta.
 
 A versão do esquema Dexie é independente da versão do backup JSON (`BACKUP_SCHEMA_VERSION`).
 
@@ -53,9 +67,13 @@ A versão do esquema Dexie é independente da versão do backup JSON (`BACKUP_SC
   (configurações, rotina ABC, treinos concluídos, treino em andamento com descanso, rotação, substituições,
   avaliações e fotos) e abre com a classe atual — todos os registros são comparados;
 - executa os fluxos (retomar treino, concluir, avançar rotação) sobre o banco legado e reabre;
-- simula uma versão 2 hipotética: upgrade real v1 → v2, transformação aplicada, novo índice funcionando, reabertura;
-- simula falha no meio do upgrade e confirma que o banco segue em v1, idêntico;
-- confirma que o app antigo (v1) ainda abre um banco já atualizado para v2 (Dexie 4 abre em modo compatível).
+- **migração real v1 → v2**: um único perfil criado, todos os registros com os mesmos IDs e campos, dono
+  atribuído, relações (foto → avaliação, treino → rotina, rotação, agenda) intactas, treino em andamento e
+  histórico de rotina excluída preservados, integridade sem erros; a migração não roda de novo ao reabrir;
+- falha ao gerar o perfil e falha no meio da atribuição (fotos): rollback completo, banco continua v1 sem `profiles`
+  e sem nenhum `profileId`; nova tentativa conclui;
+- aba antiga (Dexie com esquema v1) gravando num banco v2: o registro sem dono é adotado na próxima abertura;
+- simula uma versão 3 hipotética sobre a v2: upgrade, falha com rollback para v2, e o app v2 abrindo banco v3.
 
 ## Limitações de rollback
 
