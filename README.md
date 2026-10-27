@@ -52,12 +52,17 @@ Dexie (IndexedDB), Zod, Recharts, vite-plugin-pwa, Vitest e Playwright.
 Estrutura:
 
 ```
-src/lib/        lógica pura: rotação, sessão, cronômetro, volume, progressão, esquemas JSON, backup
-src/db/         banco Dexie e operações de persistência
-src/features/   componentes por funcionalidade (execução do treino, rotinas, gráficos, corpo)
+src/modules/    domínios com regras puras: training/ (rotinas, sessões, rotação, progressão, métricas)
+                e body/ (avaliações, PDF, evolução corporal)
+src/lib/        compartilhado: validação, datas, unidades, perfil, integridade, mesclagem e backup
+src/db/         banco Dexie e operações de persistência (por domínio)
+src/hooks/      consultas reativas para as telas
+src/features/   componentes por funcionalidade (execução do treino, rotinas, corpo, backup)
 src/pages/      telas
 tests/unit/     testes unitários   ·   e2e/   testes Playwright (celular 360 px e desktop)
 ```
+
+Limites entre camadas e domínios, e as regras que os testes conferem: [docs/ARQUITETURA.md](docs/ARQUITETURA.md).
 
 O deploy é feito pelo GitHub Actions (`.github/workflows/deploy.yml`) a cada push no `main`: testes unitários,
 build com base `/IronTrack/`, testes E2E e publicação no branch `gh-pages`.

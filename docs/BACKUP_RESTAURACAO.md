@@ -1,7 +1,8 @@
 # Backup e restauração
 
-Implementação em `src/lib/backup.ts` (arquivo, validação, transações) e `src/lib/merge.ts` (política de
-mesclagem). Interface em **Configurações › Dados e backup**.
+Implementação em `src/lib/backupFormat.ts` (formato do arquivo, validação e migrações; funções puras),
+`src/lib/backup.ts` (exportação e restauração em transações) e `src/lib/merge.ts` (política de mesclagem).
+Interface em **Configurações › Dados e backup**.
 
 ## Formatos aceitos
 

@@ -1,7 +1,7 @@
 # Formato JSON da ficha de treino
 
 O IronTrack importa e exporta fichas (rotinas) neste formato. A validação é feita com Zod
-(`src/lib/routineSchema.ts`) e os erros apontam o treino e o exercício com problema, por exemplo:
+(`src/modules/training/routineSchema.ts`) e os erros apontam o treino e o exercício com problema, por exemplo:
 
 ```
 Treino 1 › Exercício 2 › series: mínimo de 1 série

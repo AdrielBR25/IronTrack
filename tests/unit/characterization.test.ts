@@ -64,7 +64,7 @@ describe('mensagens de validação (formatZodError) por formato', () => {
 });
 
 describe('cálculos de treino', () => {
-  it('1RM do gráfico de progresso (exerciseSeries) difere de estimate1RM em 1 repetição e em 0 repetições (divergência preservada)', () => {
+  it('1RM do gráfico de progresso (exerciseSeries) difere de estimate1RM com 1 repetição (divergência preservada)', () => {
     const s = (id: string, startedAt: number, weight: number, reps: number) => {
       const base = session(id, { startedAt });
       return { ...base, exercises: [{ ...base.exercises[0], sets: [{ ...base.exercises[0].sets[0], weight, reps }] }] };
