@@ -123,3 +123,24 @@ describe('evolução', () => {
     ]);
   });
 });
+
+describe('mapa do corpo', async () => {
+  const { REGIONS, availableMeasures, beforeScale, compare, regionById } = await import('@/lib/bodyRegions');
+  const r = parseAnthropometricItems(report(ROWS));
+  if (!r.ok) throw new Error(r.error);
+  const entries = r.evaluations.map((e) => evaluationToEntry(e, 0));
+
+  it('liga regiões às medidas existentes', () => {
+    const withData = REGIONS.filter((x) => availableMeasures(entries, x).length).map((x) => x.id);
+    expect(withData).toEqual(expect.arrayContaining(['arm', 'abs', 'waist', 'thigh', 'triceps']));
+    expect(withData).not.toContain('calf');
+  });
+
+  it('compara antes × agora e amplia o contorno quando diminuiu', () => {
+    const abs = availableMeasures(entries, regionById('abs')).find((m) => m.kind === 'fold')!;
+    const first = compare(entries, abs, 'first')!;
+    expect([first.before.v, first.now.v, first.delta]).toEqual([40, 28, -12]);
+    expect(compare(entries, abs, 'previous')!.before.v).toBe(30);
+    expect(beforeScale(first)).toBeGreaterThan(1);
+  });
+});

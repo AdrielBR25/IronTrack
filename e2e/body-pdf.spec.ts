@@ -77,3 +77,29 @@ test('importa o PDF de medidas e, no PDF seguinte, só o mês novo', async ({ pa
   const scroll = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(scroll).toBeLessThanOrEqual(0);
 });
+
+test('mapa do corpo: escolhe a região e mostra antes × agora', async ({ page, browser }) => {
+  const pdf = await makeReport(browser, ['10/01/2030', '12/02/2030', '15/03/2030'], ROWS);
+  await freshStart(page);
+  await page.goto('./#/evolucao');
+  await page.getByRole('tab', { name: 'Corpo' }).click();
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Importar PDF' }).click();
+  await (await chooser).setFiles({ name: 'relatorio.pdf', mimeType: 'application/pdf', buffer: pdf });
+
+  const map = page.getByTestId('body-map');
+  await expect(map).toBeVisible();
+  const detail = page.getByTestId('region-detail');
+  await expect(detail).toContainText('Braço / bíceps');
+  await expect(detail).toContainText('Antes36 cm');
+  await expect(detail).toContainText('Agora37 cm');
+
+  await map.getByRole('button', { name: 'Tríceps' }).click();
+  await expect(page.getByRole('radio', { name: 'Costas' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByTestId('region-delta')).toHaveText(/^3(\D|$)/);
+
+  await map.getByRole('button', { name: 'Abdômen' }).click();
+  await detail.getByRole('radio', { name: 'Última avaliação' }).click();
+  await expect(page.getByTestId('region-delta')).toHaveText(/^5(\D|$)/);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
+});

@@ -18,6 +18,7 @@ import { ChartCard, DeltaBars, StackChart, TrendChart } from '@/features/progres
 import { BODY_METRICS, evolutionSummary, metricByKey, metricChanges, skinfoldChanges, type BodyMetricKey, type MetricChange } from '@/lib/bodyEvolution';
 import { evaluationToEntry, extractPdfItems, newMonthsOnly, parseAnthropometricItems } from '@/lib/bodyPdf';
 import { cn } from '@/lib/utils';
+import { BodyMap } from './BodyMap';
 
 const KG_KEYS = new Set<BodyMetricKey>(['weightKg', 'fatMassKg', 'leanMassKg']);
 const monthFmt = new Intl.DateTimeFormat('pt-BR', { month: 'short', year: '2-digit' });
@@ -327,6 +328,8 @@ export function BodySection() {
           </p>
         </Card>
       )}
+
+      <BodyMap entries={list} />
 
       {comp.length >= 2 && (
         <ChartCard title="Massa magra × massa gorda" description="Do que é feito o seu peso em cada avaliação">
