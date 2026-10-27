@@ -6,6 +6,16 @@ import { uid } from '@/lib/utils';
 // Persistência do domínio de evolução corporal (avaliações e fotos). As regras de
 // interpretação e cálculo ficam em src/modules/body.
 
+/** Avaliações em ordem de data (mais antiga primeiro). Só leitura. */
+export async function listBodyEntries(): Promise<BodyEntry[]> {
+  return db.bodyEntries.orderBy('date').toArray();
+}
+
+/** As `limit` avaliações mais recentes (mais nova primeiro). Só leitura. */
+export async function recentBodyEntries(limit: number): Promise<BodyEntry[]> {
+  return db.bodyEntries.orderBy('date').reverse().limit(limit).toArray();
+}
+
 export async function saveBodyEntry(e: BodyEntry) {
   await db.bodyEntries.put(e);
 }

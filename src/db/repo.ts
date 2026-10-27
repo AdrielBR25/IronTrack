@@ -159,6 +159,16 @@ export async function completedSessions(): Promise<WorkoutSession[]> {
   return db.sessions.where('status').equals('completed').sortBy('startedAt');
 }
 
+/** Os `limit` treinos concluídos mais recentes (mais novo primeiro). Só leitura, pelo índice de data. */
+export async function recentCompletedSessions(limit: number): Promise<WorkoutSession[]> {
+  return db.sessions.orderBy('startedAt').reverse().filter((s) => s.status === 'completed').limit(limit).toArray();
+}
+
+/** Treinos concluídos iniciados a partir de `fromTs` (ms). Só leitura, pelo índice de data. */
+export async function completedSessionsSince(fromTs: number): Promise<WorkoutSession[]> {
+  return db.sessions.where('startedAt').aboveOrEqual(fromTs).filter((s) => s.status === 'completed').sortBy('startedAt');
+}
+
 export { normIndex };
 
 /** Salva a rotina preservando qual treino é o próximo da rotação (ao reordenar/excluir treinos). */
