@@ -32,6 +32,9 @@ async function chooseBackup(page: Page, content: unknown) {
 async function historyCount(page: Page) {
   await page.goto('./#/historico');
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+  // O subtítulo "N treinos registrados" só aparece quando a consulta ao banco terminou;
+  // contar antes disso devolvia 0 de forma intermitente.
+  await expect(page.getByText(/\d+ treinos registrados/)).toBeVisible();
   return page.getByTestId('history-item').count();
 }
 
