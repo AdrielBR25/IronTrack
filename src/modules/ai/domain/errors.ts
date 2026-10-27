@@ -35,7 +35,7 @@ export const AI_ERROR_MESSAGES: Record<AIErrorCode, string> = {
   timeout: 'A IA demorou demais para responder e a solicitação foi encerrada.',
   provider_failure: 'O provedor de IA falhou ao responder. Nenhuma nova tentativa foi feita.',
   invalid_response: 'O provedor de IA devolveu uma resposta inválida.',
-  access_denied: 'O gateway de IA recusou o acesso. Confira o endereço e o token de acesso.',
+  access_denied: 'O gateway de IA recusou o acesso: o token pode estar errado, revogado ou expirado. Confira o endereço e o token de acesso.',
   rate_limited: 'Muitas solicitações em pouco tempo. Aguarde um minuto e tente de novo.',
   quota_exceeded: 'A cota de uso de IA desta credencial acabou por hoje.',
   gateway_unreachable: 'Não foi possível contatar o gateway de IA. Verifique a conexão e o endereço.',

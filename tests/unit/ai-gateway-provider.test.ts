@@ -63,6 +63,7 @@ describe('catálogo do gateway', () => {
     expect(gatewayErrorCode(503, e('provider_unavailable'))).toBe('provider_unavailable');
     expect(gatewayErrorCode(413, e('payload_too_large'))).toBe('request_invalid');
     expect(gatewayErrorCode(429, e('rate_limited'))).toBe('rate_limited');
+    expect(gatewayErrorCode(429, e('provider_rate_limited'))).toBe('rate_limited');
     expect(gatewayErrorCode(429, e('quota_exceeded'))).toBe('quota_exceeded');
     expect(gatewayErrorCode(504, e('timeout'))).toBe('timeout');
     expect(gatewayErrorCode(502, e('content_filtered'))).toBe('content_blocked');

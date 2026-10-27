@@ -76,6 +76,8 @@ export function gatewayErrorCode(status: number, body: unknown): AIErrorCode {
     request_invalid: 'request_invalid',
     payload_too_large: 'request_invalid',
     rate_limited: 'rate_limited',
+    // P07: limite/cota da conta no próprio provedor (distinto do limite do gateway no servidor).
+    provider_rate_limited: 'rate_limited',
     quota_exceeded: 'quota_exceeded',
     timeout: 'timeout',
     content_filtered: 'content_blocked',

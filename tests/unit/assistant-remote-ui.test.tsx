@@ -373,3 +373,46 @@ describe('assistente remoto: indisponibilidade e privacidade', () => {
     expect(comp.service.listProviders().map((p) => p.id)).toEqual(['mock']);
   });
 });
+
+describe('assistente remoto: credencial revogada e falhas operacionais (P07)', () => {
+  it('token revogado/expirado no meio do uso: falha sem repetir, token esquecido e reconexão exigida', async () => {
+    onGenerate = async () => json(401, { error: { code: 'unauthorized', message: 'detalhe do servidor Z' } });
+    await mount();
+    await connect();
+    await chooseRemote();
+    await openPreview();
+    await click($('preview-authorize'));
+    await waitFor(() => $('chat-user')?.dataset.status === 'failed');
+    expect($('chat-error')?.textContent).toContain('revogado ou expirado');
+    expect(document.body.textContent).not.toContain('detalhe do servidor Z');
+    expect(generates()).toHaveLength(1);
+    // O gateway foi desconectado: provedores remotos removidos e formulário de conexão de volta.
+    await waitFor(() => $('gateway-connect'));
+    expect($('gateway-error')?.textContent).toContain('esquecido nesta página');
+    expect(comp.service.listProviders().map((p) => p.id)).toEqual(['mock']);
+    expect(($('gateway-token') as HTMLInputElement).value).toBe('');
+    // Sem gateway, uma nova pergunta remota não sai.
+    await setValue($('ai-question'), 'Outra pergunta');
+    await click($('ai-send'));
+    expect($('share-preview')).toBeNull();
+    expect(generates()).toHaveLength(1);
+  });
+
+  it('limite da conta no provedor (provider_rate_limited) e gateway em encerramento: mensagens claras, sem repetir', async () => {
+    onGenerate = async () => json(429, { error: { code: 'provider_rate_limited' } });
+    await mount();
+    await connect();
+    await chooseRemote();
+    await openPreview();
+    await click($('preview-authorize'));
+    await waitFor(() => $('chat-user')?.dataset.status === 'failed');
+    expect($('chat-error')?.textContent).toContain('Aguarde');
+    onGenerate = async () => json(503, { error: { code: 'gateway_disabled' } });
+    await openPreview('Segunda pergunta');
+    await click($('preview-authorize'));
+    await waitFor(() => document.querySelectorAll('[data-testid="chat-user"][data-status="failed"]').length === 2);
+    expect(generates()).toHaveLength(2);
+    // Continua conectado: só o token recusado desconecta.
+    expect($('gateway-origin')).not.toBeNull();
+  });
+});

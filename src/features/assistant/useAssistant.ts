@@ -59,6 +59,9 @@ export type AssistantPhase = 'idle' | 'preparing' | 'preview' | 'running';
 /** Simulado: nada sai do aparelho (padrão). Remoto: dados autorizados vão ao gateway e ao provedor. */
 export type AssistantMode = 'simulated' | 'remote';
 
+/** Mostrado quando o gateway recusa o token no meio do uso: o token é esquecido nesta página. */
+export const TOKEN_REJECTED_MESSAGE = 'O gateway recusou o token (errado, revogado ou expirado) e ele foi esquecido nesta página. Conecte de novo com um token válido.';
+
 export interface GatewayState {
   status: 'disconnected' | 'connecting' | 'connected' | 'error';
   origin?: string;
@@ -367,6 +370,16 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
       const cancelled = isAIError(e) && e.code === 'cancelled';
       const error = cancelled ? 'Você cancelou. Nenhuma resposta foi gerada.' : friendlyError(e).message;
       setMessages((m) => m.map((x) => (x.id === userMsg.id ? { ...x, status: cancelled ? 'cancelled' : 'failed', error } : x)));
+      // P07: token recusado durante o uso (revogado, expirado ou trocado no servidor): esquece o token
+      // desta página na hora, em vez de continuar tentando com uma credencial que não vale mais.
+      if (isRemote && isAIError(e) && e.code === 'access_denied') {
+        connectRef.current?.abort();
+        connectRef.current = null;
+        composition.disconnectGateway();
+        setGateway({ status: 'error', providers: [], error: TOKEN_REJECTED_MESSAGE });
+        setProviderState('');
+        setModelState('');
+      }
     } finally {
       if (abortRef.current === ctrl) abortRef.current = null;
       if (mountedRef.current) setPhase('idle');
