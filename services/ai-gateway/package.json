@@ -1,0 +1,12 @@
+{
+  "name": "irontrack-ai-gateway",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Gateway seguro de IA do IronTrack (desenvolvimento). Sem dependências de runtime; Node 22.18+ (TypeScript nativo).",
+  "type": "module",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "start": "node src/main.ts",
+    "token": "node scripts/token.ts"
+  }
+}

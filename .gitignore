@@ -6,3 +6,10 @@ playwright-report
 test-results
 *.log
 .DS_Store
+# Gateway de IA: configurações reais e segredos nunca entram no repositório
+.env
+.env.*
+!.env.example
+services/ai-gateway/.env
+services/ai-gateway/config/*.json
+!services/ai-gateway/config/*.example.json
