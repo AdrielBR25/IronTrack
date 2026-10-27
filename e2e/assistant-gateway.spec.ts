@@ -2,7 +2,8 @@ import { expect, test, type Page } from '@playwright/test';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createHash, randomBytes } from 'node:crypto';
-import { createGateway, type GatewayLogEvent } from '../services/ai-gateway/src/gateway.ts';
+import { createGateway, type Gateway, type GatewayLogEvent } from '../services/ai-gateway/src/gateway.ts';
+import { issueCredential, revokeCredential } from '../services/ai-gateway/src/credentials.ts';
 import { freshStart, loadSample } from './helpers';
 
 // Assistente remoto (IronTrack 2.0 F01/P06) contra o GATEWAY REAL rodando localmente, com um
@@ -18,6 +19,8 @@ let upstreamBodies: Record<string, unknown>[] = [];
 let upstreamMode: 'ok' | 'hang' = 'ok';
 let upstreamClosed = 0;
 let logs: GatewayLogEvent[] = [];
+let gateway: Gateway;
+let baseConfig: Record<string, unknown>;
 
 const listen = (s: Server) => new Promise<string>((r) => s.listen(0, '127.0.0.1', () => r(`http://127.0.0.1:${(s.address() as AddressInfo).port}`)));
 const readJson = (req: IncomingMessage) =>
@@ -39,22 +42,24 @@ test.beforeAll(async () => {
     res.end(JSON.stringify({ type: 'message', content: [{ type: 'text', text: 'Resposta do provedor simulado local.' }], stop_reason: 'end_turn', usage: { input_tokens: 50, output_tokens: 8 } }));
   });
   const upstreamUrl = await listen(upstream);
-  const gw = createGateway({
-    config: {
-      enabled: true,
-      host: '127.0.0.1',
-      port: 0,
-      allowedOrigins: ['http://localhost:4173'],
-      clients: [{ id: 'e2e', tokenSha256: createHash('sha256').update(token).digest('hex'), enabled: true }],
-      limits: { requestsPerMinute: 100, upstreamTimeoutMs: 20_000 },
-      providers: {
-        anthropic: { enabled: true, displayName: 'Anthropic Claude', apiKeyEnv: 'ANTHROPIC_API_KEY', apiVersion: '2026-10-21', baseUrl: upstreamUrl, models: [{ id: 'modelo-e2e', displayName: 'Modelo E2E', maxInputChars: 20_000, maxOutputTokens: 600 }] },
-        openai: { enabled: true, displayName: 'OpenAI', apiKeyEnv: 'OPENAI_API_KEY', models: [{ id: 'modelo-o', displayName: 'Modelo O', maxInputChars: 20_000, maxOutputTokens: 600 }] },
-      },
+  baseConfig = {
+    enabled: true,
+    host: '127.0.0.1',
+    port: 0,
+    allowedOrigins: ['http://localhost:4173'],
+    clients: [{ id: 'e2e', tokenSha256: createHash('sha256').update(token).digest('hex'), enabled: true }],
+    limits: { requestsPerMinute: 100, upstreamTimeoutMs: 20_000 },
+    providers: {
+      anthropic: { enabled: true, displayName: 'Anthropic Claude', apiKeyEnv: 'ANTHROPIC_API_KEY', apiVersion: '2026-10-21', baseUrl: upstreamUrl, models: [{ id: 'modelo-e2e', displayName: 'Modelo E2E', maxInputChars: 20_000, maxOutputTokens: 600 }] },
+      openai: { enabled: true, displayName: 'OpenAI', apiKeyEnv: 'OPENAI_API_KEY', models: [{ id: 'modelo-o', displayName: 'Modelo O', maxInputChars: 20_000, maxOutputTokens: 600 }] },
     },
+  };
+  const gw = createGateway({
+    config: baseConfig,
     env: { ANTHROPIC_API_KEY: fakeKey },
     logger: (e) => logs.push(e),
   });
+  gateway = gw;
   gatewayServer = gw.server;
   gatewayUrl = await listen(gatewayServer);
 });
@@ -67,6 +72,7 @@ test.afterAll(async () => {
 });
 
 test.beforeEach(() => {
+  gateway.reload(baseConfig);
   upstreamBodies = [];
   upstreamMode = 'ok';
   logs = [];
@@ -191,4 +197,45 @@ test('assistente remoto: cancelamento, gateway indisponível e simulado intacto'
   await expect(page.getByTestId('preview-simulated-note')).toBeVisible();
   await page.getByTestId('preview-authorize').click();
   await expect(page.getByTestId('chat-assistant').last()).toContainText('[SIMULAÇÃO]');
+});
+
+test('assistente remoto: token revogado no gateway em execução é recusado, esquecido e substituído pelo novo (P07)', async ({ page }) => {
+  await freshStart(page);
+  await openAssistant(page);
+  await connect(page);
+  await expect(page.getByTestId('gateway-origin')).toHaveText(gatewayUrl);
+  await page.getByTestId('ai-provider').selectOption('anthropic');
+  await page.getByTestId('ai-remote-model').selectOption('modelo-e2e');
+
+  // Operador rotaciona: emite um token novo e revoga o antigo; o gateway recarrega sem reiniciar.
+  const issued = issueCredential(baseConfig, 'e2e');
+  const legacyKeyId = `legacy-${createHash('sha256').update(token).digest('hex').slice(0, 12)}`;
+  expect(gateway.reload(revokeCredential(issued.config, legacyKeyId)).ok).toBe(true);
+
+  await page.getByLabel('Sua pergunta').fill('Pergunta com token revogado');
+  await page.getByTestId('ai-send').click();
+  await page.getByTestId('preview-authorize').click();
+  await expect(page.getByTestId('chat-user')).toHaveAttribute('data-status', 'failed');
+  await expect(page.getByTestId('chat-error')).toContainText('revogado ou expirado');
+  await expect(page.getByTestId('gateway-error')).toContainText('esquecido nesta página');
+  expect(upstreamBodies).toHaveLength(0);
+  expect(logs.some((l) => l.status === 401 && l.route === 'POST /v1/generate')).toBe(true);
+
+  // Novo token: conecta e funciona.
+  await page.getByTestId('gateway-token').fill(issued.token);
+  await page.getByTestId('gateway-connect').click();
+  await expect(page.getByTestId('gateway-origin')).toHaveText(gatewayUrl);
+  await page.getByTestId('ai-provider').selectOption('anthropic');
+  await page.getByTestId('ai-remote-model').selectOption('modelo-e2e');
+  await page.getByLabel('Sua pergunta').fill('Pergunta com token novo');
+  await page.getByTestId('ai-send').click();
+  await page.getByTestId('preview-authorize').click();
+  await expect(page.getByTestId('chat-assistant').last()).toContainText('Resposta do provedor simulado local.');
+  expect(logs.find((l) => l.status === 200 && l.route === 'POST /v1/generate')?.keyId).toBe(issued.keyId);
+  // Nenhum token aparece nos logs nem no armazenamento do navegador.
+  expect(JSON.stringify(logs)).not.toContain(issued.token);
+  const stored = await page.evaluate(() => JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }) + document.cookie);
+  expect(stored).not.toContain(issued.token);
+  expect(stored).not.toContain(token);
+  expect(await noHorizontalScroll(page)).toBe(true);
 });
