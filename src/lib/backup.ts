@@ -2,8 +2,8 @@ import { z } from 'zod';
 import { db, mergeSettings } from '@/db/db';
 import type { CollectionName, DataSnapshot } from './types';
 import { formatZodError, parseJsonText, type ParseResult } from './routineSchema';
-import { checkIntegrity, type IntegrityReport } from './integrity';
-import { planMerge, planSignature, type CollectionCounts, type MergeItem } from './merge';
+import { checkIntegrity, snapshotFingerprint, type IntegrityIssue, type IntegrityReport } from './integrity';
+import { applyPlan, planMerge, type CollectionCounts, type MergeItem } from './merge';
 
 export const BACKUP_APP = 'irontrack';
 export const BACKUP_SCHEMA_VERSION = 1;
@@ -222,6 +222,8 @@ export interface ImportSummary {
   skipped: number;
   duplicates: number;
   conflicts: number;
+  /** Registros do backup não restaurados (conflitos + ignorados); 0 na substituição. */
+  notRestored: number;
 }
 
 export class BackupRestoreError extends Error {
@@ -245,8 +247,37 @@ export interface RestorePreview {
     counts: Record<CollectionName, CollectionCounts>;
     totals: CollectionCounts;
     items: MergeItem[];
-    signature: string;
+    /** Registros do backup que não serão restaurados na mesclagem (conflitos + ignorados). */
+    notRestored: number;
+    /** Erros de integridade que a mesclagem criaria no resultado (bloqueiam a mesclagem). */
+    newErrors: IntegrityIssue[];
   };
+  /**
+   * Impressão digital dos dados locais no momento da prévia. A restauração a confere
+   * dentro da própria transação e é cancelada se qualquer registro local tiver mudado.
+   */
+  localFingerprint: string;
+}
+
+/** Confirmação dada pelo usuário sobre uma prévia específica. */
+export interface RestoreConfirmation {
+  /** `localFingerprint` da prévia exibida. */
+  expectedLocalFingerprint?: string;
+  /** Obrigatório quando parte do backup não será restaurada (conflitos ou ignorados). */
+  acceptPartial?: boolean;
+}
+
+export const STALE_PREVIEW_MESSAGE = 'Os dados deste aparelho mudaram desde a prévia. Nada foi gravado; abra o backup novamente para ver a prévia atualizada.';
+
+function assertFresh(local: BackupData, opts: RestoreConfirmation) {
+  if (opts.expectedLocalFingerprint !== undefined && snapshotFingerprint(local) !== opts.expectedLocalFingerprint) throw new BackupRestoreError(STALE_PREVIEW_MESSAGE);
+}
+
+/** Erros de integridade presentes no resultado da mesclagem e ausentes nos dados locais. */
+function newMergeErrors(local: BackupData, merged: BackupData): IntegrityIssue[] {
+  const key = (i: IntegrityIssue) => `${i.code}|${i.collection}|${i.id ?? ''}`;
+  const before = new Set(checkIntegrity(local).issues.filter((i) => i.severity === 'error').map(key));
+  return checkIntegrity(merged).issues.filter((i) => i.severity === 'error' && !before.has(key(i)));
 }
 
 const countOf = (d: BackupData): Record<CollectionName, number> => ({
@@ -270,7 +301,8 @@ export async function previewRestore(b: BackupFile): Promise<RestorePreview> {
     blocked: !integrity.ok,
     incoming: countOf(b.data),
     local: countOf(local),
-    merge: { counts: plan.counts, totals: plan.totals, items: plan.items, signature: planSignature(plan) },
+    merge: { counts: plan.counts, totals: plan.totals, items: plan.items, notRestored: plan.notRestored, newErrors: integrity.ok ? newMergeErrors(local, applyPlan(local, plan)) : [] },
+    localFingerprint: snapshotFingerprint(local),
   };
 }
 
@@ -289,10 +321,12 @@ function assertRestorable(b: BackupFile) {
  * Substitui todos os dados locais pelo backup. Valida antes de gravar e roda numa
  * única transação: qualquer falha desfaz tudo e os dados anteriores ficam intactos.
  */
-export async function restoreBackupReplace(b: BackupFile): Promise<ImportSummary> {
+export async function restoreBackupReplace(b: BackupFile, opts: RestoreConfirmation = {}): Promise<ImportSummary> {
   assertRestorable(b);
   const d = b.data;
   await db.transaction('rw', ALL_TABLES(), async () => {
+    // Não apagar dados que o usuário não viu na prévia (ex.: treino concluído em outra aba).
+    assertFresh(await readSnapshot(), opts);
     await Promise.all(ALL_TABLES().map((t) => t.clear()));
     if (d.settings) await db.settings.put(mergeSettings(d.settings));
     // bulkPut: cópias idênticas repetidas no arquivo (aviso DUPLICATE_ID_IDENTICAL) viram um registro;
@@ -304,21 +338,34 @@ export async function restoreBackupReplace(b: BackupFile): Promise<ImportSummary
     await db.bodyEntries.bulkPut(d.bodyEntries);
     await db.photos.bulkPut(d.photos);
   });
-  return { routines: d.routines.length, sessions: d.sessions.length, bodyEntries: d.bodyEntries.length, photos: d.photos.length, skipped: 0, duplicates: 0, conflicts: 0 };
+  return { routines: d.routines.length, sessions: d.sessions.length, bodyEntries: d.bodyEntries.length, photos: d.photos.length, skipped: 0, duplicates: 0, conflicts: 0, notRestored: 0 };
 }
 
 /**
- * Mescla o backup com os dados atuais (política em src/lib/merge.ts).
- * O plano é refeito dentro da transação; se `expectedSignature` (da prévia) não
- * conferir, nada é gravado. Só insere: nunca sobrescreve um registro existente.
+ * Mescla o backup com os dados atuais (política em src/lib/merge.ts). Dentro da transação:
+ * 1. confere a impressão digital dos dados locais da prévia (qualquer mudança cancela);
+ * 2. refaz o plano; se parte do backup não será restaurada, exige `acceptPartial`;
+ * 3. confere que o resultado não cria erros de integridade (referências);
+ * 4. só insere: nunca sobrescreve um registro existente.
+ * Qualquer falha desfaz tudo.
  */
-export async function restoreBackupMerge(b: BackupFile, opts: { expectedSignature?: string } = {}): Promise<ImportSummary> {
+export async function restoreBackupMerge(b: BackupFile, opts: RestoreConfirmation = {}): Promise<ImportSummary> {
   assertRestorable(b);
   return db.transaction('rw', ALL_TABLES(), async () => {
     const local = await readSnapshot();
+    assertFresh(local, opts);
     const plan = planMerge(local, b.data);
-    if (opts.expectedSignature !== undefined && planSignature(plan) !== opts.expectedSignature)
-      throw new BackupRestoreError('Os dados deste aparelho mudaram desde a prévia. Nada foi gravado; abra o backup novamente para ver a prévia atualizada.');
+    if (plan.notRestored > 0 && !opts.acceptPartial)
+      throw new BackupRestoreError(
+        `${plan.notRestored} registro(s) do backup não serão restaurados (conflitos ou ignorados). Confirme explicitamente para continuar. Nada foi gravado.`,
+        plan.items.filter((i) => i.kind === 'conflict' || i.kind === 'kept-local' || i.kind === 'skipped').slice(0, 12).map((i) => `${i.collection} (${i.id}): ${i.message}`),
+      );
+    const broken = newMergeErrors(local, applyPlan(local, plan));
+    if (broken.length)
+      throw new BackupRestoreError(
+        'A mesclagem deixaria referências inconsistentes e foi cancelada. Nada foi gravado.',
+        broken.slice(0, 12).map((i) => `${i.collection}${i.id ? ` (${i.id})` : ''}: ${i.message}`),
+      );
     const a = plan.toAdd;
     if (a.settings) await db.settings.add(mergeSettings(a.settings));
     await db.routines.bulkAdd(a.routines);
@@ -336,6 +383,7 @@ export async function restoreBackupMerge(b: BackupFile, opts: { expectedSignatur
       skipped: t.duplicate + t.conflict + t.skipped,
       duplicates: t.duplicate,
       conflicts: t.conflict,
+      notRestored: plan.notRestored,
     };
   });
 }

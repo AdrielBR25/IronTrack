@@ -88,8 +88,18 @@ Casos especiais:
 - **Rotação e calendário:** se já existe estado local para a mesma rotina/data, o local é mantido.
   Se a rotina do backup foi reconhecida como idêntica a uma local (outro ID), o ponteiro e as substituições
   são associados à rotina local.
-- **Concorrência:** o plano é refeito dentro da transação. Se os dados locais mudaram desde a prévia,
-  a mesclagem é cancelada sem gravar nada e o usuário é orientado a abrir o backup de novo.
+- **Rotina em conflito:** o ponteiro de rotação e as substituições de calendário do backup para essa rotina
+  não são aplicados (referem-se à versão do backup, que não foi aplicada). Os treinos históricos dela são mantidos.
+- **Confirmação explícita:** quando parte do backup não será restaurada (conflitos ou ignorados), a prévia lista
+  o que será mantido deste aparelho, o que não será restaurado e o que será adicionado com aviso, e o botão
+  "Mesclar" só é liberado após marcar "Entendo e quero mesclar mesmo assim". A API exige `acceptPartial: true`.
+  Depois da mesclagem, um aviso informa quantos registros do backup não foram restaurados.
+- **Referências:** antes de gravar, a integridade do resultado (dados locais + inserções) é verificada;
+  se a mesclagem criaria qualquer erro novo, ela é cancelada sem gravar nada.
+- **Prévia desatualizada:** a prévia guarda uma impressão digital determinística do conteúdo local
+  (`snapshotFingerprint`: hash de cada registro, independente de ordem). Dentro da transação de restauração
+  (mesclar ou substituir), o retrato local é lido de novo e comparado. Qualquer mudança, mesmo uma nota editada
+  sem alterar a quantidade de registros, cancela a operação sem gravar nada e pede uma nova prévia.
 
 A prévia mostra: quantidade a adicionar, duplicatas confirmadas, conflitos, ignorados (com motivo),
 avisos de integridade e o efeito da substituição.

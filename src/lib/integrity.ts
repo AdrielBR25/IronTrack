@@ -284,3 +284,38 @@ export function checkIntegrity(d: DataSnapshot): IntegrityReport {
   for (const i of issues) counts[i.severity]++;
   return { ok: counts.error === 0, issues, counts };
 }
+
+// ---------- Impressão digital dos dados ----------
+
+/** Hash síncrono de 64 bits (dois FNV-1a de 32 bits com sementes diferentes), em hexadecimal. */
+function hash64(s: string): string {
+  let a = 0x811c9dc5;
+  let b = 0x01000193 ^ 0x9e3779b9;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    a = Math.imul(a ^ c, 0x01000193);
+    b = Math.imul(b ^ c, 0x01000193) ^ (b >>> 15);
+  }
+  return (a >>> 0).toString(16).padStart(8, '0') + (b >>> 0).toString(16).padStart(8, '0');
+}
+
+/**
+ * Impressão digital determinística do conteúdo de um retrato dos dados: muda se qualquer
+ * campo de qualquer registro mudar, mesmo sem mudar a quantidade de registros.
+ * É síncrona para poder rodar dentro de uma transação do IndexedDB (que não aceita
+ * aguardar promessas externas, como crypto.subtle).
+ */
+export function snapshotFingerprint(d: DataSnapshot): string {
+  const parts: string[] = [`settings=${d.settings ? hash64(stableStringify(d.settings)) : '-'}`];
+  for (const c of ['routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos'] as const) {
+    const list = (d[c] ?? []) as unknown[];
+    const entries = list
+      .map((r) => {
+        const body = stableStringify(r);
+        return `${recordKey(c, r)}:${body.length}:${hash64(body)}`;
+      })
+      .sort();
+    parts.push(`${c}=${list.length}:${hash64(entries.join('\n'))}`);
+  }
+  return parts.join(';');
+}

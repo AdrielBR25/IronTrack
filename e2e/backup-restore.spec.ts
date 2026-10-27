@@ -88,6 +88,43 @@ test('backup: prévia, cancelar, mesclar, substituir, recarregar', async ({ page
   await expect(page.locator('main')).toContainText(/Treino\s*B|Próximo: Treino B/);
 });
 
+test('backup: conflitos exigem confirmação explícita e são informados', async ({ page }, info) => {
+  await freshStart(page);
+  await loadSample(page);
+  await finishOneWorkout(page);
+  const backup = await exportBackup(page, info.outputPath('backup.json'));
+
+  // Mesmo ID, conteúdo diferente (editado em "outro aparelho") + um treino novo
+  const conflicted = structuredClone(backup);
+  conflicted.data.sessions[0].notes = 'versão do outro aparelho';
+  conflicted.data.sessions.push({ ...backup.data.sessions[0], id: 'e2e-novo', startedAt: backup.data.sessions[0].startedAt - 86_400_000 });
+  await chooseBackup(page, conflicted);
+  await expect(page.getByTestId('merge-summary')).toContainText('1 conflitos');
+  await expect(page.getByTestId('merge-kept')).toContainText('mantido');
+  await expect(page.getByTestId('merge-partial-warning')).toContainText('1 registro(s) do backup não serão restaurados');
+  const merge = page.getByTestId('backup-merge');
+  await expect(merge).toBeDisabled();
+  const dlg = page.getByTestId('restore-preview');
+  expect(await dlg.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  await page.screenshot({ path: info.outputPath('conflitos.png') });
+
+  // Cancelar mantém tudo como estava
+  await page.getByTestId('backup-cancel').click();
+  expect(await historyCount(page)).toBe(1);
+
+  // Confirmar explicitamente e mesclar
+  await chooseBackup(page, conflicted);
+  await expect(page.getByTestId('backup-merge')).toBeDisabled();
+  await page.getByTestId('accept-partial').check();
+  await expect(page.getByTestId('backup-merge')).toBeEnabled();
+  await page.getByTestId('backup-merge').click();
+  await expect(page.getByText('Backup mesclado parcialmente')).toBeVisible();
+  await expect(page.getByText(/1 registro\(s\) do backup não foram restaurados/)).toBeVisible();
+  expect(await historyCount(page)).toBe(2);
+  await page.reload();
+  await expect(page.getByTestId('history-item')).toHaveCount(2);
+});
+
 test('backup: arquivos incompatíveis ou inconsistentes são rejeitados sem alterar dados', async ({ page }) => {
   await freshStart(page);
   await loadSample(page);

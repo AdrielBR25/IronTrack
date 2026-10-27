@@ -14,6 +14,7 @@ import {
   type BackupFile,
 } from '@/lib/backup';
 import { planMerge } from '@/lib/merge';
+import { checkIntegrity, snapshotFingerprint } from '@/lib/integrity';
 import type { DataSnapshot } from '@/lib/types';
 import { backupOf, entry, photo, rotation, routine, session, settings, snapshot } from './fixtures';
 
@@ -181,7 +182,7 @@ describe('restauração por mesclagem', () => {
     expect(plan.items.filter((i) => i.code === 'ID_CONFLICT').map((i) => i.id)).toEqual(['s1', 'b1']);
     // a foto da avaliação em conflito não é ligada à avaliação errada
     expect(plan.items.find((i) => i.code === 'PHOTO_ENTRY_CONFLICT')).toBeUndefined(); // p1 idêntica já existe
-    const sum = await restoreBackupMerge(parse(backupOf(inc)));
+    const sum = await restoreBackupMerge(parse(backupOf(inc)), { acceptPartial: true });
     expect(sum.conflicts).toBe(2);
     expect((await db.sessions.get('s1'))?.notes).toBeUndefined();
     expect((await db.bodyEntries.get('b1'))?.weightKg).toBe(80);
@@ -245,14 +246,14 @@ describe('restauração por mesclagem', () => {
     const plan = planMerge(await readSnapshot(), inc);
     expect(plan.items.find((i) => i.code === 'PHOTO_ENTRY_CONFLICT')?.id).toBe('nova');
     expect(plan.items.find((i) => i.code === 'PHOTO_ORPHAN')?.id).toBe('orfa');
-    await restoreBackupMerge(parse(backupOf(inc)));
+    await restoreBackupMerge(parse(backupOf(inc)), { acceptPartial: true });
     expect(await db.photos.get('nova')).toBeUndefined();
     expect((await db.photos.get('orfa'))?.entryId).toBe('sumiu');
   });
 
   it('treino em andamento do backup não substitui o treino em andamento local', async () => {
     await seedDb(snapshot({ sessions: [session('ativo-local', { status: 'active' })] }));
-    const sum = await restoreBackupMerge(parse(backupOf(snapshot({ sessions: [session('ativo-backup', { status: 'active', startedAt: 1_800_000_000_000 })] }))));
+    const sum = await restoreBackupMerge(parse(backupOf(snapshot({ sessions: [session('ativo-backup', { status: 'active', startedAt: 1_800_000_000_000 })] }))), { acceptPartial: true });
     expect(sum.sessions).toBe(0);
     expect(await db.sessions.where('status').equals('active').count()).toBe(1);
     expect((await db.sessions.where('status').equals('active').first())?.id).toBe('ativo-local');
@@ -260,14 +261,14 @@ describe('restauração por mesclagem', () => {
 
   it('configurações locais são mantidas; aplicadas só quando não existem', async () => {
     await seedDb(snapshot({ settings: settings({ weightStep: 5 }) }));
-    await restoreBackupMerge(parse(backupOf(snapshot({ settings: settings({ weightStep: 1 }) }))));
+    await restoreBackupMerge(parse(backupOf(snapshot({ settings: settings({ weightStep: 1 }) }))), { acceptPartial: true });
     expect((await db.settings.get('settings'))?.weightStep).toBe(5);
     await db.settings.clear();
     await restoreBackupMerge(parse(backupOf(snapshot({ settings: settings({ weightStep: 1 }) }))));
     expect((await db.settings.get('settings'))?.weightStep).toBe(1);
   });
 
-  it('prévia não grava nada e a assinatura detecta mudanças antes de confirmar', async () => {
+  it('prévia não grava nada; nova prévia após mudança permite confirmar', async () => {
     await seedDb(snapshot({ sessions: [] }));
     const before = await readSnapshot();
     const b = parse(backupOf(snapshot()));
@@ -276,10 +277,10 @@ describe('restauração por mesclagem', () => {
     expect(p.merge.counts.sessions.add).toBe(2);
     expect(await readSnapshot()).toEqual(before);
     await db.sessions.put(session('s1'));
-    await expect(restoreBackupMerge(b, { expectedSignature: p.merge.signature })).rejects.toThrow(/mudaram desde a prévia/);
+    await expect(restoreBackupMerge(b, { expectedLocalFingerprint: p.localFingerprint })).rejects.toThrow(/mudaram desde a prévia/);
     expect(await db.sessions.count()).toBe(1);
     const p2 = await previewRestore(b);
-    const sum = await restoreBackupMerge(b, { expectedSignature: p2.merge.signature });
+    const sum = await restoreBackupMerge(b, { expectedLocalFingerprint: p2.localFingerprint });
     expect(sum.sessions).toBe(1);
   });
 
@@ -316,5 +317,155 @@ describe('diagnóstico local', () => {
     const r = await checkLocalIntegrity();
     expect(r.ok).toBe(true);
     expect(r.issues.map((i) => i.code)).toEqual(['PHOTO_ORPHAN']);
+  });
+});
+
+describe('revisão corretiva: conflitos e prévia', () => {
+  it('impressão digital muda com qualquer alteração de conteúdo, mesmo sem mudar contagens', () => {
+    const base = snapshot();
+    const fp = snapshotFingerprint(base);
+    expect(snapshotFingerprint(snapshot())).toBe(fp);
+    // ordem dos registros e das chaves não importa
+    expect(snapshotFingerprint({ ...base, sessions: [...base.sessions].reverse() })).toBe(fp);
+    const variants: DataSnapshot[] = [
+      { ...base, sessions: [{ ...base.sessions[0], notes: 'x' }, base.sessions[1]] },
+      { ...base, photos: [{ ...base.photos[0], dataUrl: base.photos[0].dataUrl + 'A' }, base.photos[1]] },
+      { ...base, rotations: [{ ...base.rotations[0], nextIndex: 2 }] },
+      { ...base, settings: { ...base.settings!, weightStep: 5 } },
+      { ...base, bodyEntries: [{ ...base.bodyEntries[0], weightKg: 80.1 }, base.bodyEntries[1]] },
+    ];
+    for (const v of variants) expect(snapshotFingerprint(v)).not.toBe(fp);
+  });
+
+  it('alteração local com a mesma quantidade de registros cancela a mesclagem, dentro da transação', async () => {
+    await seedDb(snapshot({ sessions: [session('so-local', { startedAt: 1_600_000_000_000 })] }));
+    const b = parse(backupOf(snapshot()));
+    const p = await previewRestore(b);
+    const before = await readSnapshot();
+    // edição de nota: mesma contagem, mesmo plano (a assinatura antiga não detectava)
+    await db.sessions.update('so-local', { notes: 'editado após a prévia' });
+    const changed = await readSnapshot();
+    expect(planMerge(changed, b.data).totals).toEqual(planMerge(before, b.data).totals);
+    await expect(restoreBackupMerge(b, { expectedLocalFingerprint: p.localFingerprint })).rejects.toThrow(/mudaram desde a prévia/);
+    expect(await readSnapshot()).toEqual(changed);
+  });
+
+  it('alteração local após a prévia também cancela a substituição', async () => {
+    await seedDb(snapshot());
+    const b = parse(backupOf(snapshot({ sessions: [] })));
+    const p = await previewRestore(b);
+    await db.sessions.update('s1', { notes: 'concluído em outra aba' });
+    const changed = await readSnapshot();
+    await expect(restoreBackupReplace(b, { expectedLocalFingerprint: p.localFingerprint })).rejects.toThrow(/mudaram desde a prévia/);
+    expect(await readSnapshot()).toEqual(changed);
+    const ok = await restoreBackupReplace(b, { expectedLocalFingerprint: (await previewRestore(b)).localFingerprint });
+    expect(ok.sessions).toBe(0);
+  });
+
+  it('a conferência acontece dentro da transação de escrita', async () => {
+    await seedDb(snapshot({ sessions: [] }));
+    const b = parse(backupOf(snapshot()));
+    const p = await previewRestore(b);
+    const spy = vi.spyOn(db, 'transaction');
+    await restoreBackupMerge(b, { expectedLocalFingerprint: p.localFingerprint });
+    // uma única transação rw (a leitura do retrato é subtransação dela)
+    expect(spy.mock.calls[0][0]).toBe('rw');
+    expect(spy.mock.calls.filter((c) => c[0] === 'rw')).toHaveLength(1);
+  });
+
+  it('conflito de ID exige confirmação explícita; sem ela nada é gravado', async () => {
+    await seedDb(snapshot({ sessions: [], photos: [] }));
+    const inc = snapshot();
+    inc.bodyEntries[0] = { ...inc.bodyEntries[0], weightKg: 70 };
+    const b = parse(backupOf(inc));
+    const p = await previewRestore(b);
+    expect(p.merge.notRestored).toBe(2); // avaliação em conflito + foto dela
+    const before = await readSnapshot();
+    const err = await restoreBackupMerge(b, { expectedLocalFingerprint: p.localFingerprint }).catch((e) => e);
+    expect(err).toBeInstanceOf(BackupRestoreError);
+    expect(err.message).toMatch(/2 registro\(s\) do backup não serão restaurados/);
+    expect(err.details.join()).toMatch(/b1/);
+    expect(await readSnapshot()).toEqual(before);
+    const sum = await restoreBackupMerge(b, { expectedLocalFingerprint: p.localFingerprint, acceptPartial: true });
+    expect(sum).toMatchObject({ sessions: 2, photos: 1, conflicts: 1, notRestored: 2 });
+    expect(await db.photos.get('p1')).toBeUndefined();
+    expect((await db.bodyEntries.get('b1'))?.weightKg).toBe(80);
+  });
+
+  it('registros ignorados são informados com motivo e contados como não restaurados', async () => {
+    await seedDb(snapshot({ sessions: [session('ativo', { status: 'active' })], settings: settings({ weightStep: 5 }) }));
+    const inc = snapshot({ sessions: [session('ativo-2', { status: 'active', startedAt: 1_800_000_000_000 })], settings: settings({ weightStep: 1 }) });
+    const plan = planMerge(await readSnapshot(), inc);
+    expect(plan.items.filter((i) => i.kind === 'skipped').map((i) => i.code)).toEqual(['ACTIVE_SESSION_CONFLICT']);
+    expect(plan.items.find((i) => i.code === 'SETTINGS_KEPT')?.kind).toBe('kept-local');
+    expect(plan.notRestored).toBe(2);
+    const sum = await restoreBackupMerge(parse(backupOf(inc)), { acceptPartial: true });
+    expect(sum.notRestored).toBe(2);
+    expect(await db.sessions.get('ativo-2')).toBeUndefined();
+  });
+
+  it('rotina em conflito: rotação e agenda do backup não são aplicadas à versão local', async () => {
+    await seedDb(snapshot({ rotations: [], overrides: [] }));
+    const r = routine();
+    const changed = { ...r, workouts: [r.workouts[0]] }; // backup tem só o treino A
+    const inc = snapshot({ routines: [changed], rotations: [rotation('r1', 0)], overrides: [{ routineId: 'r1', date: '2026-04-01', kind: 'workout', workoutId: 'r1-A' }] });
+    const plan = planMerge(await readSnapshot(), inc);
+    expect(plan.counts.routines.conflict).toBe(1);
+    expect(plan.items.filter((i) => i.code === 'ROUTINE_CONFLICT_DEPENDENT').map((i) => i.collection)).toEqual(['rotations', 'overrides']);
+    await restoreBackupMerge(parse(backupOf(inc)), { acceptPartial: true });
+    expect((await db.routines.get('r1'))?.workouts).toHaveLength(3);
+    expect(await db.rotations.get('r1')).toBeUndefined();
+    expect(await db.overrides.count()).toBe(0);
+  });
+
+  it('integridade das referências após mesclar: nenhuma foto, rotação ou agenda órfã nova', async () => {
+    await seedDb(snapshot({ photos: [] }));
+    const r2 = routine('r2');
+    const inc = snapshot({
+      routines: [{ ...routine(), workouts: [] }, r2], // r1 em conflito, r2 nova
+      rotations: [rotation('r1', 0), rotation('r2', 2)],
+      overrides: [{ routineId: 'r2', date: '2026-05-01', kind: 'workout', workoutId: 'r2-B' }],
+      bodyEntries: [{ ...entry('b1'), weightKg: 1 }, { ...snapshot().bodyEntries[1], id: 'b2-copia', createdAt: 9 }, entry('b3', { date: '2026-03-10' })],
+      photos: [photo('f1', 'b1'), photo('f2', 'b2-copia'), photo('f3', 'b3')],
+    });
+    const before = checkIntegrity(await readSnapshot());
+    await restoreBackupMerge(parse(backupOf(inc)), { acceptPartial: true });
+    const after = await readSnapshot();
+    const report = checkIntegrity(after);
+    expect(report.ok).toBe(true);
+    expect(report.issues.filter((i) => i.severity === 'warning')).toEqual(before.issues.filter((i) => i.severity === 'warning'));
+    expect((await db.photos.get('f2'))?.entryId).toBe('b2');
+    expect(await db.photos.get('f1')).toBeUndefined();
+    expect((await db.photos.get('f3'))?.entryId).toBe('b3');
+    expect((await db.rotations.get('r2'))?.nextIndex).toBe(2);
+  });
+
+  it('dados históricos locais preservados: nenhuma sessão ou avaliação local é alterada', async () => {
+    const local = snapshot();
+    await seedDb(local);
+    const inc = snapshot({ sessions: local.sessions.map((s) => ({ ...s, notes: 'versão do backup' })), bodyEntries: [], photos: [] });
+    await restoreBackupMerge(parse(backupOf(inc)), { acceptPartial: true });
+    const after = await readSnapshot();
+    expect(sorted(after).sessions).toEqual(sorted(local).sessions);
+    expect(sorted(after).bodyEntries).toEqual(sorted(local).bodyEntries);
+  });
+
+  it('cancelar após a prévia (não confirmar) não altera nada', async () => {
+    await seedDb(snapshot());
+    const before = await readSnapshot();
+    const p = await previewRestore(parse(backupOf(snapshot({ sessions: [session('nova')] }))));
+    expect(p.merge.totals.add).toBe(1);
+    expect(await readSnapshot()).toEqual(before);
+  });
+
+  it('rollback: falha depois de parte das inserções desfaz a mesclagem confirmada', async () => {
+    await seedDb(snapshot({ sessions: [], photos: [] }));
+    const b = parse(backupOf(snapshot()));
+    const p = await previewRestore(b);
+    const before = await readSnapshot();
+    vi.spyOn(db.bodyEntries, 'bulkAdd').mockRejectedValueOnce(new Error('falha simulada'));
+    await expect(restoreBackupMerge(b, { expectedLocalFingerprint: p.localFingerprint, acceptPartial: true })).rejects.toThrow(/falha simulada/);
+    expect(await readSnapshot()).toEqual(before);
+    expect(snapshotFingerprint(await readSnapshot())).toBe(p.localFingerprint);
   });
 });

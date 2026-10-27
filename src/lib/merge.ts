@@ -34,6 +34,8 @@ export interface MergePlan {
   counts: Record<CollectionName, CollectionCounts>;
   items: MergeItem[];
   totals: CollectionCounts;
+  /** Registros do backup que NÃO serão restaurados (conflitos + ignorados). Exige confirmação explícita. */
+  notRestored: number;
 }
 
 const COLLECTIONS: CollectionName[] = ['settings', 'routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos'];
@@ -83,13 +85,16 @@ export function planMerge(local: DataSnapshot, incoming: DataSnapshot): MergePla
 
   // ---- Rotinas ----
   const routineRemap = new Map<string, string>();
+  const conflictedRoutines = new Set<string>();
   {
     const localByKey = index('routines', local.routines);
     const localByContent = new Map(local.routines.map((r) => [contentOf.routines(r), r.id]));
     const localNames = new Set(local.routines.map((r) => r.name));
     const seen = new Set<string>();
     for (const r of incoming.routines) {
-      if (byKey('routines', r, localByKey, seen) !== 'new') continue;
+      const k = byKey('routines', r, localByKey, seen);
+      if (k === 'conflict') conflictedRoutines.add(r.id);
+      if (k !== 'new') continue;
       const same = localByContent.get(contentOf.routines(r));
       if (same) {
         routineRemap.set(r.id, same);
@@ -210,6 +215,12 @@ export function planMerge(local: DataSnapshot, incoming: DataSnapshot): MergePla
       }
       seen.add(key);
       const l = localByKey.get(key);
+      if (!l && conflictedRoutines.has(x.routineId)) {
+        // O índice/treino do backup se refere à versão da rotina que NÃO foi aplicada.
+        counts[c].skipped++;
+        note('skipped', 'ROUTINE_CONFLICT_DEPENDENT', c, key, c === 'rotations' ? 'Ponteiro de rotação de uma rotina em conflito: não aplicado, pois se refere à versão do backup.' : 'Substituição de calendário de uma rotina em conflito: não aplicada, pois se refere à versão do backup.');
+        continue;
+      }
       if (!l) {
         out.push(x);
         counts[c].add++;
@@ -240,10 +251,19 @@ export function planMerge(local: DataSnapshot, incoming: DataSnapshot): MergePla
 
   const totals = { add: 0, duplicate: 0, conflict: 0, skipped: 0 };
   for (const c of COLLECTIONS) for (const k of Object.keys(totals) as (keyof CollectionCounts)[]) totals[k] += counts[c][k];
-  return { toAdd, counts, items, totals };
+  return { toAdd, counts, items, totals, notRestored: totals.conflict + totals.skipped };
 }
 
-/** Assinatura do plano: detecta se os dados mudaram entre a prévia e a confirmação. */
-export function planSignature(p: MergePlan): string {
-  return stableStringify({ counts: p.counts, items: p.items.map((i) => [i.code, i.collection, i.id]) });
+/** Junta os dados locais com o que o plano vai inserir (para verificar a integridade do resultado). */
+export function applyPlan(local: DataSnapshot, plan: MergePlan): DataSnapshot {
+  const a = plan.toAdd;
+  return {
+    settings: local.settings ?? a.settings,
+    routines: [...local.routines, ...a.routines],
+    sessions: [...local.sessions, ...a.sessions],
+    rotations: [...local.rotations, ...a.rotations],
+    overrides: [...local.overrides, ...a.overrides],
+    bodyEntries: [...local.bodyEntries, ...a.bodyEntries],
+    photos: [...local.photos, ...a.photos],
+  };
 }

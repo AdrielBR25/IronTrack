@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/ui/confirm';
-import { BackupRestoreError, restoreBackupMerge, restoreBackupReplace, type BackupFile, type RestorePreview } from '@/lib/backup';
+import { BackupRestoreError, STALE_PREVIEW_MESSAGE, restoreBackupMerge, restoreBackupReplace, type BackupFile, type RestorePreview } from '@/lib/backup';
+import type { CollectionCounts, MergeItem } from '@/lib/merge';
 import type { IntegrityIssue } from '@/lib/integrity';
 import type { CollectionName } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -38,6 +39,57 @@ export function IssueList({ issues, testId }: { issues: IntegrityIssue[]; testId
   );
 }
 
+function MergeTable({ counts }: { counts: Record<CollectionName, CollectionCounts> }) {
+  const rows = (Object.keys(COLLECTION_LABEL) as CollectionName[]).filter((c) => {
+    const x = counts[c];
+    return x.add + x.duplicate + x.conflict + x.skipped > 0;
+  });
+  if (!rows.length) return null;
+  return (
+    <table className="w-full table-fixed text-xs" data-testid="merge-table">
+      <thead className="text-muted-foreground">
+        <tr>
+          <th className="text-left font-medium">Tipo</th>
+          <th className="font-medium">Adicionar</th>
+          <th className="font-medium">Duplic.</th>
+          <th className="font-medium">Conflito</th>
+          <th className="font-medium">Ignorar</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((c) => (
+          <tr key={c} className="text-center tabular-nums">
+            <td className="truncate text-left">{COLLECTION_LABEL[c]}</td>
+            <td>{counts[c].add}</td>
+            <td>{counts[c].duplicate}</td>
+            <td className={counts[c].conflict ? 'font-semibold text-warn' : ''}>{counts[c].conflict}</td>
+            <td className={counts[c].skipped ? 'font-semibold text-warn' : ''}>{counts[c].skipped}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function ItemGroup({ title, items, tone, testId }: { title: string; items: MergeItem[]; tone?: 'warn'; testId: string }) {
+  if (!items.length) return null;
+  return (
+    <details data-testid={testId} open={tone === 'warn' && items.length <= 5}>
+      <summary className={cn('cursor-pointer text-xs font-semibold', tone === 'warn' ? 'text-warn' : 'text-primary')}>
+        {title} ({items.length})
+      </summary>
+      <ul className="mt-1.5 max-h-40 space-y-1.5 overflow-y-auto text-xs">
+        {items.slice(0, 100).map((i, k) => (
+          <li key={k} className="break-words rounded-lg bg-muted/50 px-2.5 py-1.5">
+            {COLLECTION_LABEL[i.collection]} · {i.message}
+          </li>
+        ))}
+        {items.length > 100 && <li className="text-muted-foreground">… e mais {items.length - 100}.</li>}
+      </ul>
+    </details>
+  );
+}
+
 function errorText(e: unknown): { title: string; description: string } {
   if (e instanceof BackupRestoreError) return { title: e.message, description: e.details.join('\n') };
   return { title: 'A restauração falhou. Nenhum dado foi alterado.', description: e instanceof Error ? e.message : String(e) };
@@ -48,10 +100,20 @@ export function RestorePreviewDialog({ backup, preview, onClose }: { backup: Bac
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [busy, setBusy] = useState(false);
   const p = preview;
+  // Nova prévia = nova confirmação.
+  useEffect(() => setAcceptPartial(false), [preview]);
   const open = !!backup && !!p;
   const warnings = p ? p.integrity.issues.filter((i) => i.severity !== 'error') : [];
   const errors = p ? p.integrity.issues.filter((i) => i.severity === 'error') : [];
   const t = p?.merge.totals;
+  const [acceptPartial, setAcceptPartial] = useState(false);
+  const partial = !!p && p.merge.notRestored > 0;
+  const mergeBlocked = !!p && p.merge.newErrors.length > 0;
+  const items = p?.merge.items ?? [];
+  const kept = items.filter((i) => i.kind === 'conflict' || i.kind === 'kept-local');
+  const skipped = items.filter((i) => i.kind === 'skipped');
+  const addedWithWarning = items.filter((i) => i.kind === 'similar' || i.kind === 'orphan');
+  const dedup = items.filter((i) => i.kind === 'duplicate-content');
   const incomingTotal = p ? Object.values(p.incoming).reduce((a, b) => a + b, 0) : 0;
   const localTotal = p ? Object.values(p.local).reduce((a, b) => a + b, 0) : 0;
 
@@ -76,25 +138,34 @@ export function RestorePreviewDialog({ backup, preview, onClose }: { backup: Bac
             p &&
             t && (
               <div className="space-y-3 text-sm">
-                <div className="rounded-xl border p-3" data-testid="merge-summary">
+                <div className="space-y-2 rounded-xl border p-3" data-testid="merge-summary">
                   <p className="font-semibold">Mesclar com os dados atuais</p>
                   <p className="text-muted-foreground">
                     <strong className="text-foreground">{t.add}</strong> a adicionar · <strong className="text-foreground">{t.duplicate}</strong> duplicatas confirmadas ·{' '}
-                    <strong className={t.conflict ? 'text-warn' : 'text-foreground'}>{t.conflict}</strong> conflitos · <strong className="text-foreground">{t.skipped}</strong> ignorados
+                    <strong className={t.conflict ? 'text-warn' : 'text-foreground'}>{t.conflict}</strong> conflitos ·{' '}
+                    <strong className={t.skipped ? 'text-warn' : 'text-foreground'}>{t.skipped}</strong> ignorados
                   </p>
-                  {p.merge.items.length > 0 && (
-                    <details className="mt-2">
-                      <summary className="cursor-pointer text-xs font-semibold text-primary">Ver detalhes ({p.merge.items.length})</summary>
-                      <ul className="mt-2 max-h-48 space-y-1.5 overflow-y-auto text-xs" data-testid="merge-items">
-                        {p.merge.items.slice(0, 100).map((i, k) => (
-                          <li key={k} className="rounded-lg bg-muted/50 px-2.5 py-1.5">
-                            {COLLECTION_LABEL[i.collection]} · {i.message}
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
+                  <MergeTable counts={p.merge.counts} />
+                  <ItemGroup testId="merge-kept" title="Mantidos como estão neste aparelho (conflitos)" items={kept} tone="warn" />
+                  <ItemGroup testId="merge-skipped" title="Não serão restaurados" items={skipped} tone="warn" />
+                  <ItemGroup testId="merge-added-warn" title="Serão adicionados, com aviso" items={addedWithWarning} />
+                  <ItemGroup testId="merge-dedup" title="Reconhecidos como duplicatas" items={dedup} />
+                  <p className="text-xs text-muted-foreground">Nada deste aparelho é sobrescrito ou apagado.</p>
+                  {mergeBlocked && (
+                    <div className="space-y-1" data-testid="merge-blocked">
+                      <p className="text-xs font-semibold text-destructive">A mesclagem deixaria referências inconsistentes e está indisponível. Use “Substituir” ou corrija o arquivo.</p>
+                      <IssueList issues={p.merge.newErrors} />
+                    </div>
                   )}
-                  <p className="mt-1 text-xs text-muted-foreground">Nada deste aparelho é sobrescrito ou apagado.</p>
+                  {partial && !mergeBlocked && (
+                    <label className="flex items-start gap-2 rounded-lg bg-warn/10 p-2.5 text-xs" data-testid="merge-partial-warning">
+                      <input type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 accent-current" checked={acceptPartial} onChange={(e) => setAcceptPartial(e.target.checked)} data-testid="accept-partial" />
+                      <span>
+                        <strong className="text-warn">{p.merge.notRestored} registro(s) do backup não serão restaurados</strong> ({t.conflict} em conflito, mantida a versão deste aparelho; {t.skipped} ignorados).
+                        Entendo e quero mesclar mesmo assim.
+                      </span>
+                    </label>
+                  )}
                 </div>
                 <div className="rounded-xl border p-3" data-testid="replace-summary">
                   <p className="font-semibold">Substituir todos os dados</p>
@@ -122,19 +193,25 @@ export function RestorePreviewDialog({ backup, preview, onClose }: { backup: Bac
                 <Button
                   size="lg"
                   data-testid="backup-merge"
-                  disabled={busy}
+                  disabled={busy || mergeBlocked || (partial && !acceptPartial)}
                   onClick={async () => {
                     if (!backup || !p) return;
                     setBusy(true);
                     try {
-                      const r = await restoreBackupMerge(backup, { expectedSignature: p.merge.signature });
-                      toast.success('Backup mesclado', {
-                        description: `+${r.sessions} treinos, +${r.routines} rotinas, +${r.bodyEntries} avaliações, +${r.photos} fotos · ${r.duplicates} duplicatas · ${r.conflicts} conflitos`,
-                      });
+                      const r = await restoreBackupMerge(backup, { expectedLocalFingerprint: p.localFingerprint, acceptPartial });
+                      const added = `+${r.sessions} treinos, +${r.routines} rotinas, +${r.bodyEntries} avaliações, +${r.photos} fotos · ${r.duplicates} duplicatas`;
+                      if (r.notRestored > 0)
+                        toast.warning('Backup mesclado parcialmente', {
+                          description: `${added}. ${r.notRestored} registro(s) do backup não foram restaurados (${r.conflicts} em conflito, mantida a versão deste aparelho).`,
+                          duration: 12000,
+                        });
+                      else toast.success('Backup mesclado', { description: added });
                       onClose();
                     } catch (e) {
                       const m = errorText(e);
                       toast.error(m.title, { description: m.description, duration: 10000 });
+                      // Prévia desatualizada: fecha para que o usuário gere uma nova.
+                      if (e instanceof BackupRestoreError && e.message === STALE_PREVIEW_MESSAGE) onClose();
                     } finally {
                       setBusy(false);
                     }
@@ -166,7 +243,7 @@ export function RestorePreviewDialog({ backup, preview, onClose }: { backup: Bac
         onConfirm={async () => {
           if (!backup) return;
           try {
-            const r = await restoreBackupReplace(backup);
+            const r = await restoreBackupReplace(backup, { expectedLocalFingerprint: preview?.localFingerprint });
             toast.success('Backup restaurado', { description: `${r.sessions} treinos, ${r.routines} rotinas, ${r.bodyEntries} avaliações` });
           } catch (e) {
             const m = errorText(e);
