@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Dumbbell, Ruler, Trophy } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ChevronRight, Dumbbell, LineChart, Ruler, Trophy } from 'lucide-react';
 import { PageHeader } from '@/components/AppLayout';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { NativeSelect } from '@/components/ui/input';
@@ -158,6 +159,20 @@ export default function ProgressPage() {
           </TabsTrigger>
         </TabsList>
         <TabsContent value="treino">
+          <Link
+            to="/evolucao/desempenho"
+            data-testid="open-analytics"
+            className="mb-4 flex items-center gap-3 rounded-2xl border border-primary/30 bg-primary/5 p-4 transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
+              <LineChart className="h-5 w-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block font-semibold">Análise de desempenho</span>
+              <span className="block text-sm text-muted-foreground">Frequência, volume, tendências, recordes e insights por período</span>
+            </span>
+            <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
+          </Link>
           <TrainingCharts />
         </TabsContent>
         <TabsContent value="corpo">

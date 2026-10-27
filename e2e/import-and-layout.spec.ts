@@ -40,7 +40,7 @@ test('sem rolagem horizontal em telas pequenas (inclusive com avisos na tela)', 
   await freshStart(page);
   await loadSample(page);
   expect(await overflowing(page)).toEqual({ out: [], scroll: 0 });
-  for (const path of ['#/', '#/treinos', '#/historico', '#/evolucao', '#/config']) {
+  for (const path of ['#/', '#/treinos', '#/historico', '#/evolucao', '#/evolucao/desempenho', '#/config']) {
     await page.goto(`./${path}`);
     await page.waitForTimeout(300);
     expect(await overflowing(page), `overflow em ${path}`).toEqual({ out: [], scroll: 0 });
