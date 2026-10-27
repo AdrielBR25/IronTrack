@@ -1,8 +1,8 @@
 # Arquitetura
 
-IronTrack 2.0 · Fase 01 · Prompt 03 (atualizado nos Prompts 04–07 com o módulo de IA e o gateway). Descreve a organização do
+IronTrack 2.0 · Fase 01 · Prompt 03 (atualizado nos Prompts 04–07 com o módulo de IA e o gateway e no Prompt 08 com o motor de análise de treinos). Descreve a organização do
 código depois da modularização incremental, as dependências permitidas e as que os testes bloqueiam. O
-módulo de IA tem documento próprio: [IA_ARQUITETURA.md](IA_ARQUITETURA.md). As regras automáticas estão em
+módulo de IA tem documento próprio: [IA_ARQUITETURA.md](IA_ARQUITETURA.md); o de análise de treinos, [ANALYTICS_TREINAMENTO.md](ANALYTICS_TREINAMENTO.md). As regras automáticas estão em
 `tests/unit/architecture.test.ts`; a compatibilidade dos imports antigos, em `tests/unit/api-compat.test.ts`.
 
 ## 1. Visão geral
@@ -31,6 +31,7 @@ flowchart TD
     training["training"]
     body["body"]
     ai["ai (contratos, consentimento, serviço, adaptadores simulado/gateway)"]
+    analytics["analytics (métricas, tendências, insights; só leitura)"]
   end
   shared["src/lib compartilhado (validation, dates, units, utils)"]
   safety["src/lib dados (profile, integrity, merge, backupFormat, types)"]
@@ -55,11 +56,15 @@ flowchart TD
   body --> shared
   safety --> shared
   ai --> shared
+  analytics --> training
+  analytics --> shared
+  pages --> analytics
   gateway["services/ai-gateway (opcional, separado; HTTPS + token)"]
   features -. "modo remoto, após autorização" .-> gateway
 ```
 
-`training` e `body` não se conhecem. Nenhum domínio importa React, Dexie, `src/db`, hooks ou telas. O módulo
+`training` e `body` não se conhecem. `analytics` (P08) é um modelo de leitura sobre o treinamento: usa só a
+API pública de `training` e é usado só pela tela de desempenho; ninguém do domínio, da IA ou do banco o importa. Nenhum domínio importa React, Dexie, `src/db`, hooks ou telas. O módulo
 `ai` não importa `training` nem `body`; desde o Prompt 05 ele é usado só pela funcionalidade de assistente
 (`src/integrations/ai`, `src/features/assistant` e `src/pages/AIAssistantPage.tsx`).
 
@@ -92,6 +97,10 @@ src/
       domain/              types.ts, contracts.ts (AIProvider), permissions.ts (categorias, AIConsent), errors.ts
       application/         ProviderRegistry.ts, ContextBuilder.ts, AIService.ts
       adapters/            MockAIProvider.ts (simulado, offline; único adaptador)
+    analytics/             motor de análise de treinos (P08; puro, só leitura; ver ANALYTICS_TREINAMENTO.md)
+      index.ts             API pública: importe sempre '@/modules/analytics'
+      domain/              types.ts, periods.ts (calendário), metrics.ts (métricas, recordes), trends.ts
+      application/         TrainingAnalyticsService.ts, InsightsEngine.ts, summary.ts (resumo p/ IA, não usado)
   lib/                     compartilhado e infraestrutura crítica de dados
     validation.ts          ParseResult, parseJsonText, formatZodError (genéricos)
     dates.ts, units.ts     datas locais yyyy-mm-dd; conversão kg ↔ lb
@@ -122,8 +131,8 @@ src/
     useUnits.ts            exibição de pesos na unidade escolhida
   features/                workout/, routines/, body/, backup/, assistant/ (conversa, prévia, modo remoto, useAssistant)
   components/              ui/ (botões, diálogos…), charts.tsx, AppLayout, SortableList…
-  pages/                   Início, Treinos, Editor, Treino ativo, Histórico, Detalhe, Progresso, Assistente IA,
-                           Configurações
+  pages/                   Início, Treinos, Editor, Treino ativo, Histórico, Detalhe, Progresso, Desempenho
+                           (P08, #/evolucao/desempenho), Assistente IA, Configurações
 services/
   ai-gateway/              gateway de IA opcional (P06): node:http, sem dependências, bloqueado por padrão
                            (src/, providers/, tests/, config/*.example.json; ver IA_GATEWAY.md)
@@ -138,6 +147,7 @@ services/
 | --- | --- | --- | --- |
 | Treinamento | fichas, sessões, rotação ABC, progressão, volume, 1RM, estatísticas, descanso | `repo.ts`: rotinas, rotação, sessões (iniciar, salvar, concluir e avançar a rotação numa transação) | `pages/*` (exceto corpo), `features/workout`, `features/routines` |
 | Evolução corporal | avaliações JSON, PDF, métricas, regiões do mapa | `body.ts`: avaliações com fotos (atômico), exclusão em cascata, importação do PDF só de meses novos (transação) | `features/body`, aba Corpo em `ProgressPage` |
+| Análise de treinos (P08) | `modules/analytics`: frequência, volume, séries, cargas, recordes, tendências, insights | nenhuma (lê `useCompletedSessions`; não grava) | `pages/TrainingAnalyticsPage.tsx` (sub-rota de Evolução) |
 | Identidade local | `lib/profile.ts` | `db/db.ts` (criação, reparo, hooks de dono), `db/profiles.ts` | Configurações › Perfil local |
 | Backup e integridade | `lib/backupFormat.ts`, `lib/integrity.ts`, `lib/merge.ts` | `lib/backup.ts` | `features/backup`, Configurações › Dados e backup |
 
@@ -205,6 +215,8 @@ timestamp em ms. Descansos em segundos.
   `GatewayAIProvider`; lista `ADAPTER_IMPORTS` no teste). `integrations/ai/gatewayTransport.ts` é o único
   arquivo do assistente com rede e só é usado pela raiz de composição.
 - `services/ai-gateway` não importa `src/` e `src/` não importa `services/` (implantações independentes).
+- `modules/analytics` → o próprio módulo, `lib/dates` e **só** `modules/training/index.ts` (exceção documentada à
+  regra de domínios); telas → `@/modules/analytics`.
 - `features/assistant` e `pages/AIAssistantPage.tsx` → `@/modules/ai`, `integrations/ai`, componentes e `lib`.
 
 ## 8. Dependências proibidas (testadas)
@@ -236,6 +248,12 @@ timestamp em ms. Descansos em segundos.
     `eval`, `new Function`, `localStorage`, `sessionStorage`, `indexedDB`, `fetch`, XHR, WebSocket, beacon,
     cookies, Cache Storage ou `console.*` no assistente; URLs, variáveis de ambiente ou chaves; rota do
     assistente que não seja carregada sob demanda ou que substitua outra.
+
+11. Analytics (bloco "arquitetura do motor de analytics", P08): domínio ou aplicação importando algo além do
+    próprio módulo, `lib/dates` e da API pública do treinamento; qualquer dependência de IA, corpo, banco,
+    hooks, integrações, interface ou pacotes; escrita, armazenamento, rede, URLs ou variáveis de ambiente;
+    IA, assistente, treinamento, corpo, banco, hooks ou `lib` importando analytics; import de internals;
+    página que não seja carregada sob demanda em `/evolucao/desempenho` ou que mude a navegação de 6 itens.
 
 ## 9. Pontos de extensão futuros
 
@@ -278,7 +296,7 @@ Nada disto existe ainda; estes são os lugares previstos, sem interfaces antecip
 
 | Item | Evidência | Por que foi adiado |
 | --- | --- | --- |
-| Dois cálculos de 1RM | `stats.ts` (`exerciseSeries`) usa Epley inline e, com 1 repetição, dá carga × 1,033; `volume.ts` (`estimate1RM`, usado nos recordes) devolve a própria carga | Unificar muda valores do gráfico de progresso. Divergência fixada em teste de caracterização; decidir a regra numa etapa de métricas. |
+| Dois cálculos de 1RM | `stats.ts` (`exerciseSeries`) usa Epley inline e, com 1 repetição, dá carga × 1,033; `volume.ts` (`estimate1RM`, usado nos recordes) devolve a própria carga | Unificar muda valores do gráfico de progresso. Divergência fixada em teste de caracterização. P08: o motor de analytics adotou `estimate1RM` (até 12 repetições) sem alterar o gráfico antigo; ver ANALYTICS_TREINAMENTO.md, seção 4. |
 | `Settings` mistura app e treino | `lib/types.ts`: tema, unidade e nome junto de descanso, progressão, rotação e grupos musculares | Separar mudaria o registro persistido `settings` e o backup. |
 | Componentes grandes | `WorkoutsPage.tsx` (525 linhas), `BodySection.tsx` (504), `ActiveWorkoutPage.tsx` (493), `SettingsPage.tsx` (479) | A lógica de negócio que tinham já saiu; o restante é apresentação. Dividir em subcomponentes é risco visual sem ganho funcional agora. |
 | Cálculos de exibição no `BodySection` | séries dos gráficos e tabela montadas no componente | São apresentação (unidades, filtros); mover para o domínio só quando outro consumidor precisar. |
