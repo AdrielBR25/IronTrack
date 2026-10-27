@@ -6,9 +6,8 @@ import { Segmented } from '@/components/ui/segmented';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useUnits } from '@/hooks/useUnits';
-import { EQUIPMENT_HINT } from '@/lib/units';
+import { EQUIPMENT_HINT, fmtRepRange } from '@/modules/training';
 import { cn } from '@/lib/utils';
-import { fmtRepRange } from '@/lib/routineSchema';
 
 export const SET_TYPE_OPTIONS: { value: SetType; label: string }[] = [
   { value: 'warmup', label: 'Aquec.' },

@@ -20,8 +20,16 @@ import {
   undoSet,
   updateSet,
   type SetRef,
-} from '@/lib/session';
-import { adjustRest, pauseRest, resumeRest, startRest } from '@/lib/restTimer';
+  adjustRest,
+  pauseRest,
+  resumeRest,
+  startRest,
+  sessionPRs,
+  sessionVolume,
+  validSetCount,
+  completionPct,
+  shouldAdvance,
+} from '@/modules/training';
 import { audioAvailable, closeRestNotifications, notificationState, unlockAudio, vibrationAvailable } from '@/lib/alerts';
 import type { SessionSet, WorkoutSession } from '@/lib/types';
 import { ExerciseCard, summarizeSets } from '@/features/workout/ExerciseCard';
@@ -33,8 +41,6 @@ import { Input, Textarea } from '@/components/ui/input';
 import { ConfirmDialog } from '@/components/ui/confirm';
 import { useUnits } from '@/hooks/useUnits';
 import { fmtClock, fmtDuration } from '@/lib/utils';
-import { sessionPRs, sessionVolume, validSetCount } from '@/lib/volume';
-import { completionPct, shouldAdvance } from '@/lib/rotation';
 import { db } from '@/db/db';
 import { cn } from '@/lib/utils';
 

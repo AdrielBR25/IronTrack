@@ -1,6 +1,18 @@
-import type { LocalProfile } from './types';
-
 // Regras puras do perfil local (sem acesso ao banco). Modelo em docs/PERFIL_LOCAL.md.
+
+/**
+ * Perfil local: identidade estável dos dados neste navegador. O ID é aleatório (UUID v4),
+ * gerado uma única vez e nunca derivado de nome, aparelho, navegador ou data.
+ * Não é conta, login nem identidade do aparelho.
+ */
+export interface LocalProfile {
+  id: string;
+  displayName: string;
+  createdAt: number;
+  updatedAt: number;
+  /** Perfil principal. Nesta versão existe exatamente um. */
+  isDefault: boolean;
+}
 
 export const DEFAULT_PROFILE_NAME = 'Meu perfil';
 export const PROFILE_NAME_MAX = 40;

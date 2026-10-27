@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { db, mergeSettings } from '@/db/db';
 import { OWNED_COLLECTIONS, type CollectionName, type DataSnapshot, type LocalProfile } from './types';
-import { formatZodError, parseJsonText, type ParseResult } from './routineSchema';
+import { formatZodError, parseJsonText, type ParseResult } from './validation';
 import { checkIntegrity, snapshotFingerprint, type IntegrityIssue, type IntegrityReport, type OwnershipContext } from './integrity';
 import { pickDefaultProfile } from './profile';
 import { applyPlan, planMerge, type CollectionCounts, type MergeItem } from './merge';

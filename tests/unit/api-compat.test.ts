@@ -32,10 +32,16 @@ const BASELINE: Record<string, string[]> = {
 };
 
 /** Exports que mudaram de lugar de propósito: caminho antigo → nome → novo caminho. */
-const MOVED: Record<string, Record<string, string>> = {};
+const MOVED: Record<string, Record<string, string>> = {
+  // Rótulos de equipamento são vocabulário de treino; units.ts ficou só com conversão kg/lb.
+  '@/lib/units': { EQUIPMENT_LABEL: '@/modules/training', EQUIPMENT_HINT: '@/modules/training' },
+};
 
-const modules = import.meta.glob(['/src/lib/*.ts', '/src/db/*.ts']);
-const load = (path: string) => modules[path.replace('@/', '/src/') + '.ts']?.() as Promise<Record<string, unknown>> | undefined;
+const modules = import.meta.glob(['/src/lib/*.ts', '/src/db/*.ts', '/src/modules/*/index.ts']);
+const load = (path: string) => {
+  const base = path.replace('@/', '/src/');
+  return (modules[`${base}.ts`] ?? modules[`${base}/index.ts`])?.() as Promise<Record<string, unknown>> | undefined;
+};
 
 describe('exports da linha de base continuam disponíveis', () => {
   for (const [path, names] of Object.entries(BASELINE)) {

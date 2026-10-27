@@ -5,7 +5,20 @@ import { toast } from 'sonner';
 import { db } from '@/db/db';
 import { deleteBodyEntry, deletePhoto, saveBodyEntry, saveBodyEntryWithPhotos } from '@/db/repo';
 import type { BodyEntry } from '@/lib/types';
-import { parseBodyJson } from '@/lib/bodySchema';
+import {
+  parseBodyJson,
+  BODY_METRICS,
+  evolutionSummary,
+  metricByKey,
+  metricChanges,
+  skinfoldChanges,
+  type BodyMetricKey,
+  type MetricChange,
+  evaluationToEntry,
+  extractPdfItems,
+  newMonthsOnly,
+  parseAnthropometricItems,
+} from '@/modules/body';
 import { fmtNum, parseNum, readFileText, uid } from '@/lib/utils';
 import { fmtDateShort, fromISODate, todayISO } from '@/lib/dates';
 import { useUnits } from '@/hooks/useUnits';
@@ -14,9 +27,7 @@ import { Card } from '@/components/ui/card';
 import { Input, Label, Textarea } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/ui/confirm';
-import { ChartCard, DeltaBars, StackChart, TrendChart } from '@/features/progress/charts';
-import { BODY_METRICS, evolutionSummary, metricByKey, metricChanges, skinfoldChanges, type BodyMetricKey, type MetricChange } from '@/lib/bodyEvolution';
-import { evaluationToEntry, extractPdfItems, newMonthsOnly, parseAnthropometricItems } from '@/lib/bodyPdf';
+import { ChartCard, DeltaBars, StackChart, TrendChart } from '@/components/charts';
 import { cn } from '@/lib/utils';
 import { BodyMap } from './BodyMap';
 

@@ -1,8 +1,7 @@
 import { db, getSettings, saveSettings } from './db';
 import type { BodyEntry, DayOverride, ProgressPhoto, Routine, RotationState, Workout, WorkoutSession } from '@/lib/types';
 import { uid } from '@/lib/utils';
-import { buildSession, finishSession } from '@/lib/session';
-import { indexAfter, normIndex, shouldAdvance, skipIndex } from '@/lib/rotation';
+import { buildSession, finishSession, indexAfter, normIndex, shouldAdvance, skipIndex } from '@/modules/training';
 
 // ---------- Rotinas ----------
 

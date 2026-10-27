@@ -1,15 +1,12 @@
 import { ArrowDown, ArrowUp, Check, ChevronDown, MoreVertical, Plus, Repeat, SkipForward, TrendingDown, TrendingUp, Minus as MinusIcon, Info } from 'lucide-react';
 import { useState } from 'react';
 import type { SessionExercise, SessionSet, Settings } from '@/lib/types';
-import type { ExerciseHistoryEntry } from '@/lib/session';
-import { suggestProgression } from '@/lib/progression';
-import { fmtRepRange } from '@/lib/routineSchema';
+import { type ExerciseHistoryEntry, suggestProgression, fmtRepRange, EQUIPMENT_LABEL } from '@/modules/training';
 import { cn, fmtClock } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useUnits } from '@/hooks/useUnits';
 import { fmtDateShort } from '@/lib/dates';
-import { EQUIPMENT_LABEL } from '@/lib/units';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 export function summarizeSets(sets: SessionSet[], fmtW: (n: number | null | undefined, u?: boolean) => string): string {

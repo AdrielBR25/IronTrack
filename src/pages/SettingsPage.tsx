@@ -15,7 +15,7 @@ import { PROFILE_NAME_MAX } from '@/lib/profile';
 import { db, requestPersistentStorage, saveSettings } from '@/db/db';
 import type { Equipment, Settings } from '@/lib/types';
 import { GOAL_LABEL } from '@/lib/defaults';
-import { EQUIPMENT_LABEL } from '@/lib/units';
+import { EQUIPMENT_LABEL } from '@/modules/training';
 import { cn, downloadJson, fmtNum, parseNum, readFileText } from '@/lib/utils';
 import { weekdayShort } from '@/lib/dates';
 import { audioAvailable, notificationState, playBeep, requestNotificationPermission, showLocalNotification, unlockAudio, vibrate, vibrationAvailable, type NotifState } from '@/lib/alerts';

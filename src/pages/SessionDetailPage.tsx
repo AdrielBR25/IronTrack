@@ -12,10 +12,9 @@ import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { ConfirmDialog } from '@/components/ui/confirm';
-import { exerciseVolume, isValidWorkingSet, sessionPRs, sessionVolume, validSetCount } from '@/lib/volume';
+import { exerciseVolume, isValidWorkingSet, sessionPRs, sessionVolume, validSetCount, fmtRepRange } from '@/modules/training';
 import { fmtDateTime, fmtTime } from '@/lib/dates';
 import { cn, fmtDuration } from '@/lib/utils';
-import { fmtRepRange } from '@/lib/routineSchema';
 
 export default function SessionDetailPage() {
   const { id } = useParams();

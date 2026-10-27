@@ -2,7 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { BellOff, ChevronDown, ChevronUp, Pause, Play, SkipForward } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { RestState } from '@/lib/types';
-import { isPaused, progress, remainingMs } from '@/lib/restTimer';
+import { isPaused, progress, remainingMs } from '@/modules/training';
 import { cn, fmtClock } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { useNow } from '@/hooks/data';

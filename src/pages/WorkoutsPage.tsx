@@ -26,11 +26,10 @@ import {
   setNextWorkout,
   skipNextWorkout,
 } from '@/db/repo';
-import { routineToFicha } from '@/lib/routineSchema';
+import { routineToFicha, type DayPlan } from '@/modules/training';
 import type { Routine, Workout } from '@/lib/types';
 import { cn, downloadJson, uid } from '@/lib/utils';
 import { fmtDateShort, todayISO, weekday, weekdayShort } from '@/lib/dates';
-import type { DayPlan } from '@/lib/rotation';
 
 const LETTERS = 'ABCDEFGHIJ';
 

@@ -5,7 +5,7 @@ import { PageHeader } from '@/components/AppLayout';
 import { Card } from '@/components/ui/card';
 import { useCompletedSessions } from '@/hooks/data';
 import { useUnits } from '@/hooks/useUnits';
-import { sessionVolume, validSetCount } from '@/lib/volume';
+import { sessionVolume, validSetCount } from '@/modules/training';
 import { cn, fmtDuration } from '@/lib/utils';
 import { fmtTime } from '@/lib/dates';
 

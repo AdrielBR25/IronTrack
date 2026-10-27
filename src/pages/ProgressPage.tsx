@@ -7,11 +7,10 @@ import { Segmented } from '@/components/ui/segmented';
 import { Card } from '@/components/ui/card';
 import { useCompletedSessions, useToday } from '@/hooks/data';
 import { useUnits } from '@/hooks/useUnits';
-import { exerciseCatalog, exerciseSeries, setsByMuscle, weeklySeries } from '@/lib/stats';
-import { computeRecords } from '@/lib/volume';
+import { exerciseCatalog, exerciseSeries, setsByMuscle, weeklySeries, computeRecords } from '@/modules/training';
 import { addDays, fmtDateShort, startOfWeek } from '@/lib/dates';
 import { fmtNum } from '@/lib/utils';
-import { BarsChart, ChartCard, Empty, TrendChart } from '@/features/progress/charts';
+import { BarsChart, ChartCard, Empty, TrendChart } from '@/components/charts';
 import { BodySection } from '@/features/body/BodySection';
 
 type ExMetric = 'maxWeight' | 'best1RM' | 'bestReps' | 'volume';

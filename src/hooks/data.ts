@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { db, mergeSettings } from '@/db/db';
 import type { DayOverride, LocalProfile, Routine, Settings, WorkoutSession } from '@/lib/types';
 import { DEFAULT_SETTINGS } from '@/lib/defaults';
-import { projectSchedule, type DayPlan } from '@/lib/rotation';
+import { projectSchedule, type DayPlan } from '@/modules/training';
 import { todayISO, tsToISODate } from '@/lib/dates';
 
 export function useSettings(): Settings {

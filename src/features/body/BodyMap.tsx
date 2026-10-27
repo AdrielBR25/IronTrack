@@ -1,13 +1,12 @@
 import { useState } from 'react';
 import { ArrowDownRight, ArrowUpRight, Minus } from 'lucide-react';
 import type { BodyEntry } from '@/lib/types';
-import { availableMeasures, beforeScale, compare, REGIONS, regionById, type Comparison, type RegionId } from '@/lib/bodyRegions';
-import { verdict } from '@/lib/bodyEvolution';
+import { availableMeasures, beforeScale, compare, REGIONS, regionById, type Comparison, type RegionId, verdict } from '@/modules/body';
 import { cn, fmtNum } from '@/lib/utils';
 import { fmtDateShort, fromISODate } from '@/lib/dates';
 import { Card } from '@/components/ui/card';
 import { Segmented } from '@/components/ui/segmented';
-import { TrendChart } from '@/features/progress/charts';
+import { TrendChart } from '@/components/charts';
 
 // Mapa anatômico estilizado (metade esquerda desenhada e espelhada).
 // Coordenadas no viewBox 200×405, eixo central em x=100.

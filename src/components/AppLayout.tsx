@@ -5,8 +5,7 @@ import { cn, fmtClock } from '@/lib/utils';
 import { Logo } from './Logo';
 import { OfflineBadge } from './UpdatePrompt';
 import { useActiveSession, useNow } from '@/hooks/data';
-import { sessionProgress } from '@/lib/session';
-import { remainingMs } from '@/lib/restTimer';
+import { sessionProgress, remainingMs } from '@/modules/training';
 import { Suspense, useEffect } from 'react';
 
 export const NAV = [

@@ -1,7 +1,7 @@
 import { toast } from 'sonner';
 import { addRoutine } from '@/db/repo';
 import { getSettings, saveSettings } from '@/db/db';
-import { parseFicha } from '@/lib/routineSchema';
+import { parseFicha } from '@/modules/training';
 import type { Routine } from '@/lib/types';
 import { readFileText } from '@/lib/utils';
 

@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import { db } from '@/db/db';
 import { useActiveSession, useSettings } from '@/hooks/data';
-import { isPaused, remainingMs } from '@/lib/restTimer';
+import { isPaused, remainingMs } from '@/modules/training';
 import { playBeep, showLocalNotification, vibrate } from '@/lib/alerts';
 
 /**
