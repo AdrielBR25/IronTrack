@@ -1,7 +1,8 @@
 # Arquitetura
 
-IronTrack 2.0 · Fase 01 · Prompt 03. Descreve a organização do código depois da modularização
-incremental, as dependências permitidas e as que os testes bloqueiam. As regras automáticas estão em
+IronTrack 2.0 · Fase 01 · Prompt 03 (atualizado no Prompt 04 com o módulo de IA). Descreve a organização do
+código depois da modularização incremental, as dependências permitidas e as que os testes bloqueiam. O
+módulo de IA tem documento próprio: [IA_ARQUITETURA.md](IA_ARQUITETURA.md). As regras automáticas estão em
 `tests/unit/architecture.test.ts`; a compatibilidade dos imports antigos, em `tests/unit/api-compat.test.ts`.
 
 ## 1. Visão geral
@@ -28,6 +29,7 @@ flowchart TD
   subgraph Domínios["src/modules (regras puras)"]
     training["training"]
     body["body"]
+    ai["ai (contratos, consentimento, serviço; ainda sem uso)"]
   end
   shared["src/lib compartilhado (validation, dates, units, utils)"]
   safety["src/lib dados (profile, integrity, merge, backupFormat, types)"]
@@ -51,9 +53,11 @@ flowchart TD
   training --> shared
   body --> shared
   safety --> shared
+  ai --> shared
 ```
 
-`training` e `body` não se conhecem. Nenhum domínio importa React, Dexie, `src/db`, hooks ou telas.
+`training` e `body` não se conhecem. Nenhum domínio importa React, Dexie, `src/db`, hooks ou telas. O módulo
+`ai` não é importado por nenhuma outra parte do app nesta etapa e não importa `training` nem `body`.
 
 ## 2. Estrutura atual
 
@@ -79,6 +83,11 @@ src/
       bodyPdf.ts           leitura do relatório antropométrico (pdf.js sob demanda) e interpretação
       bodyEvolution.ts     métricas, variações e veredito de evolução
       bodyRegions.ts       regiões do mapa corporal (antes × agora)
+    ai/                    fundação de IA (puro, sem rede, sem persistência; ver IA_ARQUITETURA.md)
+      index.ts             API pública: importe sempre '@/modules/ai' (não exporta adaptadores)
+      domain/              types.ts, contracts.ts (AIProvider), permissions.ts (categorias, AIConsent), errors.ts
+      application/         ProviderRegistry.ts, ContextBuilder.ts, AIService.ts
+      adapters/            MockAIProvider.ts (simulado, offline; único adaptador)
   lib/                     compartilhado e infraestrutura crítica de dados
     validation.ts          ParseResult, parseJsonText, formatZodError (genéricos)
     dates.ts, units.ts     datas locais yyyy-mm-dd; conversão kg ↔ lb
@@ -173,6 +182,8 @@ timestamp em ms. Descansos em segundos.
 - `modules/<domínio>` → arquivos do próprio domínio, `lib/utils`, `lib/dates`, `lib/validation`, `zod`
   (e `pdfjs-dist`, carregado sob demanda, em `body`).
 - `lib/types.ts` → `modules/*/types.ts` (agregador de tipos, só tipos).
+- `modules/ai/domain` → só o próprio `domain`; `modules/ai/application` → `domain`, `application` e
+  `lib/dates`; `modules/ai/adapters` → só `domain` (contratos).
 
 ## 8. Dependências proibidas (testadas)
 
@@ -187,6 +198,13 @@ timestamp em ms. Descansos em segundos.
 7. `src/db` importando React, `sonner`, hooks ou telas.
 8. Código novo usando os caminhos `@deprecated` de `src/lib` (`session`, `rotation`, `progression`,
    `volume`, `stats`, `restTimer`, `routineSchema`, `bodySchema`, `bodyPdf`, `bodyEvolution`, `bodyRegions`).
+9. Módulo de IA (bloco "arquitetura do módulo de IA"): domínio de IA importando qualquer coisa fora de
+   `domain/` (React, Dexie…); aplicação importando adaptadores, banco ou interface; adaptadores importando
+   algo além dos contratos ou tocando `src/db`, hooks, `src/lib` ou Dexie; `training`/`body` importando o
+   módulo de IA; qualquer arquivo fora do módulo importando adaptadores ou internals; interface, hooks,
+   banco e `src/lib` usando o módulo nesta etapa; IndexedDB, storage, cookies, Cache Storage, `fetch`, XHR,
+   WebSocket, EventSource ou beacon no módulo; URLs, `import.meta.env`, `VITE_`, `process.env` ou padrões
+   de chave no módulo; SDKs de provedores de IA no `package.json`; segredos `VITE_*` em arquivos `.env`.
 
 ## 9. Pontos de extensão futuros
 
@@ -195,9 +213,11 @@ Nada disto existe ainda; estes são os lugares previstos, sem interfaces antecip
 - **Novo domínio** (ex.: nutrição): `src/modules/nutrition/` com `types.ts`, regras puras e `index.ts`;
   persistência em `src/db/nutrition.ts`; nova tabela só com uma nova versão do Dexie e migração
   (ver [MIGRACOES.md](MIGRACOES.md)) e nova versão do backup se entrar no arquivo.
-- **IA multiprovedor**: integrações externas em `src/integrations/<serviço>/`, consumindo dados por
-  funções puras dos domínios (ex.: `exerciseSeries`, `metricChanges`) e nunca pelo Dexie direto. O
-  contrato será definido na etapa própria.
+- **IA multiprovedor**: a fundação existe em `src/modules/ai` (Prompt 04). Adaptadores reais entram em
+  `src/modules/ai/adapters/`, registrados por uma raiz de composição futura (`src/integrations/ai/`); a tela
+  entrega ao `AIService` resumos calculados com funções puras dos domínios (ex.: `metricChanges`) e nunca
+  dados lidos pelo módulo de IA no Dexie. Provedores remotos com chave privada dependem de uma estratégia de
+  execução segura (ver [IA_ARQUITETURA.md](IA_ARQUITETURA.md), seção 10).
 - **Recomendações de treino**: partem de `suggestProgression` e das estatísticas, que já são puras e
   determinísticas.
 - **Sincronização**: `lib/backupFormat.ts` e `lib/merge.ts` já validam e mesclam retratos sem banco;
