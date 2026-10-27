@@ -112,6 +112,8 @@ describe('arquitetura', () => {
       // Exceções documentadas: reexportações de compatibilidade e o agregador de tipos.
       if (DEPRECATED_SHIMS.includes(e.from)) return false;
       if (e.from === 'lib/types.ts' && /^modules\/[^/]+\/types\.ts$/.test(e.target)) return false;
+      // Raiz de composição do assistente (P05): único ponto que registra o adaptador simulado.
+      if (e.from === 'integrations/ai/assistantService.ts' && e.target === 'modules/ai/adapters/MockAIProvider.ts') return false;
       return true;
     });
     expect(deep.map(fmt)).toEqual([]);
@@ -149,6 +151,10 @@ describe('arquitetura', () => {
 // Fundação de IA (IronTrack 2.0 F01/P04). Regras e motivos em docs/IA_ARQUITETURA.md.
 describe('arquitetura do módulo de IA', () => {
   const AI = 'modules/ai';
+  /** Raiz de composição (P05): registra o provedor simulado e monta o serviço. */
+  const COMPOSITION = 'integrations/ai/assistantService.ts';
+  /** Código da funcionalidade de assistente (P05). */
+  const ASSISTANT = ['integrations/ai', 'features/assistant', 'pages/AIAssistantPage.tsx'];
   const aiFiles = files.map(rel).filter((f) => inDir(f, AI));
   /** Código sem comentários (os comentários podem citar o que é proibido). */
   const source = (f: string) => readFileSync(join(ROOT, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
@@ -177,14 +183,15 @@ describe('arquitetura do módulo de IA', () => {
     expect(bad.map(fmt)).toEqual([]);
   });
 
-  it('fora do módulo, ninguém importa adaptadores nem internals de provedores', () => {
-    const bad = edges.filter((e) => !inDir(e.from, AI) && e.target && inDir(e.target, AI) && e.target !== `${AI}/index.ts`);
+  it('fora do módulo, ninguém importa adaptadores nem internals de provedores (exceto a raiz de composição)', () => {
+    // P05: a raiz de composição do assistente é o único ponto que registra um adaptador.
+    const bad = edges.filter((e) => !inDir(e.from, AI) && e.target && inDir(e.target, AI) && e.target !== `${AI}/index.ts` && !(e.from === COMPOSITION && e.target === `${AI}/adapters/MockAIProvider.ts`));
     expect(bad.map(fmt)).toEqual([]);
     expect(source(`${AI}/index.ts`)).not.toMatch(/adapters/);
   });
 
-  it('nesta etapa, interface, hooks, banco e backup não usam o módulo de IA', () => {
-    const bad = edges.filter((e) => inDir(e.from, ...UI, 'hooks', 'db', 'lib') && e.target && inDir(e.target, AI));
+  it('só o assistente usa o módulo de IA: hooks, banco, backup, compartilhado e as outras telas não', () => {
+    const bad = edges.filter((e) => e.target && inDir(e.target, AI) && !inDir(e.from, AI, ...ASSISTANT));
     expect(bad.map(fmt)).toEqual([]);
   });
 
@@ -214,5 +221,50 @@ describe('arquitetura do módulo de IA', () => {
     const envFiles = readdirSync(process.cwd()).filter((f) => f.startsWith('.env'));
     const bad = envFiles.filter((f) => /VITE_[A-Z_]*(KEY|TOKEN|SECRET|OPENAI|ANTHROPIC|GEMINI)/.test(readFileSync(resolve(process.cwd(), f), 'utf8')));
     expect(bad).toEqual([]);
+  });
+});
+
+// Interface do assistente (IronTrack 2.0 F01/P05). Regras e motivos em docs/IA_ARQUITETURA.md.
+describe('arquitetura do assistente de IA', () => {
+  const INTEGRATION = 'integrations/ai';
+  const UI_ASSISTANT = ['features/assistant', 'pages/AIAssistantPage.tsx'];
+  const assistantFiles = files.map(rel).filter((f) => inDir(f, INTEGRATION, ...UI_ASSISTANT));
+  const source = (f: string) => readFileSync(join(ROOT, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+  it('os arquivos do assistente existem', () => {
+    expect(assistantFiles).toEqual(
+      expect.arrayContaining(['integrations/ai/assistantService.ts', 'integrations/ai/contextSources.ts', 'features/assistant/useAssistant.ts', 'pages/AIAssistantPage.tsx']),
+    );
+  });
+
+  it('a tela do assistente não acessa banco nem adaptadores: passa pela integração', () => {
+    const bad = edges.filter((e) => inDir(e.from, ...UI_ASSISTANT) && e.target && (inDir(e.target, 'db', 'modules/ai/adapters') || e.spec.startsWith('dexie')));
+    expect(bad.map(fmt)).toEqual([]);
+  });
+
+  it('a integração só usa funções de LEITURA da persistência', () => {
+    const READS = new Set(['getSettings', 'completedSessionsSince', 'recentCompletedSessions', 'listBodyEntries', 'recentBodyEntries']);
+    const dbEdges = edges.filter((e) => inDir(e.from, INTEGRATION) && e.target && inDir(e.target, 'db'));
+    expect(dbEdges.flatMap((e) => e.names.filter((n) => !READS.has(n)).map((n) => `${fmt(e)} (${n})`))).toEqual([]);
+    // Nem o objeto do banco, nem métodos de escrita do Dexie.
+    const WRITE = /\.(put|add|bulkPut|bulkAdd|update|delete|bulkDelete|clear|modify)\s*\(/;
+    expect(assistantFiles.filter((f) => WRITE.test(source(f)))).toEqual([]);
+  });
+
+  it('sem HTML arbitrário, execução de código, armazenamento do navegador ou rede no assistente', () => {
+    const FORBIDDEN = /dangerouslySetInnerHTML|innerHTML|outerHTML|insertAdjacentHTML|\beval\s*\(|new\s+Function\s*\(|\b(localStorage|sessionStorage|indexedDB)\b|fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|document\.cookie|caches\.|console\.(log|info|debug|warn|error)/;
+    expect(assistantFiles.filter((f) => FORBIDDEN.test(source(f)))).toEqual([]);
+  });
+
+  it('sem endpoints, variáveis de ambiente ou credenciais no assistente', () => {
+    const bad = assistantFiles.filter((f) => /https?:\/\/|import\.meta\.env|VITE_|process\.env|api[_-]?key\s*[:=]|Bearer\s|sk-[A-Za-z0-9]{8,}|AIza[0-9A-Za-z_-]{10,}/i.test(source(f)));
+    expect(bad).toEqual([]);
+  });
+
+  it('a rota do assistente é carregada sob demanda pela tela, sem substituir outras', () => {
+    const app = readFileSync(join(ROOT, 'App.tsx'), 'utf8');
+    expect(app).toMatch(/lazy\(\(\) => import\('@\/pages\/AIAssistantPage'\)\)/);
+    expect(app).toMatch(/path="\/assistente"/);
+    for (const r of ['/treinos', '/historico', '/evolucao', '/config']) expect(app).toContain(`path="${r}"`);
   });
 });
