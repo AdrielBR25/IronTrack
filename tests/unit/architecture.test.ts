@@ -104,6 +104,8 @@ describe('arquitetura', () => {
       if (!inDir(e.from, 'modules')) return false;
       if (!e.target) return !allowedPackages.has(e.spec);
       const ownModule = e.from.split('/').slice(0, 2).join('/');
+      // P08: analytics é um modelo de leitura sobre o treinamento e só pode usar a API pública dele.
+      if (ownModule === 'modules/analytics' && e.target === 'modules/training/index.ts') return false;
       return !inDir(e.target, ownModule) && !allowedShared.has(e.target);
     });
     expect(bad.map(fmt)).toEqual([]);
@@ -310,5 +312,63 @@ describe('arquitetura do assistente de IA', () => {
     expect(app).toMatch(/lazy\(\(\) => import\('@\/pages\/AIAssistantPage'\)\)/);
     expect(app).toMatch(/path="\/assistente"/);
     for (const r of ['/treinos', '/historico', '/evolucao', '/config']) expect(app).toContain(`path="${r}"`);
+  });
+});
+
+// Motor de análise de treinos (IronTrack 2.0 F01/P08). Regras e motivos em docs/ANALYTICS_TREINAMENTO.md.
+describe('arquitetura do motor de analytics', () => {
+  const AN = 'modules/analytics';
+  const anFiles = files.map(rel).filter((f) => inDir(f, AN));
+  const source = (f: string) => readFileSync(join(ROOT, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+  it('o módulo existe com domain, application e API pública', () => {
+    expect(anFiles).toEqual(
+      expect.arrayContaining([`${AN}/index.ts`, `${AN}/domain/types.ts`, `${AN}/domain/metrics.ts`, `${AN}/domain/periods.ts`, `${AN}/domain/trends.ts`, `${AN}/application/TrainingAnalyticsService.ts`, `${AN}/application/InsightsEngine.ts`]),
+    );
+  });
+
+  it('domínio de analytics: sem React, Dexie ou banco; só o próprio domínio, lib/dates e a API pública do treinamento', () => {
+    const ok = new Set(['lib/dates.ts', 'modules/training/index.ts']);
+    const bad = edges.filter((e) => inDir(e.from, `${AN}/domain`) && (!e.target || !(inDir(e.target, `${AN}/domain`) || ok.has(e.target))));
+    expect(bad.map(fmt)).toEqual([]);
+  });
+
+  it('aplicação de analytics: só domain/application do módulo, lib/dates e a API pública do treinamento', () => {
+    const ok = new Set(['lib/dates.ts', 'modules/training/index.ts']);
+    const bad = edges.filter((e) => inDir(e.from, `${AN}/application`) && (!e.target || !(inDir(e.target, `${AN}/domain`, `${AN}/application`) || ok.has(e.target))));
+    expect(bad.map(fmt)).toEqual([]);
+  });
+
+  it('analytics não depende de IA, corpo, banco, hooks, integrações ou interface', () => {
+    const bad = edges.filter((e) => inDir(e.from, AN) && e.target && inDir(e.target, 'modules/ai', 'modules/body', 'db', 'hooks', 'integrations', ...UI));
+    expect(bad.map(fmt)).toEqual([]);
+    const pkgs = edges.filter((e) => inDir(e.from, AN) && !e.target);
+    expect(pkgs.map(fmt)).toEqual([]);
+  });
+
+  it('analytics não grava, não persiste e não acessa rede', () => {
+    // Set.add/Map.delete são usados em memória; o acesso ao banco já é barrado pelo teste anterior.
+    const FORBIDDEN = /\b(indexedDB|localStorage|sessionStorage|fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|document\.cookie|caches\.)|\.(put|bulkPut|bulkAdd|update|bulkDelete|modify|transaction)\s*\(|https?:\/\/|import\.meta\.env|process\.env/;
+    expect(anFiles.filter((f) => FORBIDDEN.test(source(f)))).toEqual([]);
+  });
+
+  it('o resumo para IA não é usado: IA, assistente, treinamento e corpo não importam analytics', () => {
+    const bad = edges.filter((e) => e.target && inDir(e.target, AN) && inDir(e.from, 'modules/ai', 'modules/training', 'modules/body', 'integrations', 'features/assistant', 'pages/AIAssistantPage.tsx', 'db', 'hooks', 'lib'));
+    expect(bad.map(fmt)).toEqual([]);
+  });
+
+  it('fora do módulo, importa-se só a API pública de analytics', () => {
+    const deep = edges.filter((e) => !inDir(e.from, AN) && e.target && inDir(e.target, AN) && e.target !== `${AN}/index.ts`);
+    expect(deep.map(fmt)).toEqual([]);
+  });
+
+  it('a página é carregada sob demanda numa sub-rota de /evolucao, sem novo item na navegação', () => {
+    const app = readFileSync(join(ROOT, 'App.tsx'), 'utf8');
+    expect(app).toMatch(/lazy\(\(\) => import\('@\/pages\/TrainingAnalyticsPage'\)\)/);
+    expect(app).toMatch(/path="\/evolucao\/desempenho"/);
+    for (const r of ['/treinos', '/historico', '/evolucao', '/assistente', '/config']) expect(app).toContain(`path="${r}"`);
+    const layout = readFileSync(join(ROOT, 'components/AppLayout.tsx'), 'utf8');
+    expect((layout.match(/^\s*\{ to: '\//gm) ?? []).length).toBe(6);
+    expect(layout).toContain('grid-cols-6');
   });
 });
