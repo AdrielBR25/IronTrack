@@ -1,0 +1,123 @@
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipProps } from 'recharts';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+
+// Gráficos de série única: cor de destaque, marcas finas, grade discreta e tooltip.
+
+const PRIMARY = 'hsl(var(--primary))';
+const GRID = 'hsl(var(--border))';
+const AXIS = 'hsl(var(--muted-foreground))';
+const compactFmt = new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 1 });
+const compact = (v: number) => compactFmt.format(v);
+
+export function ChartCard({ title, description, children, action }: { title: string; description?: string; children: React.ReactNode; action?: React.ReactNode }) {
+  return (
+    <Card>
+      <CardHeader className="flex-row items-start justify-between gap-2 space-y-0">
+        <div>
+          <CardTitle>{title}</CardTitle>
+          {description && <CardDescription className="text-xs">{description}</CardDescription>}
+        </div>
+        {action}
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
+  );
+}
+
+function Tip({ active, payload, label, fmt, labelFmt }: TooltipProps<number, string> & { fmt: (v: number) => string; labelFmt?: (l: string | number) => string }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-xl border bg-popover px-3 py-2 text-sm shadow-xl">
+      <p className="text-xs text-muted-foreground">{labelFmt ? labelFmt(label) : label}</p>
+      <p className="font-display font-bold tabular">{fmt(Number(payload[0].value))}</p>
+    </div>
+  );
+}
+
+export function Empty({ text = 'Sem dados suficientes ainda.' }: { text?: string }) {
+  return <div className="flex h-40 items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">{text}</div>;
+}
+
+export function TrendChart<T extends object>({
+  data,
+  x,
+  y,
+  fmt,
+  xFmt,
+  height = 200,
+}: {
+  data: T[];
+  x: keyof T & string;
+  y: keyof T & string;
+  fmt: (v: number) => string;
+  xFmt: (v: string | number) => string;
+  height?: number;
+}) {
+  if (data.length < 2) return <Empty text={data.length === 1 ? 'Registre mais uma sessão para ver a linha de evolução.' : undefined} />;
+  return (
+    <div style={{ height }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+          <defs>
+            <linearGradient id={`g-${y}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={PRIMARY} stopOpacity={0.3} />
+              <stop offset="100%" stopColor={PRIMARY} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
+          <XAxis dataKey={x} tickFormatter={xFmt} stroke={AXIS} fontSize={11} tickLine={false} axisLine={false} minTickGap={24} />
+          <YAxis stroke={AXIS} fontSize={11} tickLine={false} axisLine={false} width={48} domain={['auto', 'auto']} tickFormatter={compact} />
+          <Tooltip content={<Tip fmt={fmt} labelFmt={xFmt} />} cursor={{ stroke: AXIS, strokeDasharray: '3 3' }} />
+          <Area type="monotone" dataKey={y} stroke={PRIMARY} strokeWidth={2} fill={`url(#g-${y})`} dot={{ r: 3, fill: PRIMARY, strokeWidth: 0 }} activeDot={{ r: 5, stroke: 'hsl(var(--card))', strokeWidth: 2 }} isAnimationActive={false} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+export function BarsChart<T extends object>({
+  data,
+  x,
+  y,
+  fmt,
+  xFmt,
+  height = 200,
+  horizontal,
+}: {
+  data: T[];
+  x: keyof T & string;
+  y: keyof T & string;
+  fmt: (v: number) => string;
+  xFmt?: (v: string | number) => string;
+  height?: number;
+  horizontal?: boolean;
+}) {
+  if (!data.length || data.every((d) => !Number((d as Record<string, unknown>)[y]))) return <Empty />;
+  if (horizontal) {
+    return (
+      <div style={{ height: Math.max(120, data.length * 34) }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data} layout="vertical" margin={{ top: 0, right: 16, left: 0, bottom: 0 }} barCategoryGap={6}>
+            <XAxis type="number" hide />
+            <YAxis type="category" dataKey={x} stroke={AXIS} fontSize={12} tickLine={false} axisLine={false} width={110} />
+            <Tooltip content={<Tip fmt={fmt} />} cursor={{ fill: 'hsl(var(--accent))' }} />
+            <Bar dataKey={y} fill={PRIMARY} radius={[0, 4, 4, 0]} maxBarSize={22} isAnimationActive={false} label={{ position: 'right', fill: AXIS, fontSize: 11 }} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+  return (
+    <div style={{ height }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} margin={{ top: 8, right: 8, left: -12, bottom: 0 }} barCategoryGap="20%">
+          <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
+          <XAxis dataKey={x} tickFormatter={xFmt} stroke={AXIS} fontSize={11} tickLine={false} axisLine={false} minTickGap={16} />
+          <YAxis stroke={AXIS} fontSize={11} tickLine={false} axisLine={false} width={48} allowDecimals={false} tickFormatter={compact} />
+          <Tooltip content={<Tip fmt={fmt} labelFmt={xFmt} />} cursor={{ fill: 'hsl(var(--accent))' }} />
+          <Bar dataKey={y} fill={PRIMARY} radius={[4, 4, 0, 0]} maxBarSize={28} isAnimationActive={false} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}

@@ -1,0 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 60 9% 97%;
+    --foreground: 150 8% 8%;
+    --card: 0 0% 100%;
+    --card-foreground: 150 8% 8%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 150 8% 8%;
+    --primary: 84 85% 38%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 80 6% 92%;
+    --secondary-foreground: 150 8% 12%;
+    --muted: 80 6% 92%;
+    --muted-foreground: 150 4% 38%;
+    --accent: 80 10% 90%;
+    --accent-foreground: 150 8% 10%;
+    --destructive: 0 72% 48%;
+    --destructive-foreground: 0 0% 100%;
+    --warn: 38 92% 45%;
+    --border: 80 6% 86%;
+    --input: 80 6% 82%;
+    --ring: 84 85% 38%;
+    --radius: 1rem;
+  }
+  .dark {
+    --background: 150 8% 4.5%;
+    --foreground: 80 10% 95%;
+    --card: 150 6% 8%;
+    --card-foreground: 80 10% 95%;
+    --popover: 150 6% 9%;
+    --popover-foreground: 80 10% 95%;
+    --primary: 84 92% 55%;
+    --primary-foreground: 150 30% 5%;
+    --secondary: 150 5% 13%;
+    --secondary-foreground: 80 10% 92%;
+    --muted: 150 5% 13%;
+    --muted-foreground: 100 4% 60%;
+    --accent: 150 5% 15%;
+    --accent-foreground: 80 10% 95%;
+    --destructive: 0 75% 58%;
+    --destructive-foreground: 0 0% 100%;
+    --warn: 38 95% 58%;
+    --border: 150 5% 15%;
+    --input: 150 5% 18%;
+    --ring: 84 92% 55%;
+  }
+  * {
+    @apply border-border;
+  }
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    overscroll-behavior-y: none;
+  }
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+}
+
+@layer utilities {
+  .tabular { font-variant-numeric: tabular-nums; }
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+  .pt-safe { padding-top: env(safe-area-inset-top); }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { scrollbar-width: none; }
+}
