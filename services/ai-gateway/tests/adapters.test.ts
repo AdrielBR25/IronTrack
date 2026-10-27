@@ -178,7 +178,7 @@ describe('comum aos três adaptadores', () => {
       [400, 'provider_failure'],
       [404, 'provider_failure'],
       [413, 'payload_too_large'],
-      [429, 'provider_failure'],
+      [429, 'provider_rate_limited'],
       [500, 'provider_failure'],
       [529, 'provider_failure'],
     ] as const) {

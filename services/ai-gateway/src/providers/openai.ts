@@ -4,6 +4,10 @@
 // Resposta: `status` (`completed` | `incomplete` | `failed`…), `incomplete_details.reason`
 // (`max_output_tokens` | `content_filter`), itens `output[]` do tipo `message` com conteúdo
 // `output_text` (`text`) ou `refusal`, e `usage.input_tokens` / `usage.output_tokens`.
+// Revisado em 2026-10-27 (P07): em modelos de raciocínio, `max_output_tokens` inclui o raciocínio e
+// `usage.output_tokens` já soma `output_tokens_details.reasoning_tokens`. Se o limite acabar durante o
+// raciocínio, a resposta vem `incomplete`/`max_output_tokens` só com itens `reasoning` (sem `message`):
+// isso é cobrado e vira `invalid_response` com o uso informado, para a cota refletir o gasto.
 import { GatewayError } from '../errors.ts';
 import { isObj, postJson, upstreamStatusError, usageOf } from './http.ts';
 import type { UpstreamAdapter } from './types.ts';
@@ -25,6 +29,7 @@ export const openaiAdapter: UpstreamAdapter = {
     const { status, json } = await postJson(ctx.fetch, `${ctx.baseUrl}/v1/responses`, { authorization: `Bearer ${ctx.apiKey}` }, body, ctx.signal, ctx.maxResponseBytes);
     if (status < 200 || status >= 300) throw upstreamStatusError(status);
     if (!isObj(json) || !Array.isArray(json.output)) throw new GatewayError('invalid_response');
+    const usage = isObj(json.usage) ? usageOf(json.usage.input_tokens, json.usage.output_tokens) : undefined;
 
     let text = '';
     let refused = false;
@@ -36,14 +41,14 @@ export const openaiAdapter: UpstreamAdapter = {
       }
     }
     const reason = isObj(json.incomplete_details) ? json.incomplete_details.reason : undefined;
-    if (refused || reason === 'content_filter') throw new GatewayError('content_filtered');
+    if (refused || reason === 'content_filter') throw new GatewayError('content_filtered', usage);
     let finishReason: 'stop' | 'length';
     if (json.status === 'completed') finishReason = 'stop';
     else if (json.status === 'incomplete' && reason === 'max_output_tokens') finishReason = 'length';
-    else if (json.status === 'failed') throw new GatewayError('provider_failure');
-    else throw new GatewayError('invalid_response');
-    if (!text) throw new GatewayError('invalid_response');
-    const usage = isObj(json.usage) ? usageOf(json.usage.input_tokens, json.usage.output_tokens) : undefined;
+    else if (json.status === 'failed' || json.status === 'cancelled') throw new GatewayError('provider_failure', usage);
+    // queued / in_progress (modo background, não usado) ou status desconhecido.
+    else throw new GatewayError('invalid_response', usage);
+    if (!text) throw new GatewayError('invalid_response', usage);
     return { text, finishReason, ...(usage ? { usage } : {}) };
   },
 };

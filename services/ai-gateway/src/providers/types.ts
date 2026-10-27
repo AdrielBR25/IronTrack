@@ -1,7 +1,7 @@
 // Contrato interno dos adaptadores de provedores do gateway (lado servidor).
 import type { WireMessage } from '../protocol.ts';
 
-export type FetchLike = (input: string, init: { method: string; headers: Record<string, string>; body: string; signal: AbortSignal }) => Promise<Response>;
+export type FetchLike = (input: string, init: { method: string; headers: Record<string, string>; body: string; signal: AbortSignal; redirect: 'manual' }) => Promise<Response>;
 
 /** Solicitação já validada e autorizada pelo gateway. */
 export interface UpstreamRequest {
@@ -26,6 +26,7 @@ export interface UpstreamContext {
 export interface UpstreamResult {
   text: string;
   finishReason: 'stop' | 'length';
+  /** Uso informado pelo provedor. `outputTokens` inclui tokens de raciocínio quando o provedor os cobra como saída. */
   usage?: { inputTokens?: number; outputTokens?: number };
 }
 

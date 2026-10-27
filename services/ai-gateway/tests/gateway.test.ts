@@ -3,6 +3,7 @@
 // Toda chamada ao provedor é simulada (sem rede externa e sem custo).
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryUsageStore } from '../src/limits.ts';
+import type { FetchLike } from '../src/providers/types.ts';
 import { MODEL, fakeKey, genBody, hang, json, newToken, openaiOk, post, start, testConfig, type Started } from './helpers.ts';
 
 let s: Started | undefined;
@@ -207,13 +208,19 @@ describe('validação e limites', () => {
 });
 
 describe('falhas e normalização', () => {
-  it('12. falha do provedor (5xx, 429, rede): 502 sem repetir e sem o texto do provedor', async () => {
-    for (const upstream of [async () => json(500, { error: { message: 'detalhe interno XYZ-123' } }), async () => json(429, { error: { message: 'rate XYZ-123' } }), async () => { throw new TypeError('ECONNRESET XYZ-123'); }]) {
+  it('12. falha do provedor (5xx, 429, rede): sem repetir e sem o texto do provedor', async () => {
+    const cases: [FetchLike, number, string][] = [
+      [async () => json(500, { error: { message: 'detalhe interno XYZ-123' } }), 502, 'provider_failure'],
+      // P07: 429 do provedor (limite/cota da conta) tem código próprio, distinto do limite do gateway.
+      [async () => json(429, { error: { message: 'rate XYZ-123' } }), 429, 'provider_rate_limited'],
+      [async () => { throw new TypeError('ECONNRESET XYZ-123'); }, 502, 'provider_failure'],
+    ];
+    for (const [upstream, status, code] of cases) {
       s = await boot({ upstream });
       const r = await post(s.base, TOKEN, genBody());
       const text = await r.text();
-      expect(r.status).toBe(502);
-      expect(JSON.parse(text).error.code).toBe('provider_failure');
+      expect(r.status).toBe(status);
+      expect(JSON.parse(text).error.code).toBe(code);
       expect(text).not.toContain('XYZ-123');
       expect(s.calls).toHaveLength(1);
       await s.close();
@@ -292,8 +299,10 @@ describe('falhas e normalização', () => {
     expect(s.logs).toHaveLength(3);
     for (const bad of ['MARCADOR-PESSOAL-777', 'MARCADOR-RESPOSTA-888', '83,4', 'cintura', TOKEN, OPENAI_KEY, 'authorization']) expect(all).not.toContain(bad);
     const ok = s.logs[0];
-    expect(Object.keys(ok).sort()).toEqual(['clientId', 'durationMs', 'id', 'inputTokens', 'model', 'outputTokens', 'provider', 'route', 'status', 'ts']);
-    expect(ok).toMatchObject({ route: 'POST /v1/generate', status: 200, clientId: 'tester', provider: 'openai', model: MODEL.id });
+    // P07: o log identifica a CREDENCIAL por um keyId não secreto, não o titular.
+    expect(Object.keys(ok).sort()).toEqual(['durationMs', 'id', 'inputTokens', 'keyId', 'model', 'outputTokens', 'provider', 'route', 'status', 'ts', 'usageSource']);
+    expect(ok).toMatchObject({ route: 'POST /v1/generate', status: 200, provider: 'openai', model: MODEL.id, usageSource: 'reported' });
+    expect(all).not.toContain('tester');
   });
 
   it('16. endpoints arbitrários bloqueados: rotas, query, métodos e campos de URL', async () => {

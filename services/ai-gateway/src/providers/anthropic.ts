@@ -5,6 +5,9 @@
 // (removidos na versão 2026-10-21). Resposta: blocos `content[]` (`type: "text"`), `stop_reason`
 // (`end_turn`, `max_tokens`, `stop_sequence`, `tool_use`, `pause_turn`, `refusal`,
 // `model_context_window_exceeded`) e `usage.input_tokens` / `usage.output_tokens`.
+// Revisado em 2026-10-27 (P07, platform.claude.com "Handling stop reasons"): `refusal` chega como HTTP
+// 200 (com `stop_details`), não como erro; blocos `thinking`/`redacted_thinking` não entram no texto;
+// `max_tokens` com conteúdo vazio é cobrado e vira `invalid_response` com o uso informado.
 import { GatewayError } from '../errors.ts';
 import { isObj, postJson, upstreamStatusError, usageOf } from './http.ts';
 import type { UpstreamAdapter, UpstreamRequest } from './types.ts';
@@ -42,6 +45,7 @@ export const anthropicAdapter: UpstreamAdapter = {
     );
     if (status < 200 || status >= 300) throw upstreamStatusError(status);
     if (!isObj(json) || !Array.isArray(json.content)) throw new GatewayError('invalid_response');
+    const usage = isObj(json.usage) ? usageOf(json.usage.input_tokens, json.usage.output_tokens) : undefined;
     const text = json.content.map((b) => (isObj(b) && b.type === 'text' && typeof b.text === 'string' ? b.text : '')).join('');
     let finishReason: 'stop' | 'length';
     switch (json.stop_reason) {
@@ -54,13 +58,12 @@ export const anthropicAdapter: UpstreamAdapter = {
         finishReason = 'length';
         break;
       case 'refusal':
-        throw new GatewayError('content_filtered');
+        throw new GatewayError('content_filtered', usage);
       default:
         // tool_use / pause_turn: recursos não usados pelo IronTrack.
-        throw new GatewayError('invalid_response');
+        throw new GatewayError('invalid_response', usage);
     }
-    if (!text) throw new GatewayError('invalid_response');
-    const usage = isObj(json.usage) ? usageOf(json.usage.input_tokens, json.usage.output_tokens) : undefined;
+    if (!text) throw new GatewayError('invalid_response', usage);
     return { text, finishReason, ...(usage ? { usage } : {}) };
   },
 };

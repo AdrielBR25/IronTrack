@@ -60,8 +60,9 @@ describe('validação', () => {
 describe('credenciais de acesso', () => {
   it('só Bearer com token de alta entropia; compara pelo hash', () => {
     const t = newToken();
-    const clients = [{ id: 'a', tokenSha256: sha256Hex(t), enabled: true }];
-    expect(authenticate(`Bearer ${t}`, clients)?.id).toBe('a');
+    const clients = [{ id: 'a', enabled: true, credentials: [{ keyId: 'k-a', tokenSha256: sha256Hex(t) }] }];
+    expect(authenticate(`Bearer ${t}`, clients)?.client.id).toBe('a');
+    expect(authenticate(`Bearer ${t}`, clients)?.credential.keyId).toBe('k-a');
     expect(authenticate(`Bearer ${t}x`, clients)).toBeNull();
     expect(authenticate(undefined, clients)).toBeNull();
     expect(authenticate([`Bearer ${t}`], clients)).toBeNull();

@@ -14,6 +14,7 @@
     "requestsPerMinute": 10,
     "dailyTokenBudget": 50000,
     "maxConcurrentPerClient": 2,
+    "maxConcurrentTotal": 8,
     "upstreamTimeoutMs": 30000,
     "maxUpstreamResponseBytes": 262144
   },

@@ -14,6 +14,7 @@ export type GatewayErrorCode =
   | 'provider_unavailable'
   | 'rate_limited'
   | 'quota_exceeded'
+  | 'provider_rate_limited'
   | 'timeout'
   | 'cancelled'
   | 'provider_failure'
@@ -34,6 +35,7 @@ export const GATEWAY_ERRORS: Record<GatewayErrorCode, { status: number; message:
   provider_unavailable: { status: 503, message: 'O provedor escolhido não está configurado neste gateway.' },
   rate_limited: { status: 429, message: 'Muitas solicitações. Aguarde um pouco.' },
   quota_exceeded: { status: 429, message: 'A cota de uso desta credencial acabou por hoje.' },
+  provider_rate_limited: { status: 429, message: 'O provedor recusou por limite de uso ou cota da conta. Nenhuma nova tentativa foi feita.' },
   timeout: { status: 504, message: 'O provedor demorou demais para responder.' },
   cancelled: { status: 499, message: 'Solicitação cancelada.' },
   provider_failure: { status: 502, message: 'O provedor falhou ao responder. Nenhuma nova tentativa foi feita.' },
@@ -42,12 +44,20 @@ export const GATEWAY_ERRORS: Record<GatewayErrorCode, { status: number; message:
   internal_error: { status: 500, message: 'Erro interno do gateway.' },
 };
 
+export interface ReportedUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+}
+
 export class GatewayError extends Error {
   readonly code: GatewayErrorCode;
-  constructor(code: GatewayErrorCode) {
+  /** Uso informado pelo provedor numa resposta 2xx recusada/inválida (o provedor cobrou). */
+  readonly usage?: ReportedUsage;
+  constructor(code: GatewayErrorCode, usage?: ReportedUsage) {
     super(GATEWAY_ERRORS[code].message);
     this.name = 'GatewayError';
     this.code = code;
+    if (usage) this.usage = usage;
   }
 }
 

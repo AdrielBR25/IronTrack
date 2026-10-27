@@ -31,13 +31,33 @@ export interface ProviderConfig {
   models: ModelConfig[];
 }
 
-export interface ClientConfig {
-  /** Identificador do titular da credencial (aparece nos logs; não é segredo). */
-  id: string;
+/**
+ * Uma credencial de acesso (token) de um titular. Um titular pode ter várias ao mesmo tempo (ex.: durante
+ * uma rotação com período de transição). Só o hash fica aqui; o token é mostrado uma única vez na emissão.
+ */
+export interface CredentialConfig {
+  /** Identificador NÃO secreto da credencial, usado em auditoria, logs e revogação. */
+  keyId: string;
   /** SHA-256 (hex) do token de acesso. O token em si nunca fica no servidor nem no repositório. */
   tokenSha256: string;
+  /** Emissão (ISO 8601). Informativo. */
+  createdAt?: string;
+  /** Expiração opcional (ISO 8601). A partir deste instante o token é recusado. */
+  expiresAt?: string;
+  /** Revogação (ISO 8601). Presente = recusado. Mantido para auditoria. */
+  revokedAt?: string;
+}
+
+export interface ClientConfig {
+  /**
+   * Identificador do titular (pseudônimo, não segredo). Não use nome, e-mail ou telefone: os logs usam o
+   * `keyId` da credencial, mas o titular aparece no arquivo de configuração.
+   */
+  id: string;
+  /** Desligar o titular recusa todas as credenciais dele. */
   enabled: boolean;
-  /** Sobrescreve a cota diária global para esta credencial. */
+  credentials: CredentialConfig[];
+  /** Sobrescreve a cota diária global para este titular. */
   dailyTokenBudget?: number;
 }
 
@@ -49,6 +69,8 @@ export interface GatewayLimits {
   requestsPerMinute: number;
   dailyTokenBudget: number;
   maxConcurrentPerClient: number;
+  /** Solicitações simultâneas ao provedor somando todos os titulares (protege o processo e o gasto). */
+  maxConcurrentTotal: number;
   upstreamTimeoutMs: number;
   maxUpstreamResponseBytes: number;
 }
@@ -75,14 +97,38 @@ export const DEFAULT_LIMITS: GatewayLimits = {
   requestsPerMinute: 10,
   dailyTokenBudget: 50_000,
   maxConcurrentPerClient: 2,
+  maxConcurrentTotal: 8,
   upstreamTimeoutMs: 30_000,
   maxUpstreamResponseBytes: 256 * 1024,
+};
+
+/**
+ * Tetos aceitos na configuração. Um valor acima disso é erro (o gateway fica bloqueado), para que um
+ * zero a mais não transforme um limite em ausência de limite.
+ */
+export const MAX_LIMITS: GatewayLimits = {
+  maxBodyBytes: 1024 * 1024,
+  maxMessages: 50,
+  maxInputChars: 1_000_000,
+  maxOutputTokens: 100_000,
+  requestsPerMinute: 600,
+  dailyTokenBudget: 100_000_000,
+  maxConcurrentPerClient: 20,
+  maxConcurrentTotal: 200,
+  upstreamTimeoutMs: 300_000,
+  maxUpstreamResponseBytes: 8 * 1024 * 1024,
 };
 
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/;
 const CLIENT_ID = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 const ENV_NAME = /^[A-Z][A-Z0-9_]{1,63}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
+export const KEY_ID = /^[a-z0-9][a-z0-9_-]{2,39}$/;
+/** Data/hora ISO 8601 completa com fuso (ex.: 2026-11-30T12:00:00Z). */
+const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
+export const isIsoInstant = (v: unknown): v is string => typeof v === 'string' && ISO.test(v) && Number.isFinite(Date.parse(v));
+/** keyId derivado para credenciais no formato antigo (P06: `tokenSha256` direto no titular). */
+export const legacyKeyId = (sha: string) => `legacy-${sha.slice(0, 12)}`;
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
 
 export const isLoopbackHost = (h: string) => LOOPBACK.has(h);
@@ -142,7 +188,7 @@ export function validateConfig(raw: unknown): ConfigResult {
     if (!isObj(raw.limits)) err('limits');
     else
       for (const [k, v] of Object.entries(raw.limits)) {
-        if (!(k in DEFAULT_LIMITS) || !posInt(v)) err(`limits.${k}`);
+        if (!(k in DEFAULT_LIMITS) || !posInt(v, MAX_LIMITS[k as keyof GatewayLimits])) err(`limits.${k}`);
         else (limits as unknown as Obj)[k] = v;
       }
   }
@@ -151,12 +197,40 @@ export function validateConfig(raw: unknown): ConfigResult {
   if (!Array.isArray(raw.clients)) err('clients');
   else
     raw.clients.forEach((c, i) => {
-      if (!isObj(c) || typeof c.id !== 'string' || !CLIENT_ID.test(c.id) || typeof c.tokenSha256 !== 'string' || !HEX64.test(c.tokenSha256) || typeof c.enabled !== 'boolean')
-        return err(`clients[${i}]`);
-      if (c.dailyTokenBudget !== undefined && !posInt(c.dailyTokenBudget)) return err(`clients[${i}].dailyTokenBudget`);
-      clients.push({ id: c.id, tokenSha256: c.tokenSha256, enabled: c.enabled, ...(c.dailyTokenBudget !== undefined ? { dailyTokenBudget: c.dailyTokenBudget as number } : {}) });
+      const at = `clients[${i}]`;
+      if (!isObj(c) || typeof c.id !== 'string' || !CLIENT_ID.test(c.id) || typeof c.enabled !== 'boolean') return err(at);
+      for (const k of Object.keys(c)) if (!['id', 'enabled', 'tokenSha256', 'credentials', 'dailyTokenBudget'].includes(k)) return err(`${at}.${k}`);
+      if (c.dailyTokenBudget !== undefined && !posInt(c.dailyTokenBudget, MAX_LIMITS.dailyTokenBudget)) return err(`${at}.dailyTokenBudget`);
+      const creds: CredentialConfig[] = [];
+      // Formato do P06: um hash direto no titular. Continua aceito (vira uma credencial sem expiração).
+      if (c.tokenSha256 !== undefined) {
+        if (typeof c.tokenSha256 !== 'string' || !HEX64.test(c.tokenSha256)) return err(at);
+        creds.push({ keyId: legacyKeyId(c.tokenSha256), tokenSha256: c.tokenSha256 });
+      }
+      if (c.credentials !== undefined) {
+        if (!Array.isArray(c.credentials)) return err(`${at}.credentials`);
+        let bad = false;
+        c.credentials.forEach((k, j) => {
+          const kat = `${at}.credentials[${j}]`;
+          if (!isObj(k) || typeof k.keyId !== 'string' || !KEY_ID.test(k.keyId) || typeof k.tokenSha256 !== 'string' || !HEX64.test(k.tokenSha256)) return ((bad = true), err(kat));
+          if (Object.keys(k).some((x) => !['keyId', 'tokenSha256', 'createdAt', 'expiresAt', 'revokedAt'].includes(x))) return ((bad = true), err(kat));
+          for (const f of ['createdAt', 'expiresAt', 'revokedAt'] as const) if (k[f] !== undefined && !isIsoInstant(k[f])) return ((bad = true), err(`${kat}.${f}`));
+          creds.push({
+            keyId: k.keyId,
+            tokenSha256: k.tokenSha256,
+            ...(k.createdAt !== undefined ? { createdAt: k.createdAt as string } : {}),
+            ...(k.expiresAt !== undefined ? { expiresAt: k.expiresAt as string } : {}),
+            ...(k.revokedAt !== undefined ? { revokedAt: k.revokedAt as string } : {}),
+          });
+        });
+        if (bad) return;
+      }
+      if (creds.length === 0) return err(`${at}.credentials`);
+      clients.push({ id: c.id, enabled: c.enabled, credentials: creds, ...(c.dailyTokenBudget !== undefined ? { dailyTokenBudget: c.dailyTokenBudget as number } : {}) });
     });
-  if (new Set(clients.map((c) => c.id)).size !== clients.length || new Set(clients.map((c) => c.tokenSha256)).size !== clients.length) err('clients (duplicados)');
+  const allCreds = clients.flatMap((c) => c.credentials);
+  if (new Set(clients.map((c) => c.id)).size !== clients.length) err('clients (titulares duplicados)');
+  if (new Set(allCreds.map((k) => k.keyId)).size !== allCreds.length || new Set(allCreds.map((k) => k.tokenSha256)).size !== allCreds.length) err('clients (credenciais duplicadas)');
 
   const providers: GatewayConfig['providers'] = {};
   if (raw.providers !== undefined && !isObj(raw.providers)) err('providers');
@@ -172,6 +246,8 @@ export function validateConfig(raw: unknown): ConfigResult {
         continue;
       }
       if (p.baseUrl !== undefined && (typeof p.baseUrl !== 'string' || !validUrlBase(p.baseUrl))) err(`${at}.baseUrl`);
+      // Servidor simulado em http://localhost é só para desenvolvimento: um gateway exposto fala HTTPS.
+      else if (typeof p.baseUrl === 'string' && expose === true && !p.baseUrl.startsWith('https://')) err(`${at}.baseUrl (http só sem exposeBeyondLoopback)`);
       if (id === 'anthropic' && !(typeof p.apiVersion === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.apiVersion))) err(`${at}.apiVersion`);
       if (!Array.isArray(p.models) || p.models.length === 0) {
         err(`${at}.models`);
@@ -179,7 +255,7 @@ export function validateConfig(raw: unknown): ConfigResult {
       }
       const models: ModelConfig[] = [];
       p.models.forEach((m, i) => {
-        if (!isObj(m) || typeof m.id !== 'string' || !MODEL_ID.test(m.id) || !str(m.displayName, 80) || !posInt(m.maxInputChars, 1_000_000) || !posInt(m.maxOutputTokens, 100_000))
+        if (!isObj(m) || typeof m.id !== 'string' || !MODEL_ID.test(m.id) || !str(m.displayName, 80) || !posInt(m.maxInputChars, MAX_LIMITS.maxInputChars) || !posInt(m.maxOutputTokens, MAX_LIMITS.maxOutputTokens))
           return err(`${at}.models[${i}]`);
         models.push({ id: m.id, displayName: m.displayName, maxInputChars: m.maxInputChars, maxOutputTokens: m.maxOutputTokens });
       });
