@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bell, Database, Download, HardDrive, Palette, Plus, Smartphone, Target, Timer, TrendingUp, Upload, Vibrate, Volume2, X, Dumbbell, RotateCw } from 'lucide-react';
+import { Bell, Database, Download, HardDrive, ShieldCheck, Palette, Plus, Smartphone, Target, Timer, TrendingUp, Upload, Vibrate, Volume2, X, Dumbbell, RotateCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { PageHeader } from '@/components/AppLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -7,7 +7,7 @@ import { Input, Label } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Segmented } from '@/components/ui/segmented';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/ui/confirm';
 import { useSettings } from '@/hooks/data';
 import { db, requestPersistentStorage, saveSettings } from '@/db/db';
@@ -19,7 +19,9 @@ import { weekdayShort } from '@/lib/dates';
 import { audioAvailable, notificationState, playBeep, requestNotificationPermission, showLocalNotification, unlockAudio, vibrate, vibrationAvailable, type NotifState } from '@/lib/alerts';
 import { useInstallAvailable } from '@/components/InstallBanner';
 import { promptInstall } from '@/lib/install';
-import { exportBackup, parseBackup, restoreBackupMerge, restoreBackupReplace, type BackupFile } from '@/lib/backup';
+import { checkBackupSize, checkLocalIntegrity, exportBackup, parseBackup, previewRestore, type BackupFile, type RestorePreview } from '@/lib/backup';
+import type { IntegrityReport } from '@/lib/integrity';
+import { IssueList, RestorePreviewDialog } from '@/features/backup/RestorePreviewDialog';
 
 function Row({ label, hint, children }: { label: string; hint?: React.ReactNode; children: React.ReactNode }) {
   return (
@@ -79,8 +81,8 @@ export default function SettingsPage() {
   const [notif, setNotif] = useState<NotifState>(notificationState());
   const [persisted, setPersisted] = useState<boolean | null>(null);
   const [usage, setUsage] = useState<string | null>(null);
-  const [pendingBackup, setPendingBackup] = useState<BackupFile | null>(null);
-  const [confirmReplace, setConfirmReplace] = useState(false);
+  const [pendingBackup, setPendingBackup] = useState<{ file: BackupFile; preview: RestorePreview } | null>(null);
+  const [integrity, setIntegrity] = useState<IntegrityReport | null>(null);
   const [confirmWipe, setConfirmWipe] = useState(false);
   const [newGroup, setNewGroup] = useState('');
   const installAvailable = useInstallAvailable();
@@ -339,9 +341,16 @@ export default function SettingsPage() {
               const f = e.target.files?.[0];
               e.target.value = '';
               if (!f) return;
+              // Validação completa e prévia antes de qualquer escrita.
+              const tooBig = checkBackupSize(f.size);
+              if (tooBig) return void toast.error('Backup não aceito', { description: tooBig, duration: 10000 });
               const r = parseBackup(await readFileText(f));
-              if (!r.ok) toast.error('Backup inválido', { description: r.errors.join('\n'), duration: 10000 });
-              else setPendingBackup(r.value);
+              if (!r.ok) return void toast.error('Backup inválido', { description: r.errors.join('\n'), duration: 10000 });
+              try {
+                setPendingBackup({ file: r.value, preview: await previewRestore(r.value) });
+              } catch (err) {
+                toast.error('Não foi possível analisar o backup', { description: err instanceof Error ? err.message : String(err), duration: 10000 });
+              }
             }}
           />
         </div>
@@ -371,6 +380,9 @@ export default function SettingsPage() {
           </p>
         </div>
         <div className="py-3">
+          <Button variant="ghost" className="w-full" data-testid="check-integrity" onClick={async () => setIntegrity(await checkLocalIntegrity())}>
+            <ShieldCheck /> Verificar integridade dos dados
+          </Button>
           <Button variant="ghost" className="w-full text-destructive" onClick={() => setConfirmWipe(true)}>
             Apagar todos os dados
           </Button>
@@ -394,53 +406,20 @@ export default function SettingsPage() {
         </div>
       </Section>
 
-      <Dialog open={!!pendingBackup && !confirmReplace} onOpenChange={(o) => !o && setPendingBackup(null)}>
-        <DialogContent>
+      <RestorePreviewDialog backup={pendingBackup?.file ?? null} preview={pendingBackup?.preview ?? null} onClose={() => setPendingBackup(null)} />
+      <Dialog open={!!integrity} onOpenChange={(o) => !o && setIntegrity(null)}>
+        <DialogContent data-testid="integrity-report">
           <DialogHeader>
-            <DialogTitle>Restaurar backup</DialogTitle>
+            <DialogTitle>Integridade dos dados</DialogTitle>
             <DialogDescription>
-              Backup de {pendingBackup ? new Date(pendingBackup.exportedAt).toLocaleString('pt-BR') : ''}: {pendingBackup?.data.routines.length} rotinas, {pendingBackup?.data.sessions.length} treinos,{' '}
-              {pendingBackup?.data.bodyEntries.length} avaliações.
+              {integrity && integrity.issues.length === 0
+                ? 'Nenhum problema encontrado.'
+                : `${integrity?.counts.error ?? 0} erro(s), ${integrity?.counts.warning ?? 0} aviso(s), ${integrity?.counts.info ?? 0} observação(ões). Nada foi alterado.`}
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-2">
-            <Button
-              size="lg"
-              data-testid="backup-merge"
-              onClick={async () => {
-                if (!pendingBackup) return;
-                const r = await restoreBackupMerge(pendingBackup);
-                setPendingBackup(null);
-                toast.success('Backup mesclado', { description: `+${r.sessions} treinos, +${r.routines} rotinas, +${r.bodyEntries} avaliações · ${r.skipped} duplicados ignorados` });
-              }}
-            >
-              Mesclar com os dados atuais
-            </Button>
-            <Button size="lg" variant="outline" className="text-destructive" data-testid="backup-replace" onClick={() => setConfirmReplace(true)}>
-              Substituir todos os dados
-            </Button>
-          </div>
-          <DialogFooter>
-            <p className="text-xs text-muted-foreground">Mesclar adiciona o que não existe, sem duplicar.</p>
-          </DialogFooter>
+          {integrity && <IssueList issues={integrity.issues} />}
         </DialogContent>
       </Dialog>
-      <ConfirmDialog
-        open={confirmReplace}
-        onOpenChange={(o) => {
-          setConfirmReplace(o);
-          if (!o) setPendingBackup(null);
-        }}
-        destructive
-        title="Substituir todos os dados?"
-        description="Tudo o que está neste aparelho será apagado e trocado pelo conteúdo do backup. Essa ação não pode ser desfeita."
-        confirmLabel="Substituir"
-        onConfirm={async () => {
-          if (!pendingBackup) return;
-          const r = await restoreBackupReplace(pendingBackup);
-          toast.success('Backup restaurado', { description: `${r.sessions} treinos, ${r.routines} rotinas` });
-        }}
-      />
       <ConfirmDialog
         open={confirmWipe}
         onOpenChange={setConfirmWipe}

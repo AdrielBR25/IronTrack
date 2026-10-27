@@ -31,7 +31,7 @@ No PC (Chrome/Edge), use o ícone de instalar na barra de endereço.
 - **Sugestão de progressão** (progressão dupla): ao bater o topo da faixa em todas as séries com RIR/RPE compatível, sugere aumento; nunca aplica sem confirmação.
 - **Histórico e gráficos**: carga, 1RM estimado, repetições, volume semanal, frequência, séries por grupo muscular e recordes pessoais.
 - **Evolução corporal**: peso, % de gordura (estimado), cintura, abdômen, braço, coxa e fotos opcionais; importação via JSON.
-- **Backup** completo em JSON com validação, migração de versão, mesclar sem duplicar ou substituir com confirmação.
+- **Backup** completo em JSON com validação estrutural e de integridade, migração de versão, prévia antes de gravar (adicionados, duplicatas, conflitos e ignorados), mesclar sem sobrescrever ou substituir de forma atômica. Detalhes em [docs/BACKUP_RESTAURACAO.md](docs/BACKUP_RESTAURACAO.md), [docs/INTEGRIDADE_DADOS.md](docs/INTEGRIDADE_DADOS.md) e [docs/MIGRACOES.md](docs/MIGRACOES.md).
 
 > Os dados ficam só neste navegador/aparelho. Não há sincronização entre dispositivos. Limpar os dados do site no navegador apaga os registros — por isso exporte backups.
 

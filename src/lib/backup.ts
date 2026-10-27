@@ -1,20 +1,15 @@
 import { z } from 'zod';
 import { db, mergeSettings } from '@/db/db';
-import type { BodyEntry, DayOverride, ProgressPhoto, Routine, RotationState, Settings, WorkoutSession } from './types';
+import type { CollectionName, DataSnapshot } from './types';
 import { formatZodError, parseJsonText, type ParseResult } from './routineSchema';
+import { checkIntegrity, type IntegrityReport } from './integrity';
+import { planMerge, planSignature, type CollectionCounts, type MergeItem } from './merge';
 
 export const BACKUP_APP = 'irontrack';
 export const BACKUP_SCHEMA_VERSION = 1;
 
-export interface BackupData {
-  settings: Settings | null;
-  routines: Routine[];
-  sessions: WorkoutSession[];
-  rotations: RotationState[];
-  overrides: DayOverride[];
-  bodyEntries: BodyEntry[];
-  photos: ProgressPhoto[];
-}
+// Versão do formato JSON do backup. Independente da versão do esquema IndexedDB (DB_SCHEMA_VERSION).
+export type BackupData = DataSnapshot;
 
 export interface BackupFile {
   app: typeof BACKUP_APP;
@@ -126,33 +121,96 @@ export function migrateBackup(raw: unknown): ParseResult<Record<string, unknown>
   return { ok: true, value: obj };
 }
 
+// ---------- Limites de tamanho e complexidade ----------
+// Fotos são data URLs (JPEG ~1080 px, normalmente 100–400 KB cada); os limites
+// cabem com folga em vários anos de uso e evitam travar o navegador com arquivos absurdos.
+
+export const BACKUP_LIMITS = {
+  maxBytes: 100 * 1024 * 1024,
+  maxRecords: { routines: 1_000, sessions: 50_000, rotations: 1_000, overrides: 20_000, bodyEntries: 10_000, photos: 2_000 } as Record<Exclude<CollectionName, 'settings'>, number>,
+  maxPhotoChars: 15 * 1024 * 1024,
+  maxWorkoutsPerRoutine: 100,
+  maxExercisesPerItem: 300,
+  maxSetsPerExercise: 200,
+};
+
+const fmtMB = (n: number) => `${(n / 1024 / 1024).toFixed(1).replace('.', ',')} MB`;
+
+/** Confere o tamanho do arquivo antes de lê-lo. */
+export function checkBackupSize(bytes: number): string | null {
+  if (bytes > BACKUP_LIMITS.maxBytes) return `Arquivo muito grande (${fmtMB(bytes)}). O limite para restaurar é ${fmtMB(BACKUP_LIMITS.maxBytes)}.`;
+  return null;
+}
+
+function checkComplexity(d: BackupData): string[] {
+  const errors: string[] = [];
+  const L = BACKUP_LIMITS;
+  for (const [c, max] of Object.entries(L.maxRecords) as [Exclude<CollectionName, 'settings'>, number][])
+    if (d[c].length > max) errors.push(`"${c}" tem ${d[c].length} registros; o limite é ${max}.`);
+  d.photos.forEach((p, i) => {
+    if (p.dataUrl.length > L.maxPhotoChars) errors.push(`Foto ${i + 1} (${p.id}) tem ${fmtMB(p.dataUrl.length)}; o limite por foto é ${fmtMB(L.maxPhotoChars)}.`);
+  });
+  for (const r of d.routines) {
+    if (r.workouts.length > L.maxWorkoutsPerRoutine) errors.push(`Rotina ${r.id} tem ${r.workouts.length} treinos; o limite é ${L.maxWorkoutsPerRoutine}.`);
+    for (const w of r.workouts) if (w.exercises.length > L.maxExercisesPerItem) errors.push(`Rotina ${r.id} tem um treino com ${w.exercises.length} exercícios; o limite é ${L.maxExercisesPerItem}.`);
+  }
+  for (const s of d.sessions) {
+    if (s.exercises.length > L.maxExercisesPerItem) errors.push(`Treino ${s.id} tem ${s.exercises.length} exercícios; o limite é ${L.maxExercisesPerItem}.`);
+    for (const e of s.exercises) if (e.sets.length > L.maxSetsPerExercise) errors.push(`Treino ${s.id} tem um exercício com ${e.sets.length} séries; o limite é ${L.maxSetsPerExercise}.`);
+  }
+  return errors.slice(0, 12);
+}
+
 export function parseBackup(text: string): ParseResult<BackupFile> {
+  const sizeError = checkBackupSize(text.length);
+  if (sizeError) return { ok: false, errors: [sizeError] };
   const raw = parseJsonText(text);
   if (!raw.ok) return raw;
   const mig = migrateBackup(raw.value);
   if (!mig.ok) return mig;
   const res = backupSchema.safeParse(mig.value);
   if (!res.success) return { ok: false, errors: formatZodError(res.error) };
-  return { ok: true, value: res.data as unknown as BackupFile };
+  const value = res.data as unknown as BackupFile;
+  const tooBig = checkComplexity(value.data);
+  if (tooBig.length) return { ok: false, errors: tooBig };
+  return { ok: true, value };
+}
+
+const ALL_TABLES = () => [db.settings, db.routines, db.sessions, db.rotations, db.overrides, db.bodyEntries, db.photos];
+
+/**
+ * Lê todas as tabelas numa única transação de leitura: o retrato é consistente
+ * mesmo com gravações simultâneas (ex.: concluir um treino durante a exportação).
+ */
+export async function readSnapshot(): Promise<BackupData> {
+  return db.transaction('r', ALL_TABLES(), async () => {
+    const [settings, routines, sessions, rotations, overrides, bodyEntries, photos] = await Promise.all([
+      db.settings.get('settings'),
+      db.routines.toArray(),
+      db.sessions.toArray(),
+      db.rotations.toArray(),
+      db.overrides.toArray(),
+      db.bodyEntries.toArray(),
+      db.photos.toArray(),
+    ]);
+    return { settings: settings ?? null, routines, sessions, rotations, overrides, bodyEntries, photos };
+  });
 }
 
 export async function exportBackup(): Promise<BackupFile> {
-  const [settings, routines, sessions, rotations, overrides, bodyEntries, photos] = await Promise.all([
-    db.settings.get('settings'),
-    db.routines.toArray(),
-    db.sessions.toArray(),
-    db.rotations.toArray(),
-    db.overrides.toArray(),
-    db.bodyEntries.toArray(),
-    db.photos.toArray(),
-  ]);
+  const data = await readSnapshot();
   return {
     app: BACKUP_APP,
     kind: 'backup',
     schemaVersion: BACKUP_SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
-    data: { settings: settings ?? null, routines, sessions, rotations, overrides, bodyEntries, photos },
+    data,
   };
+}
+
+/** Diagnóstico de integridade dos dados deste aparelho (somente leitura). */
+export async function checkLocalIntegrity(): Promise<IntegrityReport> {
+  return checkIntegrity(await readSnapshot());
 }
 
 export interface ImportSummary {
@@ -160,17 +218,85 @@ export interface ImportSummary {
   sessions: number;
   bodyEntries: number;
   photos: number;
+  /** Registros do backup não aplicados (duplicatas + conflitos + ignorados). */
   skipped: number;
+  duplicates: number;
+  conflicts: number;
 }
 
-const ALL_TABLES = () => [db.settings, db.routines, db.sessions, db.rotations, db.overrides, db.bodyEntries, db.photos];
+export class BackupRestoreError extends Error {
+  constructor(
+    message: string,
+    readonly details: string[] = [],
+  ) {
+    super(message);
+    this.name = 'BackupRestoreError';
+  }
+}
 
-/** Substitui todos os dados locais pelo backup. */
+export interface RestorePreview {
+  exportedAt: string;
+  /** Integridade do conteúdo do backup. Erros impedem qualquer restauração. */
+  integrity: IntegrityReport;
+  blocked: boolean;
+  incoming: Record<CollectionName, number>;
+  local: Record<CollectionName, number>;
+  merge: {
+    counts: Record<CollectionName, CollectionCounts>;
+    totals: CollectionCounts;
+    items: MergeItem[];
+    signature: string;
+  };
+}
+
+const countOf = (d: BackupData): Record<CollectionName, number> => ({
+  settings: d.settings ? 1 : 0,
+  routines: d.routines.length,
+  sessions: d.sessions.length,
+  rotations: d.rotations.length,
+  overrides: d.overrides.length,
+  bodyEntries: d.bodyEntries.length,
+  photos: d.photos.length,
+});
+
+/** Analisa o backup contra os dados atuais sem gravar nada. */
+export async function previewRestore(b: BackupFile): Promise<RestorePreview> {
+  const integrity = checkIntegrity(b.data);
+  const local = await readSnapshot();
+  const plan = planMerge(local, b.data);
+  return {
+    exportedAt: b.exportedAt,
+    integrity,
+    blocked: !integrity.ok,
+    incoming: countOf(b.data),
+    local: countOf(local),
+    merge: { counts: plan.counts, totals: plan.totals, items: plan.items, signature: planSignature(plan) },
+  };
+}
+
+function assertRestorable(b: BackupFile) {
+  const integrity = checkIntegrity(b.data);
+  if (!integrity.ok) {
+    const errors = integrity.issues.filter((i) => i.severity === 'error');
+    throw new BackupRestoreError(
+      `O backup tem ${errors.length} problema(s) de integridade e não foi aplicado. Nenhum dado foi alterado.`,
+      errors.slice(0, 12).map((i) => `${i.collection}${i.id ? ` (${i.id})` : ''}: ${i.message}`),
+    );
+  }
+}
+
+/**
+ * Substitui todos os dados locais pelo backup. Valida antes de gravar e roda numa
+ * única transação: qualquer falha desfaz tudo e os dados anteriores ficam intactos.
+ */
 export async function restoreBackupReplace(b: BackupFile): Promise<ImportSummary> {
+  assertRestorable(b);
   const d = b.data;
   await db.transaction('rw', ALL_TABLES(), async () => {
     await Promise.all(ALL_TABLES().map((t) => t.clear()));
     if (d.settings) await db.settings.put(mergeSettings(d.settings));
+    // bulkPut: cópias idênticas repetidas no arquivo (aviso DUPLICATE_ID_IDENTICAL) viram um registro;
+    // IDs repetidos com conteúdo diferente já foram barrados por assertRestorable.
     await db.routines.bulkPut(d.routines);
     await db.sessions.bulkPut(d.sessions);
     await db.rotations.bulkPut(d.rotations);
@@ -178,57 +304,38 @@ export async function restoreBackupReplace(b: BackupFile): Promise<ImportSummary
     await db.bodyEntries.bulkPut(d.bodyEntries);
     await db.photos.bulkPut(d.photos);
   });
-  return { routines: d.routines.length, sessions: d.sessions.length, bodyEntries: d.bodyEntries.length, photos: d.photos.length, skipped: 0 };
+  return { routines: d.routines.length, sessions: d.sessions.length, bodyEntries: d.bodyEntries.length, photos: d.photos.length, skipped: 0, duplicates: 0, conflicts: 0 };
 }
 
-/** Mescla o backup com os dados atuais, sem duplicar registros. */
-export async function restoreBackupMerge(b: BackupFile): Promise<ImportSummary> {
-  const d = b.data;
-  const sum: ImportSummary = { routines: 0, sessions: 0, bodyEntries: 0, photos: 0, skipped: 0 };
-  await db.transaction('rw', ALL_TABLES(), async () => {
-    const routineIds = new Set(await db.routines.toCollection().primaryKeys());
-    for (const r of d.routines) {
-      if (routineIds.has(r.id)) sum.skipped++;
-      else {
-        await db.routines.put(r);
-        sum.routines++;
-      }
-    }
-    const existing = await db.sessions.toArray();
-    const ids = new Set(existing.map((s) => s.id));
-    const fingerprints = new Set(existing.map((s) => `${s.startedAt}|${s.workoutName}`));
-    const hasActive = existing.some((s) => s.status === 'active');
-    for (const s of d.sessions) {
-      const fp = `${s.startedAt}|${s.workoutName}`;
-      if (ids.has(s.id) || fingerprints.has(fp) || (s.status === 'active' && hasActive)) {
-        sum.skipped++;
-        continue;
-      }
-      await db.sessions.put(s);
-      fingerprints.add(fp);
-      sum.sessions++;
-    }
-    for (const r of d.rotations) if (!(await db.rotations.get(r.routineId))) await db.rotations.put(r);
-    for (const o of d.overrides) if (!(await db.overrides.get([o.routineId, o.date]))) await db.overrides.put(o);
-    const bodies = await db.bodyEntries.toArray();
-    const bodyIds = new Set(bodies.map((e) => e.id));
-    const bodyFp = new Set(bodies.map((e) => `${e.date}|${e.weightKg ?? ''}|${e.waistCm ?? ''}`));
-    for (const e of d.bodyEntries) {
-      const fp = `${e.date}|${e.weightKg ?? ''}|${e.waistCm ?? ''}`;
-      if (bodyIds.has(e.id) || bodyFp.has(fp)) {
-        sum.skipped++;
-        continue;
-      }
-      await db.bodyEntries.put(e);
-      sum.bodyEntries++;
-    }
-    const photoIds = new Set(await db.photos.toCollection().primaryKeys());
-    for (const p of d.photos) {
-      if (photoIds.has(p.id)) continue;
-      await db.photos.put(p);
-      sum.photos++;
-    }
-    if (d.settings && !(await db.settings.get('settings'))) await db.settings.put(mergeSettings(d.settings));
+/**
+ * Mescla o backup com os dados atuais (política em src/lib/merge.ts).
+ * O plano é refeito dentro da transação; se `expectedSignature` (da prévia) não
+ * conferir, nada é gravado. Só insere: nunca sobrescreve um registro existente.
+ */
+export async function restoreBackupMerge(b: BackupFile, opts: { expectedSignature?: string } = {}): Promise<ImportSummary> {
+  assertRestorable(b);
+  return db.transaction('rw', ALL_TABLES(), async () => {
+    const local = await readSnapshot();
+    const plan = planMerge(local, b.data);
+    if (opts.expectedSignature !== undefined && planSignature(plan) !== opts.expectedSignature)
+      throw new BackupRestoreError('Os dados deste aparelho mudaram desde a prévia. Nada foi gravado; abra o backup novamente para ver a prévia atualizada.');
+    const a = plan.toAdd;
+    if (a.settings) await db.settings.add(mergeSettings(a.settings));
+    await db.routines.bulkAdd(a.routines);
+    await db.sessions.bulkAdd(a.sessions);
+    await db.rotations.bulkAdd(a.rotations);
+    await db.overrides.bulkAdd(a.overrides);
+    await db.bodyEntries.bulkAdd(a.bodyEntries);
+    await db.photos.bulkAdd(a.photos);
+    const t = plan.totals;
+    return {
+      routines: a.routines.length,
+      sessions: a.sessions.length,
+      bodyEntries: a.bodyEntries.length,
+      photos: a.photos.length,
+      skipped: t.duplicate + t.conflict + t.skipped,
+      duplicates: t.duplicate,
+      conflicts: t.conflict,
+    };
   });
-  return sum;
 }

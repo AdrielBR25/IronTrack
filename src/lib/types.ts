@@ -207,3 +207,16 @@ export interface Settings {
   /** Mostrar observação de equipamento no peso (barra/halteres/máquina). */
   showEquipmentHint: boolean;
 }
+
+/** Retrato completo dos dados locais (conteúdo do backup e entrada da verificação de integridade). */
+export interface DataSnapshot {
+  settings: Settings | null;
+  routines: Routine[];
+  sessions: WorkoutSession[];
+  rotations: RotationState[];
+  overrides: DayOverride[];
+  bodyEntries: BodyEntry[];
+  photos: ProgressPhoto[];
+}
+
+export type CollectionName = keyof DataSnapshot;

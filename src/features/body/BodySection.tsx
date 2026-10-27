@@ -3,7 +3,7 @@ import { useRef, useState } from 'react';
 import { ArrowDownRight, ArrowUpRight, Camera, FileJson, FileText, Info, Loader2, Minus, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { db } from '@/db/db';
-import { addPhoto, deleteBodyEntry, deletePhoto, saveBodyEntry } from '@/db/repo';
+import { deleteBodyEntry, deletePhoto, saveBodyEntry, saveBodyEntryWithPhotos } from '@/db/repo';
 import type { BodyEntry } from '@/lib/types';
 import { parseBodyJson } from '@/lib/bodySchema';
 import { fmtNum, parseNum, readFileText, uid } from '@/lib/utils';
@@ -84,8 +84,7 @@ function EntryDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: 
               notes: f.notes?.trim() || undefined,
               createdAt: Date.now(),
             };
-            await saveBodyEntry(entry);
-            for (const p of photos) await addPhoto({ id: uid(), entryId: entry.id, dataUrl: p, createdAt: Date.now() });
+            await saveBodyEntryWithPhotos(entry, photos);
             toast.success('Avaliação salva');
             setF({ date: todayISO() });
             setPhotos([]);

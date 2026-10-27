@@ -145,6 +145,14 @@ export async function saveBodyEntry(e: BodyEntry) {
   await db.bodyEntries.put(e);
 }
 
+/** Grava a avaliação e suas fotos juntas: ou tudo é salvo, ou nada (sem fotos órfãs ou faltando). */
+export async function saveBodyEntryWithPhotos(e: BodyEntry, photoDataUrls: string[], now = Date.now()) {
+  await db.transaction('rw', db.bodyEntries, db.photos, async () => {
+    await db.bodyEntries.put(e);
+    if (photoDataUrls.length) await db.photos.bulkAdd(photoDataUrls.map((dataUrl) => ({ id: uid(), entryId: e.id, dataUrl, createdAt: now })));
+  });
+}
+
 export async function deleteBodyEntry(id: string) {
   await db.transaction('rw', db.bodyEntries, db.photos, async () => {
     await db.bodyEntries.delete(id);
