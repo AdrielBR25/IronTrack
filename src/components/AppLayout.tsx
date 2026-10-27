@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { BarChart3, Dumbbell, History, Home, Play, Settings } from 'lucide-react';
+import { BarChart3, Dumbbell, History, Home, Play, Settings, Sparkles } from 'lucide-react';
 import { cn, fmtClock } from '@/lib/utils';
 import { Logo } from './Logo';
 import { OfflineBadge } from './UpdatePrompt';
@@ -13,6 +13,8 @@ export const NAV = [
   { to: '/treinos', label: 'Treinos', icon: Dumbbell },
   { to: '/historico', label: 'Histórico', icon: History },
   { to: '/evolucao', label: 'Evolução', icon: BarChart3 },
+  // Rótulo curto na barra do celular (6 itens em 360 px); nome completo no computador e para leitores de tela.
+  { to: '/assistente', label: 'IA', icon: Sparkles, title: 'Assistente IA', ariaLabel: 'Assistente IA' },
   { to: '/config', label: 'Ajustes', icon: Settings, title: 'Configurações' },
 ];
 
@@ -102,12 +104,13 @@ export function AppLayout() {
           <ActivePill />
         </div>
         <nav className="border-t border-border/60 bg-background/95 pb-safe backdrop-blur-2xl backdrop-saturate-150" aria-label="Principal">
-          <ul className="grid grid-cols-5">
-            {NAV.map(({ to, label, icon: Icon, end }) => (
+          <ul className="grid grid-cols-6">
+            {NAV.map(({ to, label, icon: Icon, end, ariaLabel }) => (
               <li key={to}>
                 <NavLink
                   to={to}
                   end={end}
+                  aria-label={ariaLabel}
                   onClick={() => navigator.vibrate?.(6)}
                   className={({ isActive }) =>
                     cn('flex h-16 flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors active:opacity-70', isActive ? 'text-primary' : 'text-muted-foreground')
@@ -115,7 +118,7 @@ export function AppLayout() {
                 >
                   {({ isActive }) => (
                     <>
-                      <span className="relative flex h-8 w-14 items-center justify-center">
+                      <span className="relative flex h-8 w-12 items-center justify-center">
                         {isActive && (
                           <motion.span layoutId="nav-pill" className="absolute inset-0 rounded-full bg-primary/15" transition={{ type: 'spring', stiffness: 500, damping: 38 }} />
                         )}
