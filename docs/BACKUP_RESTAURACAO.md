@@ -233,4 +233,4 @@ mesmo se um treino for concluído durante a exportação. O JSON é indentado (l
 - Substituir e mesclar preservam as referências e os IDs das instâncias; um app anterior (P17) preserva a
   referência a um item da versão 2 do catálogo mesmo sem conhecê-lo (a ficha é uma cópia e continua funcionando).
 - Restaurar um backup enquanto a confirmação de associação está aberta: se a instância voltou diferente, a associação
-  é recusada (impressão digital). Ver [RECONHECIMENTO_EXERCICIOS.md](RECONHECIMENTO_EXERCICIOS.md) §11 e §18.
+  é recusada (impressão digital). Ver [RECONHECIMENTO_EXERCICIOS.md](RECONHECIMENTO_EXERCICIOS.md) §16 e §17.
