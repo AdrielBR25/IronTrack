@@ -44,7 +44,7 @@ test('biblioteca: buscar, filtrar, favoritar, criar, montar a ficha, substituir,
   await page.goto('./#/treinos');
   await page.getByTestId('open-library').click();
   await expect(page).toHaveURL(/#\/exercicios$/);
-  await expect(count(page)).toHaveText(/^5\d exercícios$/);
+  await expect(count(page)).toHaveText(/^1\d\d exercícios$/); // P18: catálogo 2 (≥ 100)
   const total = (await count(page).textContent())!.trim();
   await noHorizontalScroll(page);
 
@@ -65,7 +65,7 @@ test('biblioteca: buscar, filtrar, favoritar, criar, montar a ficha, substituir,
   let panel = await filters(page);
   await panel.getByRole('button', { name: 'Tríceps', exact: true }).click();
   await panel.getByRole('button', { name: 'Polia', exact: true }).click();
-  await expect(count(page)).toHaveText('1 exercício');
+  await expect(count(page)).toHaveText('3 exercícios'); // P18: + tríceps corda e unilateral na polia
   await expect(item(page, 'Tríceps na polia')).toBeVisible();
   await noHorizontalScroll(page);
   await panel.getByTestId('clear-filters').click();
