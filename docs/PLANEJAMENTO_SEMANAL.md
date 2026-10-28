@@ -192,3 +192,11 @@ mudaram**. `?data=yyyy-mm-dd` abre um dia (usado pela Início e pela Treinos). D
   única, impressão digital e desfazer da última importação. As entradas criadas são entradas comuns de planejamento,
   sem campo novo; Dexie v4 e backup v5 continuam.
 - Detalhes em [CONSOLIDACAO_AGENDAS.md](CONSOLIDACAO_AGENDAS.md).
+
+## Decisões do calendário (P16)
+
+As decisões lembradas sobre divergências ficam na tabela `calendarDecisions` (Dexie v5), **não** em `planEntries`:
+lembrar "manter planejamento" não cria, altera nem apaga entradas. A impressão digital do conflito usa ID, revisão,
+tipo, rotina e treino das entradas do dia — editar o planejamento do dia (nova revisão) invalida a decisão; planejar
+outro dia não. "Usar a agenda antiga só neste dia" continua sendo uma alteração real (exceção da data, com
+confirmação). O desfazer da importação agora pode ser parcial. Ver [DECISOES_CALENDARIO.md](DECISOES_CALENDARIO.md).

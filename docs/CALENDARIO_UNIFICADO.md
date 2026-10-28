@@ -206,3 +206,11 @@ antiga só neste dia" como única decisão gravada), preferências de exibição
 o que mostrar) e `ResolvedDay.legacyAgrees` ("A agenda anterior indica o mesmo", sem repetir a atividade). `?visao=mes`
 e `?visao=semana` passaram a ser aceitos, e os links são aplicados também com a tela já aberta. Detalhes em
 [CONSOLIDACAO_AGENDAS.md](CONSOLIDACAO_AGENDAS.md).
+
+## Decisões lembradas (P16)
+
+Cada conflito agora tem **identidade** (`tipo|data|assunto`) e **impressão digital** das informações que o definem.
+Uma decisão lembrada ("Manter planejamento e lembrar", "Ocultar observação") só muda a **apresentação** de um conflito
+idêntico: ele sai de `hasWarning` (conta em `rememberedCount`) e continua consultável no dia; precedência, entradas,
+estado e próxima atividade não mudam. Qualquer mudança relevante faz o aviso voltar como novo. Ver
+[DECISOES_CALENDARIO.md](DECISOES_CALENDARIO.md).

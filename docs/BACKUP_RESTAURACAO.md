@@ -8,7 +8,8 @@ Interface em **Configurações › Dados e backup**.
 
 | Formato | Identificação | Situação |
 | ------- | ------------- | -------- |
-| Backup v5 (atual, P13) | igual ao v4 com `"schemaVersion": 5` e `data.planEntries` (planejamento semanal) | Exportado e importado (ver seção "Planejamento semanal"). |
+| Backup v6 (atual, P16) | igual ao v5 com `"schemaVersion": 6` e `data.calendarDecisions` (decisões lembradas do calendário) | Exportado e importado (ver seção "Decisões do calendário"). |
+| Backup v5 (P13) | igual ao v4 com `data.planEntries` (planejamento semanal) | Importado; v5 → v6 acrescenta `calendarDecisions: []`. |
 | Backup v4 (P12) | igual ao v3 com `data.goals` | Importado; v4 → v5 acrescenta `planEntries: []`. |
 | Backup v3 (P10) | igual ao v2 com `"schemaVersion": 3`; exercícios e séries podem ter os campos de modalidade (`modality`, `laterality`, `loadMode`, `secondaryMuscles`, `distanceUnit`, `targetDurationSec`, `targetDistance`, `durationSec`, `distance`, `side`, `assistanceKg`), ver [MIGRACAO_EXERCICIOS_V3.md](MIGRACAO_EXERCICIOS_V3.md) | Exportado e importado. Valores inválidos bloqueiam (`INVALID_MODALITY_FIELD`); contradições são aviso (`MODALITY_CONTRADICTION`). |
 | Backup v2 | `{"app": "irontrack", "kind": "backup", "schemaVersion": 2, "exportedAt": "...", "profile": {"id", "displayName", "createdAt"}, "data": {...}}`; registros de `routines`, `sessions`, `bodyEntries` e `photos` com `profileId` | Importado; migrado em memória v2 → v3 (identidade, nada muda). |
@@ -18,7 +19,7 @@ Interface em **Configurações › Dados e backup**.
 | Avaliações `irontrack.avaliacoes` v1 | — | Importadas em Evolução › Corpo (contrato inalterado). |
 | `schemaVersion` maior que o suportado | — | Recusado: "Atualize o IronTrack antes de importar". |
 
-`data` contém `settings`, `routines`, `sessions`, `rotations`, `overrides`, `bodyEntries`, `photos`, `goals` (v4+) e `planEntries` (v5+).
+`data` contém `settings`, `routines`, `sessions`, `rotations`, `overrides`, `bodyEntries`, `photos`, `goals` (v4+), `planEntries` (v5+) e `calendarDecisions` (v6+).
 Campos desconhecidos são preservados (`.passthrough()`), para que backups de versões futuras compatíveis não percam dados.
 
 ## Versionamento
@@ -26,6 +27,8 @@ Campos desconhecidos são preservados (`.passthrough()`), para que backups de ve
 - `BACKUP_SCHEMA_VERSION` (formato JSON) e `DB_SCHEMA_VERSION` (IndexedDB) são **independentes**.
 - Mudou o formato do arquivo? Incremente `BACKUP_SCHEMA_VERSION` e acrescente uma função em `MIGRATIONS`
   (chave = versão de origem) que leve à versão seguinte. Nunca remova migrações antigas.
+- v5 → v6 (P16) acrescenta `data.calendarDecisions: []` (decisões lembradas; ver [DECISOES_CALENDARIO.md](DECISOES_CALENDARIO.md) §9).
+  Um app anterior recusa arquivos v6 com a orientação de atualizar.
 - v4 → v5 (P13) acrescenta `data.planEntries: []` (planejamento semanal; ver [PLANEJAMENTO_SEMANAL.md](PLANEJAMENTO_SEMANAL.md) §8).
   Um app anterior recusa arquivos v5 com a orientação de atualizar.
 - v3 → v4 (P12) acrescenta `data.goals: []` (metas de treinamento; ver [METAS_TREINAMENTO.md](METAS_TREINAMENTO.md) §5).
@@ -186,9 +189,22 @@ mesmo se um treino for concluído durante a exportação. O JSON é indentado (l
 ## Consolidação de agendas (P15)
 
 - Entradas criadas pela importação da agenda anterior são entradas de planejamento comuns: vão em `data.planEntries`
-  e seguem as regras acima (formato continua **v5**).
+  e seguem as regras acima (formato **v5** no P15; **v6** desde o P16).
 - O registro do desfazer (`settings`, chave `planImport.last.<perfil>`) e as preferências do calendário
   (`localStorage`) **não** entram no backup. "Substituir" e "Apagar tudo" apagam o registro do desfazer: depois disso a
   última importação não pode mais ser desfeita (o planejamento pode ser editado normalmente).
 - Substituir por um backup anterior à importação volta ao planejamento antigo; a agenda anterior continua e pode ser
   importada de novo. Ver [CONSOLIDACAO_AGENDAS.md](CONSOLIDACAO_AGENDAS.md).
+
+## Decisões do calendário (backup v6, P16)
+
+- `data.calendarDecisions`: decisões lembradas sobre divergências do calendário (limite de 1.000 no arquivo).
+- **Substituir** devolve as decisões exatamente; com transferência de perfil, `profileId` e `id`
+  (`<perfil>~<conflito>`) são remapeados juntos.
+- **Mesclar** acrescenta só por ID: idênticas são ignoradas; em conflito de ID fica a decisão local (exige aceitar a
+  restauração parcial). Nada é sobrescrito.
+- Decisão inválida, de outro dono ou com ID incoerente é erro de integridade (`INVALID_CALENDAR_DECISION`): a
+  restauração inteira é recusada, sem gravar.
+- Uma decisão restaurada só vale se o conflito for idêntico ao que existia quando foi tomada (impressão digital); se o
+  planejamento restaurado for outro, ela aparece como invalidada ou resolvida, sem esconder nenhum aviso.
+- Backups v0–v5 continuam importáveis (sem decisões). Ver [DECISOES_CALENDARIO.md](DECISOES_CALENDARIO.md).

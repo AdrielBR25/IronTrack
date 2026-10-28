@@ -177,8 +177,9 @@ A sessão em andamento é gravada a cada ação (`saveSession`) e recuperada ao 
 
 ## 5. Persistência
 
-- Banco `irontrack`, Dexie **v4** (P12: tabela `goals`; P13: `planEntries`; P14 e P15 não mudaram o esquema): tabelas
-  `settings`, `profiles`, `routines`, `sessions`, `rotations`, `overrides`, `bodyEntries`, `photos`, `goals`, `planEntries`. Histórico em [MIGRACOES.md](MIGRACOES.md).
+- Banco `irontrack`, Dexie **v5** (P12: tabela `goals`; P13: `planEntries`; P14 e P15 não mudaram o esquema; P16:
+  `calendarDecisions`): tabelas `settings`, `profiles`, `routines`, `sessions`, `rotations`, `overrides`, `bodyEntries`,
+  `photos`, `goals`, `planEntries`, `calendarDecisions`. Histórico em [MIGRACOES.md](MIGRACOES.md).
 - A instância `db` e o esquema ficam só em `src/db/db.ts`. As telas não a importam (regra testada).
 - Repositórios por domínio, com funções explícitas (`completeSession`, `importBodyEvaluations`). Não há
   repositório genérico: cada operação mantém sua regra de negócio e sua transação.
@@ -439,3 +440,25 @@ Detalhes em [CONSOLIDACAO_AGENDAS.md](CONSOLIDACAO_AGENDAS.md).
 - **Preferências** em `localStorage` (`irontrack.calendarPrefs.v1`), por perfil, fora do banco e do backup.
 - **Regras testadas**: domínio puro; a importação só escreve `planEntries` e o registro; nada vai para IA ou rede;
   `trainingDays`, `overrides`, sessões e rotação nunca são alterados.
+
+## 18. Decisões do calendário e desfazer inteligente (P16)
+
+Detalhes em [DECISOES_CALENDARIO.md](DECISOES_CALENDARIO.md).
+
+| Camada | Arquivo | Responsabilidade |
+| --- | --- | --- |
+| Domínio (puro) | `modules/planner/decisions.ts` | registro `CalendarDecision`, Zod, permissões, limites, erros, identidade do registro |
+| Domínio (puro) | `modules/calendar/fingerprint.ts`, `conflicts.ts` | identidade e impressão digital de cada conflito |
+| Domínio (puro) | `modules/calendar/decisionMatch.ts` | aplica decisões ao dia calculado (só apresentação) |
+| Domínio (puro) | `modules/calendar/decisions.ts` | situação das decisões, regras de gravação revalidadas |
+| Domínio (puro) | `modules/planner/legacyImport.ts` (`previewUndoImport`) | prévia por item do desfazer, modo parcial |
+| Banco | `db/calendarDecisions.ts` | leitura validada por perfil, transação `rw` única, limite |
+| Banco | `db/legacyImport.ts` (`undoLastImport`) | desfazer tudo/só os seguros com revalidação da prévia |
+| Aplicação | `features/calendar/decisionActions.ts`, `decisionUi.ts` | camada única usada por Planejamento, Início e Treinos |
+| Interface | `ConflictCenter.tsx`, `ConflictNotice.tsx`, `RememberedDecisions.tsx`, `LegacyImportPage.tsx` | ações rotuladas, revisão, prévia do desfazer |
+
+- **Fronteiras mantidas**: `db` e `lib` não importam `modules/calendar`; por isso o registro e a validação ficam em
+  `modules/planner` (única exceção de dependência: `zod` em `planner/decisions.ts`, testada) e a regra do calendário
+  entra na transação como função (`mutateCalendarDecisions(fn)`).
+- **Dexie v5** e **backup v6** (`data.calendarDecisions`). O registro do desfazer continua em `settings`, fora do backup.
+- Decisões nunca escrevem fora de `calendarDecisions`; desfazer só escreve `planEntries` e o próprio registro.

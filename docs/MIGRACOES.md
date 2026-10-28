@@ -10,6 +10,7 @@ Implementação em `src/db/db.ts`; testes em `tests/unit/migrations.test.ts`.
 | 2 | IronTrack 2.0 F01/P02 | Tabela `profiles` (`id`) e índice `profileId` em `routines`, `sessions`, `bodyEntries`, `photos` (ver [PERFIL_LOCAL.md](PERFIL_LOCAL.md)). |
 | 3 | IronTrack 2.0 F01/P12 | Tabela `goals` (`id, profileId, status, updatedAt`), sem função de upgrade; nenhuma tabela antiga muda (ver [METAS_TREINAMENTO.md](METAS_TREINAMENTO.md) §4). |
 | 4 | IronTrack 2.0 F01/P13 | Tabela `planEntries` (`id, profileId, scope, date, routineId, updatedAt`), sem função de upgrade; nenhuma tabela antiga muda (ver [PLANEJAMENTO_SEMANAL.md](PLANEJAMENTO_SEMANAL.md) §7). |
+| 5 | IronTrack 2.0 F01/P16 | Tabela `calendarDecisions` (`id, profileId, date, updatedAt`), sem função de upgrade; nenhuma tabela antiga muda (ver [DECISOES_CALENDARIO.md](DECISOES_CALENDARIO.md) §8). |
 
 O Prompt 01 não alterou o esquema (só criou a infraestrutura). O Prompt 02 criou a versão 2 (`DB_SCHEMA_VERSION = 2`).
 O Prompt 10 (modelo de exercícios v3) **não** criou versão nova: os campos de modalidade ficam dentro dos registros,
@@ -20,6 +21,8 @@ registros. Um app anterior com Dexie 4 que declara só a v2 continua abrindo o b
 instalada) e ignora a tabela nova; verificado no Chromium e em `tests/unit/goals-db.test.ts`.
 O Prompt 13 criou a versão 4 (`DB_SCHEMA_VERSION = 4`) só para a tabela do planejamento; mesmas garantias (app do P12
 abrindo v4 testado em `tests/unit/planner-db.test.ts`).
+O Prompt 16 criou a versão 5 (`DB_SCHEMA_VERSION = 5`) só para as decisões lembradas do calendário; mesmas garantias
+(migração aditiva, sem transformar registros; declarações v1–v4 intactas, testado em `tests/unit/migrations.test.ts`).
 
 ## Migração v1 → v2 (perfil local)
 

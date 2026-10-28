@@ -105,6 +105,10 @@ Planejamento igual é "sem alteração" (é isso que torna a importação idempo
   criadas são encerradas ontem (o passado não é reescrito), exceções de datas passadas ficam, substituídas voltam como
   nova versão a partir de hoje.
 - Sessões, rotação e agenda anterior nunca são tocadas.
+- **P16 — desfazer inteligente**: a prévia lista cada lugar como seguro, alterado depois, excluído depois, passado ou
+  já desfeito; "Desfazer tudo" só quando tudo é seguro; "Desfazer só os itens seguros" preserva o resto e marca o
+  registro como **desfeita em parte** (`status: 'partial'`, `reverted`). A confirmação revalida a impressão digital da
+  prévia. Detalhes em [DECISOES_CALENDARIO.md](DECISOES_CALENDARIO.md) §10.
 
 ## 8. Preferências de exibição
 
@@ -141,7 +145,9 @@ com **Origem** e **Impacto** de cada grupo e, por dia:
   "Nada foi alterado; a divergência continua e volta ao reabrir". Nada é marcado como resolvido.
 
 Decisão pendente herdada do P14: lembrar "manter planejamento atual" entre aberturas exigiria persistir uma decisão
-que não altera nenhum modelo; continua **não persistido** (e rotulado assim). A importação reduz a maior parte dessas
+que não altera nenhum modelo; continua **não persistido** (e rotulado assim). **Atualizado no P16**: "Manter
+planejamento e lembrar" agora é uma decisão de exibição persistida e invalidada sozinha quando algo relevante muda;
+"recolher só agora" continua visual. Ver [DECISOES_CALENDARIO.md](DECISOES_CALENDARIO.md). A importação reduz a maior parte dessas
 divergências de forma real (planejamento e agenda passam a concordar).
 
 ## 10. Compatibilidade
@@ -202,10 +208,11 @@ sugestão, descanso, concluído) e "A agenda anterior indica o mesmo".
 
 ## 15. Limitações
 
-- Só a **última** importação pode ser desfeita, e o desfazer é bloqueado (inteiro) se algo afetado mudou depois.
+- Só a **última** importação pode ser desfeita. Desde o P16, se algo afetado mudou depois, "desfazer tudo" é bloqueado
+  mas é possível desfazer **só os itens seguros** (ver §7).
 - A importação considera só a **rotina ativa** (a agenda anterior só existe para ela).
 - Dias fora de `trainingDays` não viram descanso; quem quiser descanso explícito planeja no Planejamento.
 - Preferências são por aparelho (não sincronizam e não entram no backup).
-- "Manter planejamento atual" continua só visual (persistir exigiria autorização).
+- ~~"Manter planejamento atual" continua só visual~~ — persistido no P16 ([DECISOES_CALENDARIO.md](DECISOES_CALENDARIO.md)).
 - O registro do desfazer mora na tabela `settings` com chave própria; se um dia houver um registro de operações mais
   amplo, ele deve virar uma tabela (com migração).
