@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Flag, Trash2, Trophy, Undo2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Flag, Trash2, Trophy, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useActiveSession, useCompletedSessions, useNow, useSettings } from '@/hooks/data';
-import { completeSession, discardSession, getRoutine, saveSession } from '@/db/repo';
+import { completeSession, discardSession, getRoutine, saveSessionGuarded } from '@/db/repo';
 import {
   addSet,
   carryForwardWeight,
@@ -31,12 +31,15 @@ import {
   completionPct,
   shouldAdvance,
   setCompletionErrors,
+  type SetTimerTarget,
 } from '@/modules/training';
 import { audioAvailable, closeRestNotifications, notificationState, unlockAudio, vibrationAvailable } from '@/lib/alerts';
 import type { SessionSet, WorkoutSession } from '@/lib/types';
 import { ExerciseCard, summarizeSets } from '@/features/workout/ExerciseCard';
-import { SetEditor, SetFields } from '@/features/workout/SetEditor';
+import { SetEditor, SetFields, setTitle } from '@/features/workout/SetEditor';
 import { RestPanel } from '@/features/workout/RestPanel';
+import { SetTimerChip } from '@/features/workout/SetTimerPanel';
+import { setTimerStore, useSetTimer } from '@/features/workout/setTimerStore';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input, Textarea } from '@/components/ui/input';
@@ -95,17 +98,68 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
   const now = useNow(1000);
   useWakeLock(true);
 
-  // Sincroniza mudanças vindas do banco (ex.: aviso de descanso marcado pelo RestWatcher).
+  // Gravação segura (P11, docs/CRONOMETROS_E_CONCORRENCIA.md §9). `confirmedRef` é a última versão do banco que esta
+  // tela conhece; cada gravação compara com o banco na mesma transação e, se outra aba (ou o aviso de descanso)
+  // gravou antes, mescla em três vias em vez de sobrescrever. As gravações desta aba saem em fila, na ordem.
+  const confirmedRef = useRef<WorkoutSession>(initial);
+  const dirtyRef = useRef(false);
+  const closedRef = useRef(false);
+  const queueRef = useRef<Promise<void>>(Promise.resolve());
+  const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
+
+  // Sincroniza mudanças vindas do banco (outra aba, aviso de descanso) quando não há edição local pendente.
   useEffect(() => {
-    if (live && live.id === session.id && live.updatedAt > sessionRef.current.updatedAt) setSession(live);
+    if (live && live.id === session.id && !dirtyRef.current && live.updatedAt > sessionRef.current.updatedAt) {
+      confirmedRef.current = live;
+      sessionRef.current = live;
+      setSession(live);
+    }
   }, [live, session.id]);
 
-  const commit = useCallback((next: WorkoutSession) => {
-    const stamped = { ...next, updatedAt: Date.now() };
-    sessionRef.current = stamped;
-    setSession(stamped);
-    void saveSession(stamped);
+  const flush = useCallback(() => {
+    queueRef.current = queueRef.current.then(async () => {
+      if (!dirtyRef.current || closedRef.current) return;
+      const local = sessionRef.current;
+      setSaveState('saving');
+      try {
+        const r = await saveSessionGuarded(confirmedRef.current, local);
+        if (r.status === 'closed') {
+          closedRef.current = true;
+          dirtyRef.current = false;
+          setSaveState('saved');
+          toast.warning('Este treino foi finalizado ou descartado em outra aba.', { description: 'As alterações feitas aqui depois disso não foram gravadas.' });
+          return;
+        }
+        if (r.conflicts.length) toast.warning('Este treino também foi alterado em outra aba.', { description: 'Onde as duas mudaram a mesma coisa, ficou o que foi gravado primeiro. Confira as séries.' });
+        if (sessionRef.current === local) {
+          dirtyRef.current = false;
+          confirmedRef.current = r.session;
+          sessionRef.current = r.session;
+          setSession(r.session);
+        } else {
+          // Houve novas edições durante a gravação: elas partiram de `local`, que vira a base da próxima mescla.
+          confirmedRef.current = r.status === 'saved' ? r.session : local;
+        }
+        setSaveState(dirtyRef.current ? 'saving' : 'saved');
+      } catch {
+        setSaveState('error');
+        toast.error('Não foi possível salvar a última alteração.', { description: 'Os dados continuam na tela. Toque em "tentar de novo" no topo.' });
+      }
+    });
+    return queueRef.current;
   }, []);
+
+  const commit = useCallback(
+    (next: WorkoutSession) => {
+      if (closedRef.current) return;
+      const stamped = { ...next, updatedAt: Date.now() };
+      sessionRef.current = stamped;
+      dirtyRef.current = true;
+      setSession(stamped);
+      void flush();
+    },
+    [flush],
+  );
 
   const history = useCallback((key: string) => historyFor(key, completed ?? [], 5), [completed]);
 
@@ -124,13 +178,19 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
     requestAnimationFrame(() => document.getElementById(`ex-${exId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   };
 
-  const doComplete = () => {
-    if (!current || !currentSet || !currentEx) return;
+  const doComplete = (patch?: Partial<SessionSet>) => {
+    const base = sessionRef.current;
+    if (!current) return;
+    const ex0 = base.exercises.find((e) => e.id === current.exerciseId);
+    const set0 = ex0?.sets.find((s) => s.id === current.setId);
+    // Ação repetida (toque duplo, tela desatualizada): só uma série pendente pode ser concluída, uma vez.
+    if (!ex0 || !set0 || set0.status !== 'pending') return;
     // Nunca conclui uma série com valores inválidos (o botão já fica desabilitado; isto protege atalhos).
-    if (setCompletionErrors(currentEx, currentSet).length) return;
+    if (setCompletionErrors(ex0, { ...set0, ...patch }).length) return;
     unlockAudio();
     void closeRestNotifications();
-    let next = carryForwardWeight(completeSet(session, current.exerciseId, current.setId), current.exerciseId, current.setId);
+    const patched = patch ? updateSet(base, current.exerciseId, current.setId, patch) : base;
+    let next = carryForwardWeight(completeSet(patched, current.exerciseId, current.setId), current.exerciseId, current.setId);
     const following = nextPending(next, current.exerciseId);
     const secs = restAfter(next, current, following, settings);
     next = {
@@ -140,6 +200,8 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
     };
     setFocusSet(null);
     commit(next);
+    // O cronômetro de execução desta série termina com ela (o descanso não é afetado).
+    setTimerStore.discardWhere((t) => t.sessionId === base.id && t.exerciseId === ex0.id && t.setId === set0.id);
     if (navigator.vibrate && settings.vibration) navigator.vibrate(20);
     if (following && following.exerciseId !== current.exerciseId) scrollTo(following.exerciseId);
     if (!following) {
@@ -147,6 +209,20 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
       setFinishOpen(true);
     }
   };
+
+  const describeTimer = (t: SetTimerTarget) => {
+    const ex = session.exercises.find((e) => e.id === t.exerciseId);
+    const set = ex?.sets.find((x) => x.id === t.setId);
+    return ex && set ? `${ex.name} · ${setTitle(ex, set)}` : 'Série não encontrada';
+  };
+  const goToTimer = (t: SetTimerTarget) => {
+    if (!session.exercises.some((e) => e.id === t.exerciseId && e.sets.some((x) => x.id === t.setId && x.status === 'pending'))) return;
+    setFocusSet({ exerciseId: t.exerciseId, setId: t.setId });
+    commit({ ...sessionRef.current, focusExerciseId: t.exerciseId });
+    setExpanded((m) => ({ ...m, [t.exerciseId]: true }));
+    scrollTo(t.exerciseId);
+  };
+  const { state: timerState } = useSetTimer();
 
   const endRest = useCallback(() => {
     const s = sessionRef.current;
@@ -159,7 +235,7 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
 
   const patchCurrent = (p: Partial<SessionSet>) => {
     if (!current) return;
-    commit(updateSet(session, current.exerciseId, current.setId, 'weight' in p || 'assistanceKg' in p ? { ...p, edited: true } : p));
+    commit(updateSet(sessionRef.current, current.exerciseId, current.setId, 'weight' in p || 'assistanceKg' in p ? { ...p, edited: true } : p));
   };
 
   const prog = sessionProgress(session);
@@ -184,6 +260,16 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
             </p>
             <p className="text-xs text-muted-foreground tabular">
               {fmtClock((now - session.startedAt) / 1000)} · {prog.done}/{prog.total} séries · {fmtVol(sessionVolume(session))}
+              {' · '}
+              {saveState === 'error' ? (
+                <button type="button" className="font-semibold text-destructive underline" onClick={() => void flush()} data-testid="save-status">
+                  <AlertTriangle className="inline h-3 w-3" /> não salvo · tentar de novo
+                </button>
+              ) : (
+                <span data-testid="save-status" data-state={saveState}>
+                  {saveState === 'saving' ? 'salvando…' : 'salvo'}
+                </span>
+              )}
             </p>
           </div>
           <Button size="sm" variant={current ? 'secondary' : 'default'} onClick={() => setFinishOpen(true)} data-testid="open-finish">
@@ -212,21 +298,21 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
               onSelectSet={(s) => {
                 if (s.status === 'pending') {
                   setFocusSet({ exerciseId: ex.id, setId: s.id });
-                  commit({ ...session, focusExerciseId: ex.id });
+                  commit({ ...sessionRef.current, focusExerciseId: ex.id });
                 } else setEditing({ exId: ex.id, setId: s.id });
               }}
               onAddSet={(type) => {
-                commit(addSet(session, ex.id, type));
+                commit(addSet(sessionRef.current, ex.id, type));
                 setExpanded((m) => ({ ...m, [ex.id]: true }));
               }}
               onApplyWeight={(kg) => {
-                let next = session;
+                let next = sessionRef.current;
                 for (const s of ex.sets) if (s.status === 'pending' && s.type === 'normal') next = updateSet(next, ex.id, s.id, { weight: kg });
                 commit(next);
                 toast.success(`Carga ajustada para ${fmtW(kg)}`);
               }}
               onSubstitute={() => setSubstituting(ex.id)}
-              onSkipExercise={() => commit(skipExercise(session, ex.id))}
+              onSkipExercise={() => commit(skipExercise(sessionRef.current, ex.id))}
             />
           );
         })}
@@ -247,13 +333,16 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
       <div className="fixed inset-x-0 bottom-0 z-30 pb-safe">
         <div className="pointer-events-none h-6 bg-gradient-to-t from-background to-transparent" />
         <div className="mx-auto max-w-3xl space-y-2 bg-background px-3 pb-3">
+          {timerState && timerState.sessionId === session.id && (session.rest || timerState.setId !== currentSet?.id) && (
+            <SetTimerChip state={timerState} label={describeTimer(timerState)} onGoTo={session.rest ? undefined : () => goToTimer(timerState)} />
+          )}
           {session.rest && (
             <RestPanel
               rest={session.rest}
               alertsMissing={alertsMissing || (!settings.sound && !settings.vibration)}
-              onAdjust={(d) => commit({ ...session, rest: adjustRest(session.rest!, d, Date.now()) })}
-              onPause={() => commit({ ...session, rest: pauseRest(session.rest!, Date.now()) })}
-              onResume={() => commit({ ...session, rest: resumeRest(session.rest!, Date.now()) })}
+              onAdjust={(d) => commit({ ...sessionRef.current, rest: adjustRest(sessionRef.current.rest!, d, Date.now()) })}
+              onPause={() => commit({ ...sessionRef.current, rest: pauseRest(sessionRef.current.rest!, Date.now()) })}
+              onResume={() => commit({ ...sessionRef.current, rest: resumeRest(sessionRef.current.rest!, Date.now()) })}
               onSkip={endRest}
             />
           )}
@@ -267,8 +356,11 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
               highlight={highlight}
               onPatch={patchCurrent}
               onComplete={doComplete}
+              sessionId={session.id}
+              onGoToTimer={goToTimer}
+              describeTimer={describeTimer}
               onSkip={() => {
-                const next = skipSet(session, currentEx.id, currentSet.id);
+                const next = skipSet(sessionRef.current, currentEx.id, currentSet.id);
                 const following = nextPending(next, currentEx.id);
                 commit({ ...next, focusExerciseId: following?.exerciseId ?? currentEx.id });
                 setFocusSet(null);
@@ -288,7 +380,7 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
                 <DialogTitle>{setLabel(session, { exerciseId: editingEx.id, setId: editingSet.id })}</DialogTitle>
                 <DialogDescription>{editingSet.status === 'done' ? 'Série concluída — ajuste os valores se precisar.' : 'Série pulada.'}</DialogDescription>
               </DialogHeader>
-              <SetFields compact ex={editingEx} set={editingSet} settings={settings} onPatch={(p) => commit(updateSet(session, editingEx.id, editingSet.id, p))} />
+              <SetFields compact ex={editingEx} set={editingSet} settings={settings} onPatch={(p) => commit(updateSet(sessionRef.current, editingEx.id, editingSet.id, p))} />
               {editingSet.status === 'done' && setCompletionErrors(editingEx, editingSet).length > 0 && (
                 <p role="status" className="text-xs text-warn" data-testid="edit-set-errors">
                   {setCompletionErrors(editingEx, editingSet).join(' ')} Valores inválidos ficam fora do histórico e das análises.
@@ -298,7 +390,7 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
                 <Button
                   variant="outline"
                   onClick={() => {
-                    commit(removeSet(session, editingEx.id, editingSet.id));
+                    commit(removeSet(sessionRef.current, editingEx.id, editingSet.id));
                     setEditing(null);
                   }}
                 >
@@ -307,7 +399,7 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
                 <Button
                   variant="secondary"
                   onClick={() => {
-                    commit(undoSet(session, editingEx.id, editingSet.id));
+                    commit(undoSet(sessionRef.current, editingEx.id, editingSet.id));
                     setFocusSet({ exerciseId: editingEx.id, setId: editingSet.id });
                     setEditing(null);
                   }}
@@ -328,7 +420,7 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
         onClose={() => setSubstituting(null)}
         onPick={(name) => {
           if (!substituting) return;
-          commit(substituteExercise(session, substituting, name, completed ?? []));
+          commit(substituteExercise(sessionRef.current, substituting, name, completed ?? []));
           setSubstituting(null);
           toast.success(`Substituído por ${name}`);
         }}
@@ -344,7 +436,14 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
           setDiscardOpen(true);
         }}
         onFinish={async (notes) => {
+          // Grava o que estiver pendente antes; a conclusão é idempotente (outra aba pode ter finalizado antes).
+          await flush();
+          if (closedRef.current) {
+            navigate('/', { replace: true });
+            return;
+          }
           const done = await completeSession(sessionRef.current, notes);
+          closedRef.current = true;
           toast.success('Treino concluído e salvo!', {
             description: done.advancedRotation ? 'A rotação avançou para o próximo treino.' : 'A rotação não avançou (política de conclusão).',
           });

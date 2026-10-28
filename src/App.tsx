@@ -4,6 +4,8 @@ import { AppLayout } from '@/components/AppLayout';
 import { ThemeSync } from '@/components/ThemeSync';
 import { UpdatePrompt } from '@/components/UpdatePrompt';
 import { RestWatcher } from '@/features/workout/RestWatcher';
+import { SetTimerWatcher } from '@/features/workout/SetTimerWatcher';
+import { CompatGuard } from '@/features/compat/CompatGuard';
 import HomePage from '@/pages/HomePage';
 import ActiveWorkoutPage from '@/pages/ActiveWorkoutPage';
 import { lazy } from 'react';
@@ -25,6 +27,7 @@ export default function App() {
     <HashRouter>
       <ThemeSync />
       <RestWatcher />
+      <SetTimerWatcher />
       <Routes>
         <Route path="/treino" element={<ActiveWorkoutPage />} />
         <Route element={<AppLayout />}>
@@ -41,6 +44,7 @@ export default function App() {
         </Route>
       </Routes>
       <UpdatePrompt />
+      <CompatGuard />
       <Toaster position="top-center" theme={dark ? 'dark' : 'light'} richColors closeButton toastOptions={{ className: 'rounded-2xl' }} />
     </HashRouter>
   );

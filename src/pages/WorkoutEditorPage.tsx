@@ -34,6 +34,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { ConfirmDialog } from '@/components/ui/confirm';
 import { SortableList } from '@/components/SortableList';
 import { Badge } from '@/components/ui/badge';
+import { useModelCapability } from '@/features/compat/CompatGuard';
 
 type Draft = {
   name: string;
@@ -438,6 +439,7 @@ export default function WorkoutEditorPage() {
   const [toDelete, setToDelete] = useState<ExerciseTemplate | null>(null);
   const [meta, setMeta] = useState({ label: '', name: '', notes: '' });
   const { fmtW } = useUnits();
+  const outdated = useModelCapability().newer;
 
   useEffect(() => {
     if (workout) setMeta({ label: workout.label, name: workout.name, notes: workout.notes ?? '' });
@@ -453,7 +455,14 @@ export default function WorkoutEditorPage() {
     );
   }
 
-  const saveWorkout = (w: Workout) => saveRoutineKeepPointer({ ...routine, workouts: routine.workouts.map((x) => (x.id === w.id ? w : x)) } as Routine);
+  const saveWorkout = (w: Workout) => {
+    // P11: um app desatualizado não regrava fichas que uma versão mais nova já usou (docs/CRONOMETROS_E_CONCORRENCIA.md §7).
+    if (outdated) {
+      toast.error('Atualize o IronTrack antes de editar: estes dados já foram usados por uma versão mais nova.');
+      return Promise.resolve();
+    }
+    return saveRoutineKeepPointer({ ...routine, workouts: routine.workouts.map((x) => (x.id === w.id ? w : x)) } as Routine);
+  };
   const saveMeta = () => {
     const label = meta.label.trim().toUpperCase().slice(0, 4) || workout.label;
     if (routine.workouts.some((w) => w.id !== workout.id && w.label === label)) {
