@@ -4,6 +4,8 @@ import { toast } from 'sonner';
 import type { SessionSet } from '@/lib/types';
 import {
   canIncludeAway,
+  wasRecovered,
+  SET_TIMER_LIMITS,
   fmtDurationSec,
   fmtStopwatch,
   isRecordableMeasure,
@@ -122,15 +124,23 @@ export function SetTimerPanel({
         )}
       </div>
 
-      {mine?.status === 'paused' && canIncludeAway(mine) && (
+      {mine && wasRecovered(mine) && (
         <div className="mt-2 rounded-xl bg-background/70 p-2 text-xs" data-testid="set-timer-recovered">
           <p>
-            O app foi recarregado ou fechado com o cronômetro rodando. A contagem foi pausada no último tempo confirmado. Tempo fora do app:{' '}
-            <strong className="tabular">{fmtStopwatch(mine.awayMs ?? 0)}</strong>.
+            A página foi recarregada ou fechada com o cronômetro rodando. A contagem foi pausada no último tempo confirmado; toque em Continuar para seguir.
+            {(mine.awayMs ?? 0) >= 1000 && (
+              <>
+                {' '}
+                Tempo fora do app: <strong className="tabular">{fmtStopwatch(mine.awayMs ?? 0)}</strong>
+                {(mine.awayMs ?? 0) > SET_TIMER_LIMITS.maxAwayMs ? ' (longo demais para somar; ajuste a duração à mão se precisar).' : '.'}
+              </>
+            )}
           </p>
-          <Button size="sm" variant="secondary" className="mt-1.5" onClick={() => store.includeAway(target)} data-testid="set-timer-include-away">
-            <History /> Somar tempo fora
-          </Button>
+          {canIncludeAway(mine) && (
+            <Button size="sm" variant="secondary" className="mt-1.5" onClick={() => store.includeAway(target)} data-testid="set-timer-include-away">
+              <History /> Somar tempo fora
+            </Button>
+          )}
         </div>
       )}
 

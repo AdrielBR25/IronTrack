@@ -94,9 +94,14 @@ export function recoverSetTimer(s: SetTimerState, now: number): SetTimerState {
   return { ...s, status: 'paused', accumulatedMs: confirmed, segmentStartedAt: null, awayMs: Math.max(0, now - s.checkpointAt), checkpointAt: now, rev: s.rev + 1 };
 }
 
-/** O tempo fora do app pode ser somado? (pausado depois de recuperar, positivo e até 6 h). */
+/** Recuperado depois de recarregar e ainda não retomado (a tela explica o que aconteceu). */
+export function wasRecovered(s: SetTimerState): boolean {
+  return s.status === 'paused' && typeof s.awayMs === 'number';
+}
+
+/** O tempo fora do app pode ser somado? (pausado depois de recuperar, de 1 s até 6 h). */
 export function canIncludeAway(s: SetTimerState): boolean {
-  return s.status === 'paused' && !!s.awayMs && s.awayMs > 0 && s.awayMs <= SET_TIMER_LIMITS.maxAwayMs;
+  return wasRecovered(s) && (s.awayMs ?? 0) >= 1000 && (s.awayMs ?? 0) <= SET_TIMER_LIMITS.maxAwayMs;
 }
 
 export function includeAwayTime(s: SetTimerState): SetTimerState {
@@ -177,7 +182,7 @@ export function parseSetTimerState(raw: unknown): SetTimerState | null {
     accumulatedMs: cap(r.accumulatedMs),
     segmentStartedAt: r.status === 'running' ? (r.segmentStartedAt as number) : null,
     checkpointAt: r.checkpointAt,
-    awayMs: num(r.awayMs) && r.awayMs > 0 ? r.awayMs : null,
+    awayMs: num(r.awayMs) && r.awayMs >= 0 ? r.awayMs : null,
     appliedSec: num(r.appliedSec) ? r.appliedSec : null,
     rev: r.rev,
   };

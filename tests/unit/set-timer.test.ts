@@ -21,6 +21,7 @@ import {
   startRest,
   startSetTimer,
   stopSetTimer,
+  wasRecovered,
 } from '@/modules/training';
 import { SET_TIMER_KEY, SetTimerStore, type SetTimerDeps } from '@/features/workout/setTimerStore';
 
@@ -95,6 +96,11 @@ describe('cronômetro: regras puras', () => {
     expect(canIncludeAway(inc)).toBe(false);
     // Fora por mais de 6 h: não oferece somar (só digitação manual).
     expect(canIncludeAway(recoverSetTimer(s, T0 + 40_000 + SET_TIMER_LIMITS.maxAwayMs + 1))).toBe(false);
+    // Recarga rápida (menos de 1 s fora): recuperado e pausado, sem oferecer soma.
+    const quick = recoverSetTimer(s, T0 + 40_400);
+    expect(wasRecovered(quick)).toBe(true);
+    expect(canIncludeAway(quick)).toBe(false);
+    expect(wasRecovered(resumeSetTimer(quick, T0 + 41_000))).toBe(false);
     // Pausado ou encerrado não muda ao recuperar.
     const p = pauseSetTimer(startSetTimer(A, T0), T0 + 5_000);
     expect(recoverSetTimer(p, T0 + 99_000)).toBe(p);
