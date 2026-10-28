@@ -170,7 +170,12 @@ classificação da ficha some.
   outro navegador não tem a fotografia); só detecta exercícios com o mesmo ID; se o app antigo gravar duas vezes, a
   fotografia continua com o último estado conhecido pelo app novo, então ainda detecta.
 
-### Impacto de uma migração Dexie v2 → v3 (não executada)
+### Impacto de uma migração Dexie v2 → v3 (não executada no P11; feita no P12)
+
+> **Correção (P12):** a afirmação abaixo sobre `VersionError` vale para o Dexie 3. Com o Dexie 4 (usado por todas
+> as versões publicadas), um app que declara só a v2 abre o banco v3 na versão instalada e ignora tabelas novas;
+> verificado no Chromium e em `tests/unit/goals-db.test.ts`. O P12 criou a v3 só com a tabela `goals`
+> ([METAS_TREINAMENTO.md](METAS_TREINAMENTO.md) §4). O texto original fica como registro.
 
 - **Efeito:** qualquer app que declare só a v2 recebe `VersionError` ao abrir o banco. O P09 mostra "Atualize o app";
   apps mais antigos podem só falhar ao carregar. Ou seja: impede a regravação, mas também bloqueia **todo** o acesso

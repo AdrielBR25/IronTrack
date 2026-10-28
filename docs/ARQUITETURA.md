@@ -177,8 +177,8 @@ A sessão em andamento é gravada a cada ação (`saveSession`) e recuperada ao 
 
 ## 5. Persistência
 
-- Banco `irontrack`, Dexie **v2** (inalterado nesta etapa): tabelas `settings`, `profiles`, `routines`,
-  `sessions`, `rotations`, `overrides`, `bodyEntries`, `photos`. Histórico em [MIGRACOES.md](MIGRACOES.md).
+- Banco `irontrack`, Dexie **v3** (P12: tabela `goals`): tabelas `settings`, `profiles`, `routines`,
+  `sessions`, `rotations`, `overrides`, `bodyEntries`, `photos`, `goals`. Histórico em [MIGRACOES.md](MIGRACOES.md).
 - A instância `db` e o esquema ficam só em `src/db/db.ts`. As telas não a importam (regra testada).
 - Repositórios por domínio, com funções explícitas (`completeSession`, `importBodyEvaluations`). Não há
   repositório genérico: cada operação mantém sua regra de negócio e sua transação.
@@ -191,8 +191,9 @@ A sessão em andamento é gravada a cada ação (`saveSession`) e recuperada ao 
 | --- | --- | --- |
 | Ficha de treino `irontrack.ficha` | `modules/training/routineSchema.ts` | 1, 2 ([FICHA_JSON.md](FICHA_JSON.md)) |
 | Avaliações `irontrack.avaliacoes` | `modules/body/bodySchema.ts` | 1 |
-| Backup `irontrack` / `backup` | `lib/backupFormat.ts` | 0, 1, 2, 3 ([BACKUP_RESTAURACAO.md](BACKUP_RESTAURACAO.md)) |
-| Registros persistidos | `modules/*/types.ts`, `lib/types.ts`, `lib/profile.ts` | Dexie v2 (campos de modalidade do P10 dentro dos registros) |
+| Backup `irontrack` / `backup` | `lib/backupFormat.ts` | 0, 1, 2, 3, 4 ([BACKUP_RESTAURACAO.md](BACKUP_RESTAURACAO.md)) |
+| Registros persistidos | `modules/*/types.ts`, `lib/types.ts`, `lib/profile.ts` | Dexie v3 (campos de modalidade do P10 dentro dos registros; metas do P12 na tabela `goals`) |
+| Metas de treinamento | `modules/goals/validation.ts` (`goalFieldErrors`, `goalIssues`) | registro com `revision` ([METAS_TREINAMENTO.md](METAS_TREINAMENTO.md)) |
 
 Os três formatos usam `lib/validation.ts` (`parseJsonText`, `formatZodError`). Cada formato informa seus
 rótulos de caminho: a ficha usa "Treino N › Exercício N"; avaliações reescrevem "Avaliação N"; o backup
@@ -224,6 +225,10 @@ digitação, conforme `distanceUnit` do exercício).
 - `modules/analytics` → o próprio módulo, `lib/dates` e **só** `modules/training/index.ts` (exceção documentada à
   regra de domínios); telas → `@/modules/analytics`.
 - `features/assistant` e `pages/AIAssistantPage.tsx` → `@/modules/ai`, `integrations/ai`, componentes e `lib`.
+- `modules/goals` (P12) → o próprio módulo, `lib/dates`, `lib/utils`, `modules/training/index.ts` e
+  `modules/analytics/index.ts` (exceção documentada: as metas reutilizam as medidas e o 1RM canônico do analytics em
+  vez de recalcular). `lib/integrity.ts` → `modules/goals/index.ts` (validação das metas no backup, como já fazia com
+  `modules/training`). IA, integrações e assistente **não** importam metas (privacidade, testado).
 
 ## 8. Dependências proibidas (testadas)
 
@@ -355,3 +360,20 @@ Detalhes em [CRONOMETROS_E_CONCORRENCIA.md](CRONOMETROS_E_CONCORRENCIA.md).
 - **Regras de dependência** inalteradas: os três arquivos novos do domínio são puros e importados só pela API pública
   (`@/modules/training`); as telas não acessam o Dexie diretamente (`tests/unit/architecture.test.ts` continua
   passando).
+
+## 14. Metas de treinamento (P12)
+
+Detalhes em [METAS_TREINAMENTO.md](METAS_TREINAMENTO.md).
+
+| Camada | Arquivo | Responsabilidade |
+| --- | --- | --- |
+| Domínio (puro) | `modules/goals/types.ts`, `validation.ts`, `lifecycle.ts` | modelo, validação, criação/edição/estados |
+| Domínio (puro) | `modules/goals/exercises.ts` | identidade do exercício por ID da ficha, disponibilidade |
+| Domínio (puro) | `modules/goals/progress.ts`, `achievements.ts`, `service.ts` | progresso, estados exibidos, conquistas, referências |
+| Persistência | `db/goals.ts` | gravações em transação com conferência de `revision` |
+| Hook | `hooks/useGoals.ts` | metas do perfil local (consulta ao vivo) |
+| Interface | `pages/TrainingGoalsPage.tsx`, `features/goals/*` | tela `#/metas`, formulário, cartões, metas na análise |
+
+- **Dexie v3** só acrescenta a tabela `goals`; nenhum registro antigo é transformado.
+- **Progresso nunca é gravado**: é recalculado a partir das sessões a cada leitura.
+- **Navegação** continua com 6 itens: `#/metas` abre por Evolução e Análise e destaca "Evolução".

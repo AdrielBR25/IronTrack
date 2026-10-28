@@ -459,3 +459,15 @@ modalidade) e `e2e/exercise-model.spec.ts`.
   nunca usa o peso do corpo.
 - Teste de ponta a ponta do domínio: `tests/unit/workout-timers-flow.test.ts` (cronômetro → série → treino finalizado
   → histórico → relatório), mais o E2E `e2e/workout-timers.spec.ts` (Desempenho com tempo, cardio e lados).
+
+## 24. Prompt 12: metas de treinamento
+
+- `exercisePoint` passou a ser exportado pela API pública (`@/modules/analytics`) para que o motor de metas
+  (`src/modules/goals`) use exatamente as mesmas medidas por série, validade e 1RM canônico (`epley-1a12-v1`). Nenhuma
+  fórmula mudou e o 1RM histórico continua como estava (decisão do P09 pendente).
+- A página de análise mostra a **linha tracejada do objetivo** no gráfico do exercício quando há meta da métrica
+  exibida (carga → maior carga, 1RM → 1RM estimado, repetições, duração, distância) e a lista "Metas deste exercício".
+  A meta de frequência aparece como linha no gráfico semanal e em "Metas de frequência".
+- As metas são associadas aos exercícios pelo ID da ficha; o gráfico só recebe a linha quando alguma sessão da meta
+  tem o mesmo `exerciseKey` do gráfico (nunca por nome digitado).
+- Detalhes em [METAS_TREINAMENTO.md](METAS_TREINAMENTO.md).

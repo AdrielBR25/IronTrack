@@ -24,6 +24,8 @@ Campos desconhecidos são preservados (`.passthrough()`), para que backups de ve
 - `BACKUP_SCHEMA_VERSION` (formato JSON) e `DB_SCHEMA_VERSION` (IndexedDB) são **independentes**.
 - Mudou o formato do arquivo? Incremente `BACKUP_SCHEMA_VERSION` e acrescente uma função em `MIGRATIONS`
   (chave = versão de origem) que leve à versão seguinte. Nunca remova migrações antigas.
+- v3 → v4 (P12) acrescenta `data.goals: []` (metas de treinamento; ver [METAS_TREINAMENTO.md](METAS_TREINAMENTO.md) §5).
+  Um app anterior recusa arquivos v4 com a orientação de atualizar.
 - v2 → v3 (P10) é identidade: o incremento existe para que um app antigo recuse arquivos com campos de modalidade
   em vez de restaurá-los sem entendê-los.
 - Os arquivos do usuário nunca são reescritos; a migração acontece apenas em memória.
@@ -150,3 +152,16 @@ mesmo se um treino for concluído durante a exportação. O JSON é indentado (l
 - Conflitos de mesmo ID não são resolvidos campo a campo; o registro local sempre vence na mesclagem.
 - Backups de outro perfil não podem ser mesclados nesta versão (só substituir).
 - O backup é lido inteiro na memória (até 100 MB); aparelhos com pouca memória podem ficar lentos perto do limite.
+
+## Metas de treinamento (backup v4, P12)
+
+- Exportadas em `data.goals` com todos os campos (ID, versão do registro, estado, pausas).
+- **Substituir** troca as metas pelas do arquivo. Um backup v0–v3 não tem metas: substituir por ele **apaga as metas
+  locais**, e a prévia mostra a contagem "Metas" de cada lado antes de confirmar.
+- **Mesclar:** ID novo é acrescentado; ID igual com conteúdo diferente mantém a meta local (conta como conflito e
+  exige confirmar a restauração parcial); conteúdo igual com outro ID é ignorado; mesmo tipo e título com valores
+  diferentes é mantido com aviso `SIMILAR_GOAL`; a referência à rotina é remapeada quando a rotina do arquivo já
+  existe aqui com outro ID.
+- Meta inválida (`INVALID_GOAL`), com ID repetido ou de outro perfil bloqueia a restauração inteira; metas nunca são
+  descartadas em silêncio. Meta cujo exercício não está mais na ficha só gera aviso (`GOAL_EXERCISE_UNAVAILABLE`).
+- Limite: 2000 metas por arquivo.
