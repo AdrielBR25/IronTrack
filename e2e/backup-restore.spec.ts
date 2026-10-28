@@ -46,8 +46,9 @@ test('backup: prévia, cancelar, mesclar, substituir, recarregar', async ({ page
   // 1. Exportar
   const file = info.outputPath('backup.json');
   const backup = await exportBackup(page, file);
-  expect(backup).toMatchObject({ app: 'irontrack', kind: 'backup', schemaVersion: 5 });
+  expect(backup).toMatchObject({ app: 'irontrack', kind: 'backup', schemaVersion: 6 }); // P16: v6 (decisões do calendário)
   expect(backup.data.goals).toEqual([]);
+  expect(backup.data.calendarDecisions).toEqual([]);
   expect(backup.profile.id).toMatch(/^[0-9a-f-]{36}$/);
   expect(backup.data.sessions).toHaveLength(1);
 
