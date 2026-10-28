@@ -30,6 +30,7 @@ export {
   DAY_STATE_LABEL,
   ACTIVITY_STATUS_LABEL,
   buildWeek,
+  describeEntry,
   matchDay,
   compareWeeks,
   type DayState,

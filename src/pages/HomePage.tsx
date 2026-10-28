@@ -1,7 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useRef, useState } from 'react';
-import { CalendarCheck2, ChevronRight, Clock, Dumbbell, FileUp, Flame, Moon, Play, Sparkles, TrendingDown, TrendingUp, Trophy, Weight } from 'lucide-react';
+import { CalendarCheck2, CalendarDays, ChevronRight, Clock, Dumbbell, FileUp, Flame, Moon, Play, Sparkles, TrendingDown, TrendingUp, Trophy, Weight } from 'lucide-react';
 import { toast } from 'sonner';
 import { useActiveRoutine, useActiveSession, useCompletedSessions, useSchedule, useToday } from '@/hooks/data';
 import { useStartWorkout } from '@/features/routines/useStartWorkout';
@@ -317,6 +317,18 @@ export default function HomePage() {
       ) : (
         <motion.div initial={{ scale: 0.98, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
           <TodayCard routine={routine} />
+          <Link
+            to="/planejamento"
+            data-testid="home-open-planner"
+            className="mt-3 flex items-center gap-3 rounded-2xl border p-3 transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <CalendarDays className="h-5 w-5 shrink-0 text-primary" />
+            <span className="min-w-0 flex-1 text-sm">
+              <span className="block font-semibold">Planejamento da semana</span>
+              <span className="block text-muted-foreground">Organize os dias e veja o que já fez</span>
+            </span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+          </Link>
         </motion.div>
       )}
 

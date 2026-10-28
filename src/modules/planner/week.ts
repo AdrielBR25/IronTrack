@@ -111,7 +111,8 @@ export interface BuildWeekInput {
   profileId: string | undefined;
 }
 
-function describe(entry: PlanEntry, routines: BuildWeekInput['routines']): Omit<PlannedActivity, 'status' | 'sessionId'> {
+/** Rotina e treino referenciados por uma entrada (com a situação de disponibilidade), sem a parte de realização. */
+export function describeEntry(entry: PlanEntry, routines: BuildWeekInput['routines']): Omit<PlannedActivity, 'status' | 'sessionId'> {
   const routine = routines.find((r) => r.id === entry.routineId);
   const followsRotation = entry.workoutId === null;
   if (!routine) return { entry, availability: 'routine_missing', routineName: null, workoutLabel: null, workoutName: null, followsRotation };
@@ -172,7 +173,7 @@ export function buildWeek(input: BuildWeekInput): WeekView {
     const isPast = date < input.today;
     const isFuture = date > input.today;
     const activities = workouts.map((e): PlannedActivity => {
-      const base = describe(e, input.routines);
+      const base = describeEntry(e, input.routines);
       const sessionId = matched.get(e.id) ?? null;
       const activeHere = !sessionId && !!active && active.routineId === e.routineId && (e.workoutId === null || active.workoutId === e.workoutId);
       const status: ActivityStatus = sessionId ? 'realizada' : activeHere ? 'em_andamento' : isFuture ? 'futura' : isToday ? 'pendente' : 'nao_registrada';

@@ -422,3 +422,45 @@ describe('arquitetura das metas de treinamento (P12)', () => {
     expect((layout.match(/^\s*\{ to: '\//gm) ?? []).length).toBe(6);
   });
 });
+
+describe('arquitetura do planejamento semanal (P13)', () => {
+  const PL = 'modules/planner';
+  const rels = files.map(rel);
+  const plannerFiles = rels.filter((f) => inDir(f, PL));
+  const source = (f: string) => readFileSync(join(ROOT, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+  it('o domínio existe e depende só de treinamento, analytics e metas (APIs públicas)', () => {
+    expect(plannerFiles).toEqual(expect.arrayContaining([`${PL}/index.ts`, `${PL}/operations.ts`, `${PL}/week.ts`, `${PL}/validation.ts`]));
+    const allowed = ['modules/training/index.ts', 'modules/analytics/index.ts', 'modules/goals/index.ts'];
+    const bad = edges.filter((e) => inDir(e.from, PL) && e.target && !inDir(e.target, PL) && !allowed.includes(e.target));
+    expect(bad.map(fmt)).toEqual([]);
+    expect(edges.filter((e) => inDir(e.from, PL) && !e.target && !e.spec.startsWith('.')).map(fmt)).toEqual([]);
+  });
+
+  it('o domínio não grava nem acessa rede, relógio ou aleatoriedade', () => {
+    const FORBIDDEN = /\b(indexedDB|localStorage|sessionStorage|fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|document\.cookie|caches\.|Math\.random|Date\.now\s*\(\s*\)|new Date\(\s*\))/;
+    expect(plannerFiles.filter((f) => FORBIDDEN.test(source(f)))).toEqual([]);
+  });
+
+  it('planejamento não vai para a IA: IA, integrações e assistente não o importam nem citam a tabela', () => {
+    const bad = edges.filter(
+      (e) => e.target && (inDir(e.target, PL) || e.target === 'db/planner.ts' || e.target === 'hooks/usePlanner.ts') && inDir(e.from, 'modules/ai', 'integrations', 'features/assistant', 'pages/AIAssistantPage.tsx'),
+    );
+    expect(bad.map(fmt)).toEqual([]);
+    const mentions = rels.filter((f) => inDir(f, 'modules/ai', 'integrations', 'features/assistant') && /planEntries|planejamento/i.test(source(f)));
+    expect(mentions).toEqual([]);
+  });
+
+  it('só src/db e a restauração de backup tocam a tabela; o planejamento não grava sessões, rotinas nem rotação', () => {
+    expect(rels.filter((f) => !inDir(f, 'db') && f !== 'lib/backup.ts' && /\bdb\.planEntries\b/.test(source(f)))).toEqual([]);
+    expect(/db\.(sessions|routines|rotations|overrides|goals)\b/.test(source('db/planner.ts'))).toBe(false);
+  });
+
+  it('a página é carregada sob demanda em /planejamento, sem novo item na navegação', () => {
+    const app = readFileSync(join(ROOT, 'App.tsx'), 'utf8');
+    expect(app).toMatch(/lazy\(\(\) => import\('@\/pages\/WeeklyPlannerPage'\)\)/);
+    expect(app).toMatch(/path="\/planejamento"/);
+    const layout = readFileSync(join(ROOT, 'components/AppLayout.tsx'), 'utf8');
+    expect((layout.match(/^\s*\{ to: '\//gm) ?? []).length).toBe(6);
+  });
+});

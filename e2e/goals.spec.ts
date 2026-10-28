@@ -99,7 +99,7 @@ test('metas: criar, treinar, atingir, conquista, backup, restauração, offline 
   const file = info.outputPath('backup-metas.json');
   await download.saveAs(file);
   const backup = JSON.parse(readFileSync(file, 'utf8'));
-  expect(backup.schemaVersion).toBe(4);
+  expect(backup.schemaVersion).toBe(5); // P13: backup v5 (planejamento); metas continuam iguais
   expect(backup.data.goals).toHaveLength(2);
 
   // 10. Apagar tudo e restaurar; 11. metas de volta, ainda atingidas.

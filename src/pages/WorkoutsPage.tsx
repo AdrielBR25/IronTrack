@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CalendarClock, Check, Copy, Download, FileUp, MoreVertical, Moon, Pencil, Play, Plus, SkipForward, Sparkles, Trash2, Undo2 } from 'lucide-react';
+import { CalendarClock, CalendarDays, Check, Copy, Download, FileUp, MoreVertical, Moon, Pencil, Play, Plus, SkipForward, Sparkles, Trash2, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PageHeader } from '@/components/AppLayout';
 import { Button } from '@/components/ui/button';
@@ -307,6 +307,7 @@ export default function WorkoutsPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [importErrors, setImportErrors] = useState<string[] | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
 
   const routine = routines?.find((r) => r.id === (selectedId ?? settings.activeRoutineId)) ?? routines?.[0];
   const isActive = routine && routine.id === (settings.activeRoutineId ?? routines?.[0]?.id);
@@ -318,6 +319,9 @@ export default function WorkoutsPage() {
         subtitle="Rotinas, rotação e fichas"
         action={
           <div className="flex gap-2">
+            <Button variant="outline" size="icon" aria-label="Planejamento semanal" title="Planejamento semanal" onClick={() => navigate('/planejamento')} data-testid="open-planner">
+              <CalendarDays />
+            </Button>
             <Button variant="outline" size="icon" aria-label="Importar ficha JSON" onClick={() => fileRef.current?.click()}>
               <FileUp />
             </Button>
