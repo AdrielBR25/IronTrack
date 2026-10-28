@@ -445,3 +445,17 @@ modalidade) e `e2e/exercise-model.spec.ts`.
 | Registrado mas sem análise própria | grupos secundários (informativos, não recebem séries) |
 | Adiado (precisa de autorização) | migração do 1RM do gráfico antigo e dos recordes antigos (seção 4); calibração dos limiares com dados reais; resumo para IA com os campos novos |
 
+
+## 23. Prompt 11: dados vindos do cronômetro e do registro rápido
+
+- **Nada mudou no motor.** Fórmulas de 1RM (antigas e canônica), limiares de tendência e classificação continuam
+  iguais; nenhum diagnóstico médico.
+- A duração medida pelo cronômetro é gravada em `durationSec` como qualquer duração digitada, então aparece em
+  `timedMetrics` (maior duração, total, tendência de duração) e em `cardioMetrics`.
+- A distância digitada em m, km ou mi é gravada em metros; `cardioMetrics` e o ritmo usam metros, como antes.
+- O lado escolhido pelo atalho de alternância é um lado comum: `compareSides` conta cada série uma vez; lado ausente
+  continua em "desconhecido".
+- Carga adicional (`weight`) e assistência (`assistanceKg`) continuam separadas em `bodyweightMetrics`; o volume em kg
+  nunca usa o peso do corpo.
+- Teste de ponta a ponta do domínio: `tests/unit/workout-timers-flow.test.ts` (cronômetro → série → treino finalizado
+  → histórico → relatório), mais o E2E `e2e/workout-timers.spec.ts` (Desempenho com tempo, cardio e lados).

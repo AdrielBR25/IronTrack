@@ -124,3 +124,12 @@ Regras de validação (Zod, em `routineSchema`/`backupFormat` e no editor):
 
 Calorias, frequência cardíaca, zonas de treino, avaliação de condicionamento, diagnóstico de desequilíbrio
 muscular e prescrição automática. Sincronização entre aparelhos.
+
+## 10. Situação depois do P10 e do P11
+
+- **P10** implementou esta proposta sem nova versão do Dexie ([MIGRACAO_EXERCICIOS_V3.md](MIGRACAO_EXERCICIOS_V3.md)).
+- **P11** não muda o modelo: acrescenta o cronômetro de execução (estado transitório em `localStorage`, nunca no
+  banco nem no backup), registro rápido de cardio e unilaterais, a distinção visual entre carga adicional e
+  assistência e a proteção contra regravação por app antigo
+  ([CRONOMETROS_E_CONCORRENCIA.md](CRONOMETROS_E_CONCORRENCIA.md)). A duração medida é gravada no mesmo
+  `durationSec` (segundos inteiros), a distância continua em metros e o lado continua opcional (ausente ≠ bilateral).

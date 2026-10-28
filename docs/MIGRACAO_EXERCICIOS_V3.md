@@ -181,8 +181,10 @@ O que os testes (`tests/unit/exercise-model-db.test.ts`) comprovam:
 
 - Editar no app do P09 um exercício classificado no P10: o editor antigo monta o registro só com os campos que
   conhece e **descarta** os campos novos daquele exercício na ficha (as séries já registradas não são afetadas).
-  Recomendação: não voltar a versão do app depois de classificar exercícios.
-- Sem cronômetro de série para exercícios por tempo (a duração é digitada).
+  Recomendação: não voltar a versão do app depois de classificar exercícios. **P11:** o app atual detecta essa
+  regravação e oferece restaurar os campos (seção 13); não é possível impedi-la no app antigo.
+- ~~Sem cronômetro de série para exercícios por tempo (a duração é digitada).~~ P11: cronômetro de execução por série
+  (seção 13).
 - Distância e duração só por série; não há registro de percurso, ritmo por volta, calorias ou frequência cardíaca.
 - O resumo para IA não inclui os campos novos (exigiria nova versão do contrato e consentimento próprio).
 - Grupos secundários são informativos: não recebem séries nas contagens.
@@ -207,3 +209,28 @@ O que os testes (`tests/unit/exercise-model-db.test.ts`) comprovam:
 | Mistura de métricas (segundos como repetições, assistência como corpo) | leitura só com modalidade explícita, testes específicos |
 | Mudança silenciosa em números antigos | volume, recordes, gráfico e 1RM antigos usam as mesmas funções; teste compara relatório com e sem dados v3 |
 | Vazamento para IA | o contexto da IA usa lista fechada de campos; teste garante que nenhum campo novo é enviado |
+
+## 13. Prompt 11: cronômetros, registro rápido e proteção de compatibilidade
+
+Detalhes em [CRONOMETROS_E_CONCORRENCIA.md](CRONOMETROS_E_CONCORRENCIA.md). Resumo do que mudou para o modelo v3:
+
+- **Nenhuma mudança de formato.** Dexie continua na versão 2, backup continua v3, ficha continua v1/v2; nenhum campo
+  novo em registros. Os estados auxiliares (cronômetro, fotografia dos campos de modalidade, capacidade) ficam em
+  `localStorage`, fora do banco e dos backups.
+- **Exercício por tempo e cardio:** cronômetro de execução por série; a duração medida (segundos inteiros, para
+  baixo) entra em `durationSec` só por ação da pessoa, nunca substitui em silêncio um valor diferente.
+- **Cardio:** unidade de digitação m/km/mi (gravação em metros), equivalências, ritmo derivado e atalhos de meta.
+- **Unilateral:** lado em destaque, alternância só em série pendente; ausente continua ausente.
+- **Peso corporal:** "Carga adicional (+kg)" e "Assistência (−kg)" com explicações distintas.
+- **Concorrência:** o treino em andamento é gravado com mescla em três vias; finalizar é idempotente.
+- **Downgrade:** detecção de regravação por app antigo (`detectModelLoss`) com restauração confirmada; app
+  desatualizado em relação a dados mais novos bloqueia o editor. A migração para Dexie v3 foi analisada e **não**
+  executada (impacto em CRONOMETROS_E_CONCORRENCIA.md §8).
+
+Atualização da tabela de compatibilidade (seção 9):
+
+| Situação | Resultado |
+| --- | --- |
+| App P09 regrava uma rotina classificada | campos de modalidade somem no banco; ao abrir o app atual, aviso com "Restaurar classificação" |
+| App P11 abre dados já usados por um app com capacidade de modelo maior | aviso de app desatualizado; salvar no editor de fichas bloqueado |
+| Backup v3 exportado pelo P11 | idêntico ao do P10 (sem estado de cronômetro nem fotografia) |

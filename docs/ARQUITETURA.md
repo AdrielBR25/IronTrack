@@ -331,3 +331,27 @@ de análise.". A proposta de evolução do modelo está em [MODELO_EXERCICIOS_V2
 A conversão kg ↔ lb do contrato de 1RM usa a constante exata `KG_PER_LB` declarada no próprio módulo (igual a
 `lib/units`, verificado em teste) para manter as regras de dependência do domínio sem exceção nova.
 
+
+## 13. Cronômetros e concorrência (P11)
+
+Detalhes em [CRONOMETROS_E_CONCORRENCIA.md](CRONOMETROS_E_CONCORRENCIA.md).
+
+| Camada | Arquivo | Responsabilidade |
+| --- | --- | --- |
+| Domínio (puro) | `modules/training/setTimer.ts` | estado e transições do cronômetro de execução, recuperação, relógio |
+| Domínio (puro) | `modules/training/sessionMerge.ts` | mescla em três vias do treino em andamento |
+| Domínio (puro) | `modules/training/modelCompat.ts` | fotografia/detecção/restauração dos campos de modalidade, capacidade |
+| Persistência | `db/repo.ts` | `saveSessionGuarded` (transação + mescla), `completeSession` idempotente, restauração |
+| Persistência | `db/modelGuard.ts` | estado auxiliar em `localStorage` e ganchos do Dexie na tabela de rotinas |
+| Funcionalidade | `features/workout/setTimerStore.ts`, `SetTimerWatcher.tsx`, `SetTimerPanel.tsx` | cronômetro compartilhado entre telas e abas |
+| Funcionalidade | `features/compat/CompatGuard.tsx` | avisos de compatibilidade |
+
+- **Estado transitório fora do banco.** O cronômetro, a fotografia e a capacidade ficam em `localStorage`: não entram
+  no IndexedDB, não mudam o esquema (Dexie v2) e não entram em backups. É uma decisão consciente: perder esse estado
+  nunca altera dados de treino.
+- **Gravação do treino ativo.** A tela mantém a última versão conhecida do banco e grava por uma fila; cada gravação
+  compara com o banco na mesma transação e mescla em vez de sobrescrever. `saveSession` (gravação direta) continua
+  disponível para compatibilidade e testes antigos.
+- **Regras de dependência** inalteradas: os três arquivos novos do domínio são puros e importados só pela API pública
+  (`@/modules/training`); as telas não acessam o Dexie diretamente (`tests/unit/architecture.test.ts` continua
+  passando).
