@@ -173,3 +173,71 @@ describe('análise de desempenho: filtros', () => {
     expect($('record-history')!.textContent).toContain('antes');
   });
 });
+
+describe('análise de desempenho: tipos de exercício e explicações (P09)', () => {
+  const withGroup = (e: SessionExercise, muscleGroup: string): SessionExercise => ({ ...e, muscleGroup });
+
+  beforeEach(async () => {
+    const list: WorkoutSession[] = [];
+    for (let i = 0; i < 6; i++)
+      list.push(
+        workout(`p${i}`, 25 - i * 4, [
+          withGroup(exercise('supino', 'Supino', [[60 + i * 2.5, 8]]), i % 2 ? 'peitoral' : 'Peito'),
+          withGroup(exercise('paralela', 'Paralela', [[null, 8 + i], [10, 6]], 'bodyweight'), 'TRÍCEPS'),
+          withGroup(exercise('afundo', 'Afundo', [[20, 10]]), 'Pernas'),
+        ]),
+      );
+    await db.sessions.bulkPut(list);
+  });
+
+  it('grupos musculares normalizados, originais citados e ambíguos fora do gráfico', async () => {
+    const before = await dump();
+    await mount();
+    await waitFor(() => $('chart-muscles'));
+    expect($('muscle-synonyms')!.textContent).toContain('Peitoral (Peito, peitoral)');
+    expect($('muscle-synonyms')!.textContent).toContain('Tríceps (TRÍCEPS)');
+    expect($('muscle-unclassified')!.textContent).toContain('Pernas (6 séries)');
+    // A ficha (sessões gravadas) não muda.
+    expect(await dump()).toBe(before);
+  });
+
+  it('peso corporal com carga adicional: repetições e carga adicional, sem 1RM; análises indisponíveis explicadas', async () => {
+    await mount();
+    const select = (await waitFor(() => $('exercise-select'))) as HTMLSelectElement;
+    await act(async () => {
+      select.value = 'paralela';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const metric = document.querySelector('[aria-label="Métrica do exercício"]')!;
+    expect([...metric.querySelectorAll('[role="radio"]')].map((r) => r.textContent)).toEqual(['Repetições', 'Carga adicional']);
+    expect($('exercise-type')!.textContent).toContain('Peso corporal com carga adicional');
+    expect($('exercise-type')!.textContent).toContain('Tríceps');
+    expect($('bodyweight-note')!.textContent).toContain('não há 1RM estimado');
+    expect($('exercise-records')!.textContent).not.toContain('1RM');
+    expect($('analysis-carga')!.dataset.available).toBe('false');
+    expect($('analysis-carga_adicional')!.dataset.available).toBe('true');
+    for (const k of ['duracao', 'cardio', 'lados']) {
+      expect($(`analysis-${k}`)!.dataset.available).toBe('false');
+      expect($(`analysis-${k}`)!.textContent).toContain('Este exercício ainda não possui dados suficientes para esse tipo de análise.');
+    }
+    expect(text()).not.toMatch(/NaN|Infinity|undefined/);
+  });
+
+  it('carga externa: método do 1RM identificado e explicações dos indicadores expansíveis', async () => {
+    await mount();
+    const select = (await waitFor(() => $('exercise-select'))) as HTMLSelectElement;
+    await act(async () => {
+      select.value = 'supino';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect($('e1rm-method')!.textContent).toContain('Epley (1 a 12 repetições)');
+    expect($('e1rm-method')!.textContent).toContain('1 repetição: a própria carga');
+    expect($('analysis-carga')!.dataset.available).toBe('true');
+    const guide = $('indicator-guide')!;
+    const details = [...guide.querySelectorAll('details')];
+    expect(details.length).toBeGreaterThanOrEqual(8);
+    expect(details.every((d) => !d.open)).toBe(true);
+    expect($('guide-e1rm')!.textContent).toContain('Como é calculado');
+    expect($('guide-volume')!.textContent).toContain('Peso corporal nunca é convertido em quilos');
+  });
+});

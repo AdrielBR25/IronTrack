@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, CalendarCheck, Dumbbell, Info, Layers, LineChart, Minus, Repeat, Trophy, TrendingUp, Weight } from 'lucide-react';
+import { ArrowLeft, BookOpen, CalendarCheck, ChevronDown, Dumbbell, Info, Layers, LineChart, Minus, Repeat, Trophy, TrendingUp, Weight } from 'lucide-react';
 import { PageHeader } from '@/components/AppLayout';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -14,8 +14,14 @@ import { cn, fmtNum } from '@/lib/utils';
 import {
   buildInsights,
   createTrainingAnalytics,
-  E1RM_MAX_REPS,
+  E1RM_METHOD,
+  exerciseAnalyses,
+  INDICATOR_GUIDE,
+  LOAD_KIND_LABEL,
   MIN_PRIOR_SESSIONS_FOR_RECORD,
+  supportsLoadMetrics,
+  UNAVAILABLE_ANALYSIS_TEXT,
+  type MuscleDistribution,
   TREND_MIN_POINTS,
   TREND_MIN_SPAN_DAYS,
   type ExercisePoint,
@@ -29,6 +35,8 @@ import {
 
 // Análise de desempenho (IronTrack 2.0 F01/P08): tudo calculado no aparelho pelo motor local
 // (src/modules/analytics), só com leitura das sessões concluídas. Nada é gravado nem enviado.
+// P09: grupos musculares normalizados, métricas conforme o tipo de exercício, método de 1RM identificado,
+// explicações dos indicadores e estados indisponíveis para análises que os registros ainda não sustentam.
 
 type ExMetric = 'e1rm' | 'topLoad' | 'bestReps' | 'volume';
 
@@ -57,6 +65,8 @@ const TREND_METRIC_LABEL: Record<Trend['metric'], string> = {
   e1rm: '1RM estimado',
   carga_13: 'carga em séries de 13+ repetições',
   reps: 'repetições sem carga',
+  duracao: 'maior duração por sessão',
+  distancia: 'distância por sessão',
 };
 
 const CONFIDENCE_LABEL = { alta: 'confiança alta', media: 'confiança média', baixa: 'confiança baixa' } as const;
@@ -177,6 +187,51 @@ function TrendExplanation({ ex }: { ex: ExerciseSummary }) {
           ? TREND_REASON[t.reason ?? 'poucas_sessoes']
           : `Média de ${TREND_METRIC_LABEL[t.metric]} na segunda metade das sessões: ${signedPct(t.changePct!)} em relação à primeira (${t.points} sessões em ${t.spanDays} dias; variações de até ${fmtNum(t.thresholdPct!, 1)}% são tratadas como oscilação natural).`}
       </p>
+      {t.longGap && (
+        <p className="mt-1 text-xs text-muted-foreground" data-testid="trend-long-gap">
+          Houve uma pausa de {t.maxGapDays} dias entre duas sessões deste exercício. Os dias sem treino não entram no cálculo e não contam como queda.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Detalhe expansível acessível por teclado (summary nativo), no estilo dos cartões do app. */
+function Disclosure({ title, children, testId, icon: Icon = Info }: { title: string; children: ReactNode; testId?: string; icon?: typeof Info }) {
+  return (
+    <details className="group rounded-xl border" data-testid={testId}>
+      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+        <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1">{title}</span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="px-3 pb-3 text-sm text-muted-foreground">{children}</div>
+    </details>
+  );
+}
+
+function ExerciseAnalyses({ ex }: { ex: ExerciseSummary }) {
+  const list = exerciseAnalyses(ex);
+  const unavailable = list.filter((a) => !a.available);
+  return (
+    <div className="mt-3" data-testid="exercise-analyses">
+      <Disclosure title={`Análises por tipo de exercício (${list.length - unavailable.length} de ${list.length} disponíveis)`}>
+        <ul className="space-y-2">
+          {list.map((a) => (
+            <li key={a.kind} data-testid={`analysis-${a.kind}`} data-available={a.available}>
+              <p className="flex items-center gap-2 font-medium text-foreground">
+                {a.title}
+                <Badge variant={a.available ? 'default' : 'outline'}>{a.available ? 'disponível' : 'indisponível'}</Badge>
+              </p>
+              {!a.available && (
+                <p className="mt-0.5">
+                  {UNAVAILABLE_ANALYSIS_TEXT} {a.reason}
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
+      </Disclosure>
     </div>
   );
 }
@@ -189,8 +244,25 @@ function ExerciseSection({ report, analytics }: { report: TrainingReport; analyt
   useEffect(() => {
     if (ex && ex.key !== key) setKey(ex.key);
   }, [ex, key]);
-  const unloadedOnly = !!ex && ex.loadedSets === 0;
-  const effective: ExMetric = unloadedOnly && (metric === 'e1rm' || metric === 'topLoad' || metric === 'volume') ? 'bestReps' : metric;
+  // Métricas de carga (1RM, carga, volume) só com carga externa; peso corporal mede repetições e, quando
+  // registrada, a carga adicional (sem somar o peso do corpo).
+  const loadMetrics = !!ex && supportsLoadMetrics(ex.classification) && ex.loadedSets > 0;
+  const bodyweight = !!ex && ex.classification.modalities.includes('bodyweight');
+  const addedLoad = bodyweight && !!ex && ex.loadedSets > 0;
+  const options: { value: ExMetric; label: string }[] = loadMetrics
+    ? [
+        { value: 'e1rm', label: '1RM est.' },
+        { value: 'topLoad', label: 'Carga' },
+        { value: 'bestReps', label: 'Reps' },
+        { value: 'volume', label: 'Volume' },
+      ]
+    : addedLoad
+      ? [
+          { value: 'bestReps', label: 'Repetições' },
+          { value: 'topLoad', label: 'Carga adicional' },
+        ]
+      : [{ value: 'bestReps', label: 'Repetições' }];
+  const effective: ExMetric = options.some((o) => o.value === metric) ? metric : 'bestReps';
   const data = useMemo(() => {
     if (!ex) return [];
     return analytics.series(ex.key, report.range, PICK[effective]).map((p) => {
@@ -203,10 +275,11 @@ function ExerciseSection({ report, analytics }: { report: TrainingReport; analyt
   const fmt = (v: number) => (effective === 'bestReps' ? `${fmtNum(v, 0)} reps` : `${fmtNum(v, effective === 'volume' ? 0 : 1)} ${unit}`);
   const rec = ex.records;
   const history = rec.loadRecordHistory;
+  const muscle = ex.muscle.label || 'sem grupo';
   return (
     <ChartCard
       title="Evolução por exercício"
-      description={`1RM estimado por Epley só em séries de 1 a ${E1RM_MAX_REPS} repetições; carga = maior carga válida da sessão.`}
+      description={loadMetrics ? `1RM estimado: ${E1RM_METHOD.name}; carga = maior carga válida da sessão.` : 'Métricas conforme o tipo do exercício e os dados registrados.'}
     >
       <div className="space-y-2">
         <NativeSelect aria-label="Exercício" data-testid="exercise-select" value={ex.key} onChange={(e) => setKey(e.target.value)}>
@@ -216,75 +289,166 @@ function ExerciseSection({ report, analytics }: { report: TrainingReport; analyt
             </option>
           ))}
         </NativeSelect>
-        <Segmented
-          size="sm"
-          aria-label="Métrica do exercício"
-          value={effective}
-          onChange={setMetric}
-          options={
-            unloadedOnly
-              ? [{ value: 'bestReps', label: 'Repetições' }]
-              : [
-                  { value: 'e1rm', label: '1RM est.' },
-                  { value: 'topLoad', label: 'Carga' },
-                  { value: 'bestReps', label: 'Reps' },
-                  { value: 'volume', label: 'Volume' },
-                ]
-          }
-        />
+        <div className="flex flex-wrap gap-1.5" data-testid="exercise-type">
+          <Badge variant="secondary">{LOAD_KIND_LABEL[ex.classification.load]}</Badge>
+          <Badge variant="outline" title={ex.muscleGroup && ex.muscleGroup.trim() !== ex.muscle.label ? `Na ficha: ${ex.muscleGroup.trim()}` : undefined}>
+            {muscle}
+          </Badge>
+        </div>
+        <Segmented size="sm" aria-label="Métrica do exercício" value={effective} onChange={setMetric} options={options} />
       </div>
       <div className="mt-3" data-testid="exercise-chart">
         <TrendChart data={data} x="ts" y="v" fmt={fmt} xFmt={(t) => fmtDateShort(Number(t))} />
       </div>
-      {unloadedOnly && <p className="mt-2 text-xs text-muted-foreground">Exercício sem carga registrada: a evolução é medida em repetições, sem converter em quilos.</p>}
+      {!loadMetrics && !bodyweight && (
+        <p className="mt-2 text-xs text-muted-foreground">Exercício sem carga registrada: a evolução é medida em repetições, sem converter em quilos.</p>
+      )}
+      {bodyweight && (
+        <p className="mt-2 text-xs text-muted-foreground" data-testid="bodyweight-note">
+          {addedLoad
+            ? 'Exercício de peso corporal com carga adicional: repetições e carga adicional aparecem separadas. O peso do corpo não é somado e não há 1RM estimado.'
+            : 'Exercício sem carga registrada: a evolução é medida em repetições, sem converter em quilos.'}
+        </p>
+      )}
+      {loadMetrics && effective === 'e1rm' && (
+        <p className="mt-2 text-xs text-muted-foreground" data-testid="e1rm-method">
+          Método: {E1RM_METHOD.name}. {E1RM_METHOD.formula}. Estimativa, não medida.
+        </p>
+      )}
       <TrendExplanation ex={ex} />
 
       <dl className="mt-3 grid grid-cols-2 gap-2 text-sm" data-testid="exercise-records">
-        <div className="min-w-0 rounded-xl border p-2.5">
-          <dt className="text-xs text-muted-foreground">Maior carga (histórico)</dt>
-          <dd className="font-semibold tabular">{rec.maxLoad ? `${fmtW(rec.maxLoad.value)} × ${rec.maxLoad.reps}` : '—'}</dd>
-          {rec.maxLoad && <dd className="text-xs text-muted-foreground">{fmtDateShort(rec.maxLoad.date)}</dd>}
-        </div>
-        <div className="min-w-0 rounded-xl border p-2.5">
-          <dt className="text-xs text-muted-foreground">Melhor no período</dt>
-          <dd className="font-semibold tabular">
-            {ex.periodBest.maxLoad ? `${fmtW(ex.periodBest.maxLoad.value)} × ${ex.periodBest.maxLoad.reps}` : ex.periodBest.maxUnloadedReps ? `${ex.periodBest.maxUnloadedReps.value} reps` : '—'}
-          </dd>
-        </div>
-        <div className="min-w-0 rounded-xl border p-2.5">
-          <dt className="text-xs text-muted-foreground">1RM estimado (histórico)</dt>
-          <dd className="font-semibold tabular">{rec.bestE1rm ? `${fmtW(rec.bestE1rm.value)}` : '—'}</dd>
-          {rec.bestE1rm && <dd className="text-xs text-muted-foreground">estimativa, não medido</dd>}
-        </div>
-        <div className="min-w-0 rounded-xl border p-2.5">
-          <dt className="text-xs text-muted-foreground">Maior volume numa série</dt>
-          <dd className="font-semibold tabular">{rec.maxSetVolume ? fmtW(rec.maxSetVolume.value) : '—'}</dd>
-        </div>
+        {loadMetrics || !bodyweight ? (
+          <>
+            <div className="min-w-0 rounded-xl border p-2.5">
+              <dt className="text-xs text-muted-foreground">Maior carga (histórico)</dt>
+              <dd className="font-semibold tabular">{rec.maxLoad ? `${fmtW(rec.maxLoad.value)} × ${rec.maxLoad.reps}` : '—'}</dd>
+              {rec.maxLoad && <dd className="text-xs text-muted-foreground">{fmtDateShort(rec.maxLoad.date)}</dd>}
+            </div>
+            <div className="min-w-0 rounded-xl border p-2.5">
+              <dt className="text-xs text-muted-foreground">Melhor no período</dt>
+              <dd className="font-semibold tabular">
+                {ex.periodBest.maxLoad ? `${fmtW(ex.periodBest.maxLoad.value)} × ${ex.periodBest.maxLoad.reps}` : ex.periodBest.maxUnloadedReps ? `${ex.periodBest.maxUnloadedReps.value} reps` : '—'}
+              </dd>
+            </div>
+            <div className="min-w-0 rounded-xl border p-2.5">
+              <dt className="text-xs text-muted-foreground">1RM estimado (histórico)</dt>
+              <dd className="font-semibold tabular">{rec.bestE1rm ? `${fmtW(rec.bestE1rm.value)}` : '—'}</dd>
+              {rec.bestE1rm && <dd className="text-xs text-muted-foreground">estimativa, não medido</dd>}
+            </div>
+            <div className="min-w-0 rounded-xl border p-2.5">
+              <dt className="text-xs text-muted-foreground">Maior volume numa série</dt>
+              <dd className="font-semibold tabular">{rec.maxSetVolume ? fmtW(rec.maxSetVolume.value) : '—'}</dd>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="min-w-0 rounded-xl border p-2.5">
+              <dt className="text-xs text-muted-foreground">Mais repetições sem carga</dt>
+              <dd className="font-semibold tabular">{rec.maxUnloadedReps ? `${rec.maxUnloadedReps.value} reps` : '—'}</dd>
+              {rec.maxUnloadedReps && <dd className="text-xs text-muted-foreground">{fmtDateShort(rec.maxUnloadedReps.date)}</dd>}
+            </div>
+            {rec.maxLoad && (
+              <div className="min-w-0 rounded-xl border p-2.5">
+                <dt className="text-xs text-muted-foreground">Maior carga adicional</dt>
+                <dd className="font-semibold tabular">{`+${fmtW(rec.maxLoad.value)} × ${rec.maxLoad.reps}`}</dd>
+                <dd className="text-xs text-muted-foreground">{fmtDateShort(rec.maxLoad.date)}</dd>
+              </div>
+            )}
+          </>
+        )}
       </dl>
 
-      <div className="mt-3" data-testid="record-history">
-        <p className="mb-1.5 flex items-center gap-1.5 text-sm font-medium">
-          <Trophy className="h-4 w-4 text-primary" /> Recordes de carga
-        </p>
-        {history.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            {rec.sessions <= MIN_PRIOR_SESSIONS_FOR_RECORD
-              ? `Recordes aparecem a partir da ${MIN_PRIOR_SESSIONS_FOR_RECORD + 1}ª sessão com carga (antes não há base de comparação).` : 'Nenhuma carga acima da melhor marca anterior até agora.'}
+      {(loadMetrics || addedLoad) && (
+        <div className="mt-3" data-testid="record-history">
+          <p className="mb-1.5 flex items-center gap-1.5 text-sm font-medium">
+            <Trophy className="h-4 w-4 text-primary" /> {bodyweight ? 'Recordes de carga adicional' : 'Recordes de carga'}
           </p>
+          {history.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {rec.sessions <= MIN_PRIOR_SESSIONS_FOR_RECORD
+                ? `Recordes aparecem a partir da ${MIN_PRIOR_SESSIONS_FOR_RECORD + 1}ª sessão com carga (antes não há base de comparação).` : 'Nenhuma carga acima da melhor marca anterior até agora.'}
+            </p>
+          ) : (
+            <ol className="space-y-1 text-sm">
+              {[...history].reverse().slice(0, 6).map((r) => (
+                <li key={r.ts} className="flex justify-between gap-2 tabular">
+                  <span className="text-muted-foreground">{fmtDateShort(r.date)}</span>
+                  <span>
+                    {fmtW(r.value)} × {r.reps} {r.previous !== undefined && <span className="text-xs text-muted-foreground">(antes {fmtW(r.previous)})</span>}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
+      <ExerciseAnalyses ex={ex} />
+    </ChartCard>
+  );
+}
+
+function MuscleGroupsCard({ dist, unclassified }: { dist: MuscleDistribution; unclassified: number }) {
+  // Linhas em que a ficha usou outro texto (ex.: "Peito" → Peitoral) mostram os originais.
+  const merged = dist.groups.filter((g) => g.originals.some((o) => o !== g.group));
+  const others = [...dist.unrecognized, ...dist.ambiguous];
+  return (
+    <ChartCard title="Séries por grupo muscular" description="séries realizadas no período, com nomes de grupo normalizados">
+      <div data-testid="chart-muscles">
+        {dist.groups.length ? (
+          <BarsChart horizontal data={dist.groups} x="group" y="sets" fmt={(v) => `${v} séries`} />
         ) : (
-          <ol className="space-y-1 text-sm">
-            {[...history].reverse().slice(0, 6).map((r) => (
-              <li key={r.ts} className="flex justify-between gap-2 tabular">
-                <span className="text-muted-foreground">{fmtDateShort(r.date)}</span>
-                <span>
-                  {fmtW(r.value)} × {r.reps} {r.previous !== undefined && <span className="text-xs text-muted-foreground">(antes {fmtW(r.previous)})</span>}
-                </span>
-              </li>
-            ))}
-          </ol>
+          <p className="text-sm text-muted-foreground">Nenhum exercício do período tem um grupo muscular reconhecido.</p>
         )}
       </div>
+      {merged.length > 0 && (
+        <p className="mt-2 text-xs text-muted-foreground" data-testid="muscle-synonyms">
+          Nomes na ficha: {merged.map((g) => `${g.group} (${g.originals.join(', ')})`).join(' · ')}. A ficha não é alterada.
+        </p>
+      )}
+      {others.length > 0 && (
+        <p className="mt-2 text-xs text-muted-foreground" data-testid="muscle-unclassified">
+          Fora do gráfico, sem classificação segura: {others.map((g) => `${g.group} (${g.sets} ${g.sets === 1 ? 'série' : 'séries'})`).join(', ')}.
+        </p>
+      )}
+      {unclassified > 0 && <p className="mt-2 text-xs text-muted-foreground">{unclassified} séries de exercícios sem grupo muscular informado não aparecem aqui.</p>}
+      <p className="mt-2 text-xs text-muted-foreground">Cada série conta uma vez, no grupo principal do exercício; músculos auxiliares não recebem séries.</p>
     </ChartCard>
+  );
+}
+
+function IndicatorGuideCard() {
+  return (
+    <Card className="p-4" data-testid="indicator-guide">
+      <div className="mb-3 flex items-center gap-2">
+        <BookOpen className="h-5 w-5 text-primary" />
+        <h2 className="font-display font-semibold">Como ler os indicadores</h2>
+      </div>
+      <div className="space-y-2">
+        {INDICATOR_GUIDE.map((g) => (
+          <Disclosure key={g.id} title={g.title} testId={`guide-${g.id}`}>
+            <dl className="space-y-1.5">
+              <div>
+                <dt className="font-medium text-foreground">O que mede</dt>
+                <dd>{g.measures}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-foreground">Como é calculado</dt>
+                <dd>{g.calculation}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-foreground">Quando comparar</dt>
+                <dd>{g.comparable}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-foreground">Limitações</dt>
+                <dd>{g.limitations}</dd>
+              </div>
+            </dl>
+          </Disclosure>
+        ))}
+      </div>
+    </Card>
   );
 }
 
@@ -367,12 +531,11 @@ export default function TrainingAnalyticsPage() {
             </ChartCard>
           </div>
 
-          <ChartCard title="Séries por grupo muscular" description="séries realizadas no período, pela classificação da ficha">
-            <BarsChart horizontal data={report.muscleGroups} x="group" y="sets" fmt={(v) => `${v} séries`} />
-            {report.unclassifiedSets > 0 && <p className="mt-2 text-xs text-muted-foreground">{report.unclassifiedSets} séries de exercícios sem grupo muscular informado não aparecem aqui.</p>}
-          </ChartCard>
+          <MuscleGroupsCard dist={report.muscleDistribution} unclassified={report.unclassifiedSets} />
 
           <ExerciseSection report={report} analytics={analytics} />
+
+          <IndicatorGuideCard />
         </>
       )}
     </div>

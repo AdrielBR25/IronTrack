@@ -139,3 +139,46 @@ test('desempenho: vazio, dados fictícios, períodos, exercício, gráficos e la
   await page.getByTestId('analytics-back').click();
   await expect(page).toHaveURL(/#\/evolucao$/);
 });
+
+test('desempenho (P09): grupos normalizados, tipo do exercício, estados indisponíveis e explicações pelo teclado', async ({ page }, info) => {
+  await freshStart(page);
+  await seed(page, info.outputPath('backup.json'));
+  await page.goto('./#/evolucao/desempenho');
+  await expect(page.getByTestId('stat-sessions')).toBeVisible();
+
+  // Grupos com nome normalizado; o texto original da ficha é citado (e não é alterado).
+  await expect(page.getByTestId('chart-muscles').locator('svg.recharts-surface')).toBeVisible();
+  await expect(page.getByTestId('muscle-synonyms')).toContainText('Peitoral (Peito)');
+
+  // Carga externa: o método do 1RM aparece na tela.
+  await page.getByTestId('exercise-select').selectOption({ label: 'Supino fictício (5)' });
+  await expect(page.getByTestId('e1rm-method')).toContainText('Epley (1 a 12 repetições)');
+  await expect(page.getByTestId('exercise-type')).toContainText('Carga externa');
+
+  // Peso corporal: só repetições; análises sem dados ficam indisponíveis, sem zeros.
+  await page.getByTestId('exercise-select').selectOption({ label: 'Barra fictícia (5)' });
+  await expect(page.getByTestId('exercise-type')).toContainText('Peso corporal');
+  const analyses = page.getByTestId('exercise-analyses');
+  const summary = analyses.locator('summary');
+  await summary.focus();
+  await page.keyboard.press('Enter');
+  await expect(analyses.locator('details')).toHaveAttribute('open', '');
+  await expect(page.getByTestId('analysis-duracao')).toContainText('Este exercício ainda não possui dados suficientes para esse tipo de análise.');
+  await expect(page.getByTestId('analysis-lados')).toContainText('lado');
+  await expect(page.getByTestId('analysis-carga')).toHaveAttribute('data-available', 'false');
+
+  // Explicações dos indicadores: abrem pelo teclado (Enter e Espaço).
+  const guide = page.getByTestId('guide-e1rm').locator('summary');
+  await guide.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('guide-e1rm')).toContainText('Quando comparar');
+  const vol = page.getByTestId('guide-volume').locator('summary');
+  await vol.focus();
+  await page.keyboard.press(' ');
+  await expect(page.getByTestId('guide-volume')).toContainText('Peso corporal nunca é convertido em quilos');
+
+  // Tudo aberto: continua sem rolagem horizontal e sem NaN, em 360 px e no desktop.
+  for (const d of await page.locator('[data-testid="indicator-guide"] details').all()) await d.evaluate((el) => ((el as HTMLDetailsElement).open = true));
+  await expect(page.locator('body')).not.toContainText(/NaN|Infinity/);
+  expect(await noHorizontalScroll(page)).toBe(true);
+});
