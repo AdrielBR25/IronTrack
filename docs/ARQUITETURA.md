@@ -1,6 +1,6 @@
 # Arquitetura
 
-IronTrack 2.0 · Fase 01 · Prompt 03 (atualizado nos Prompts 04–07 com o módulo de IA e o gateway, no Prompt 08 com o motor de análise de treinos e no Prompt 09 com a análise avançada de exercícios; seções 12–15 cobrem os Prompts 10–13). Descreve a organização do
+IronTrack 2.0 · Fase 01 · Prompt 03 (atualizado nos Prompts 04–07 com o módulo de IA e o gateway, no Prompt 08 com o motor de análise de treinos e no Prompt 09 com a análise avançada de exercícios; seções 12–16 cobrem os Prompts 10–14). Descreve a organização do
 código depois da modularização incremental, as dependências permitidas e as que os testes bloqueiam. O
 módulo de IA tem documento próprio: [IA_ARQUITETURA.md](IA_ARQUITETURA.md); o de análise de treinos, [ANALYTICS_TREINAMENTO.md](ANALYTICS_TREINAMENTO.md). As regras automáticas estão em
 `tests/unit/architecture.test.ts`; a compatibilidade dos imports antigos, em `tests/unit/api-compat.test.ts`.
@@ -177,8 +177,8 @@ A sessão em andamento é gravada a cada ação (`saveSession`) e recuperada ao 
 
 ## 5. Persistência
 
-- Banco `irontrack`, Dexie **v3** (P12: tabela `goals`): tabelas `settings`, `profiles`, `routines`,
-  `sessions`, `rotations`, `overrides`, `bodyEntries`, `photos`, `goals`. Histórico em [MIGRACOES.md](MIGRACOES.md).
+- Banco `irontrack`, Dexie **v4** (P12: tabela `goals`; P13: `planEntries`; P14 não mudou o esquema): tabelas
+  `settings`, `profiles`, `routines`, `sessions`, `rotations`, `overrides`, `bodyEntries`, `photos`, `goals`, `planEntries`. Histórico em [MIGRACOES.md](MIGRACOES.md).
 - A instância `db` e o esquema ficam só em `src/db/db.ts`. As telas não a importam (regra testada).
 - Repositórios por domínio, com funções explícitas (`completeSession`, `importBodyEvaluations`). Não há
   repositório genérico: cada operação mantém sua regra de negócio e sua transação.
@@ -225,6 +225,9 @@ digitação, conforme `distanceUnit` do exercício).
 - `modules/analytics` → o próprio módulo, `lib/dates` e **só** `modules/training/index.ts` (exceção documentada à
   regra de domínios); telas → `@/modules/analytics`.
 - `features/assistant` e `pages/AIAssistantPage.tsx` → `@/modules/ai`, `integrations/ai`, componentes e `lib`.
+- `modules/calendar` (P14) → o próprio módulo e as APIs públicas de `training`, `goals` e `planner` (exceção
+  documentada: modelo de leitura que só combina fontes para exibir). Só telas, `features` e `hooks/useCalendar.ts` o
+  importam; banco, `lib`, IA e outros domínios **não** (testado).
 - `modules/goals` (P12) → o próprio módulo, `lib/dates`, `lib/utils`, `modules/training/index.ts` e
   `modules/analytics/index.ts` (exceção documentada: as metas reutilizam as medidas e o 1RM canônico do analytics em
   vez de recalcular). `lib/integrity.ts` → `modules/goals/index.ts` (validação das metas no backup, como já fazia com
@@ -397,3 +400,22 @@ Detalhes em [PLANEJAMENTO_SEMANAL.md](PLANEJAMENTO_SEMANAL.md).
 - **Rotação**: o planejamento só lê o ponteiro; iniciar reutiliza `startSession`/`useStartWorkout`.
 - **Navegação** continua com 6 itens: `#/planejamento` abre por Treinos e Início e destaca "Treinos".
 - **Privacidade**: IA, integrações e assistente não importam o planejamento (testado).
+
+## 16. Calendário unificado (P14)
+
+Detalhes em [CALENDARIO_UNIFICADO.md](CALENDARIO_UNIFICADO.md).
+
+| Camada | Arquivo | Responsabilidade |
+| --- | --- | --- |
+| Domínio (puro) | `modules/calendar/types.ts` | contrato da visão resolvida (origem, certeza, estado, conflitos) |
+| Domínio (puro) | `modules/calendar/legacy.ts` | agenda anterior via `projectSchedule` (mesma projeção de antes) |
+| Domínio (puro) | `modules/calendar/forecast.ts` | previsão da rotação (ponteiro atual + simulação, horizonte de 14 dias) |
+| Domínio (puro) | `modules/calendar/conflicts.ts` | conflitos determinísticos entre as fontes |
+| Domínio (puro) | `modules/calendar/resolve.ts` | precedência, dia/semana/mês, resumos, próxima atividade |
+| Hook | `hooks/useCalendar.ts` | reúne as fontes (consultas ao vivo, só leitura) |
+| Interface | `features/calendar/*`, `pages/WeeklyPlannerPage.tsx`, `HomePage.tsx`, `WorkoutsPage.tsx` | avisos, grade mensal, escolha de treino, resumos |
+
+- **Visão nunca persistida**: sem tabela, migração ou chave nova; Dexie v4 e backup v5.
+- **Reuso**: o dia do planejamento vem de `buildWeek` (P13); sessões de `countableSessions` (P12); agenda anterior de
+  `projectSchedule`; rotação de `indexAfter`/`normIndex`. Nenhuma fórmula paralela.
+- **Navegação** continua com 6 itens.

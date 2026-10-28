@@ -164,12 +164,20 @@ planejamento nem citam a tabela; o domínio não usa rede, storage, relógio nem
   (por desenho).
 - Não há "copiar esta semana para o modelo" nem planejamento por intervalo de datas; o modelo semanal é o único
   recorrente.
-- A agenda antiga da Início/Treinos (dias de treino das Configurações + reagendamentos) continua separada e não
-  conversa com o planejamento; os dois podem mostrar coisas diferentes para o mesmo dia.
-- "Próximo da rotação" mostra o ponteiro atual; para dias futuros ele é só indicativo (a rotação muda quando você
-  treina).
+- ~~A agenda antiga da Início/Treinos continua separada~~ — **resolvido no P14**: as três telas usam o calendário
+  unificado ([CALENDARIO_UNIFICADO.md](CALENDARIO_UNIFICADO.md)); os dados continuam separados.
+- ~~"Próximo da rotação" mostra o ponteiro atual em dias futuros~~ — **P14**: previsão simulada e identificada (§6
+  do calendário unificado), "a definir" além de 14 dias.
 - Iniciar pelo painel só é oferecido para hoje. Ao concluir, a rotação segue a regra existente (pode ir para o treino
   seguinte ao realizado, mesmo que outro estivesse na vez).
 - O app anterior ao P13 não mostra nem restaura o planejamento (recusa backup v5); "apagar tudo" nele não limpa
   `planEntries`.
 - Sem lembretes, notificações ou sincronização entre aparelhos.
+
+## 14. Calendário unificado (P14)
+
+Esta tela passou a ser também o calendário unificado: alternância Semana | Mês, avisos de divergência com a agenda
+anterior, seção "Agenda anterior" no dia selecionado, previsões da rotação identificadas e o texto "Estes ajustes
+alteram só o planejamento semanal". O modelo `planEntries`, as regras de edição, o backup v5 e o Dexie v4 **não
+mudaram**. `?data=yyyy-mm-dd` abre um dia (usado pela Início e pela Treinos). Detalhes em
+[CALENDARIO_UNIFICADO.md](CALENDARIO_UNIFICADO.md).

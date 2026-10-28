@@ -182,3 +182,10 @@ O painel `#/planejamento` mostra as metas de frequência semanal chamando `compu
 exibida em `weekly.weeks` (e até 4 anteriores). Nenhuma fórmula foi duplicada: as sessões contadas pelo painel usam
 `countableSessions`, exportado por este módulo. Descanso planejado não afeta metas; metas não leem o planejamento.
 Detalhes em [PLANEJAMENTO_SEMANAL.md](PLANEJAMENTO_SEMANAL.md) §6. Backup atual: v5 (metas continuam em `data.goals`).
+
+## 15. Calendário unificado (P14)
+
+O calendário unificado ([CALENDARIO_UNIFICADO.md](CALENDARIO_UNIFICADO.md)) não criou fórmula de meta: as metas
+semanais continuam vindo de `computeGoalProgress` via `weeklyGoalsForWeek`, e as sessões contadas pelo calendário,
+pela Início e pelo Planejamento são as de `countableSessions`. Sugestões da agenda anterior e previsões da rotação não
+entram em nenhum cálculo de meta nem na contagem de atividades planejadas.
