@@ -73,6 +73,8 @@ export {
   type TimedSessionObs,
 } from './domain/modalities';
 export { muscleDistributionOf, trendFor, classifyHistory } from './domain/metrics';
+// P12: medida de um exercício numa sessão, reutilizada pelo motor de metas (mesmas regras de validade dos gráficos).
+export { exercisePoint } from './domain/metrics';
 export {
   INDICATOR_GUIDE,
   UNAVAILABLE_ANALYSIS_TEXT,
