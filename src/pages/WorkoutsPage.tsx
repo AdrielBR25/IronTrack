@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { AlertTriangle, CalendarClock, CalendarDays, Check, Coffee, Copy, Download, FileUp, Minus, MoreVertical, Moon, Pencil, Play, Plus, SkipForward, Sparkles, Trash2, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PageHeader } from '@/components/AppLayout';
@@ -307,6 +307,17 @@ function RotationCard({ routine }: { routine: Routine }) {
             <AlertTriangle className="h-3 w-3 text-warn" /> divergência
           </li>
         </ul>
+        <Link
+          to="/planejamento/importar"
+          className="flex min-h-11 items-center gap-2 rounded-xl bg-secondary/50 px-3 py-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid="treinos-open-import"
+        >
+          <CalendarDays className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+          <span className="min-w-0 flex-1">
+            <span className="font-medium">Importar agenda antiga para o planejamento</span>
+            <span className="block text-muted-foreground">Opcional, com prévia e confirmação. Reagendar e descanso aqui continuam alterando só a agenda anterior.</span>
+          </span>
+        </Link>
       </CardContent>
       <AgendaDayDialog day={day} routine={routine} onClose={() => setSelected(null)} />
     </Card>

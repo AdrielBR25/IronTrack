@@ -6,9 +6,23 @@ import { legacyText, type ResolvedDay } from '@/modules/calendar';
 import { CERTAINTY_HINT, ORIGIN_LABEL, entryLine } from './calendarFormat';
 
 // Aviso de divergência entre as agendas (IronTrack 2.0 F01/P14, docs/CALENDARIO_UNIFICADO.md §5). Nunca resolve nada
-// sozinho: "Manter planejamento atual" só recolhe o aviso nesta tela (nada é gravado; ele volta ao reabrir).
+// sozinho: "Manter planejamento atual" só recolhe o aviso nesta tela (nada é gravado; ele volta ao reabrir) — P15:
+// rotulado como tal. Com a preferência "observações informativas" desligada, dias só com informações mostram uma
+// linha discreta (consultável); avisos relevantes aparecem sempre.
 
-export function ConflictNotice({ day, onEditPlan, legacyHref = '/treinos', planHref }: { day: ResolvedDay; onEditPlan?: () => void; legacyHref?: string | null; planHref?: string }) {
+export function ConflictNotice({
+  day,
+  onEditPlan,
+  legacyHref = '/treinos',
+  planHref,
+  showInfo = true,
+}: {
+  day: ResolvedDay;
+  onEditPlan?: () => void;
+  legacyHref?: string | null;
+  planHref?: string;
+  showInfo?: boolean;
+}) {
   const [kept, setKept] = useState(false);
   const [details, setDetails] = useState(false);
   useEffect(() => {
@@ -31,6 +45,7 @@ export function ConflictNotice({ day, onEditPlan, legacyHref = '/treinos', planH
           <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
             <Button size="sm" variant="secondary" className="h-auto min-h-11 whitespace-normal py-2 text-center leading-tight sm:min-h-9" onClick={() => setKept(true)} data-testid="conflict-keep">
               Manter planejamento atual
+              <span className="block text-[10px] font-normal opacity-80">só nesta tela; nada é gravado</span>
             </Button>
             <Button size="sm" variant="outline" className="h-auto min-h-11 whitespace-normal py-2 text-center leading-tight sm:min-h-9" aria-expanded={details} onClick={() => setDetails((v) => !v)} data-testid="conflict-details">
               {details ? 'Ocultar detalhes' : 'Ver detalhes'}
@@ -66,8 +81,9 @@ export function ConflictNotice({ day, onEditPlan, legacyHref = '/treinos', planH
         >
           <Info className="h-4 w-4 shrink-0" aria-hidden />
           <span className="min-w-0 flex-1">
-            {kept ? 'Você manteve o planejamento atual; nada foi alterado. ' : ''}
+            {kept ? 'Você manteve o planejamento atual; nada foi alterado (o aviso volta ao reabrir). ' : ''}
             {day.conflicts.length === 1 ? '1 observação sobre as agendas deste dia' : `${day.conflicts.length} observações sobre as agendas deste dia`}
+            {!showInfo && !warnings.length ? ' (informativas, ocultas pelas preferências)' : ''}
           </span>
           <span className="font-medium text-foreground">{details ? 'Ocultar' : 'Ver'}</span>
         </button>

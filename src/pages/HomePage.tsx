@@ -88,6 +88,15 @@ function originCaption(e: ResolvedEntry): string {
   return 'Agenda anterior';
 }
 
+/** P15: origem do que a Início mostra para hoje, em texto (concluído, planejado, sugestão, descanso ou nada). */
+function todaySource(day: ResolvedDay, isDone: boolean, pending: ResolvedEntry | undefined, marker: ResolvedEntry | undefined): string {
+  if (isDone) return `Concluído · ${day.plan.sessions.length === 1 ? '1 treino registrado' : `${day.plan.sessions.length} treinos registrados`}`;
+  if (pending) return `${pending.origin.startsWith('plan_') ? 'Planejado' : 'Sugestão'} · ${originCaption(pending)}`;
+  if (marker) return `${marker.kind === 'rest' ? 'Descanso' : 'Dia livre'} · ${originCaption(marker)}`;
+  if (day.legacy?.kind === 'rest') return day.legacy.source === 'override' ? 'Descanso · reagendado na agenda anterior' : 'Descanso · agenda anterior (não é dia de treino)';
+  return 'Nada planejado para hoje';
+}
+
 const fmtNext = (date: string) => `${weekdayShort(weekday(date))} ${fmtDateShort(date)}`;
 
 /**
@@ -250,6 +259,13 @@ function TodayCard({ routine, input }: { routine: Routine; input: CalendarData |
           </>
         )}
         <dl className="grid gap-1 rounded-xl bg-secondary/40 p-3 text-xs" data-testid="home-calendar-info">
+          <div className="flex flex-wrap justify-between gap-x-2">
+            <dt className="text-muted-foreground">Hoje</dt>
+            <dd className="min-w-0 break-words text-right" data-testid="home-today-source">
+              {todaySource(day, isDone, pending, marker)}
+              {day.legacyAgrees ? <span className="block text-muted-foreground">A agenda anterior indica o mesmo.</span> : null}
+            </dd>
+          </div>
           <div className="flex flex-wrap justify-between gap-x-2">
             <dt className="text-muted-foreground">Rotação</dt>
             <dd data-testid="home-rotation">
