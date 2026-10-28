@@ -277,7 +277,17 @@ function compose(p: Prepared, date: string): ResolvedDay {
     entries,
     conflicts,
     hasWarning: conflicts.some((c) => c.severity === 'warning'),
+    legacyAgrees: legacyAgreesWithPlan(plan, legacy),
   };
+}
+
+/** A agenda anterior diz o mesmo que o planejamento do dia (mesma rotina pela rotação, mesmo treino ou descanso). */
+function legacyAgreesWithPlan(plan: DayView, legacy: LegacyDay | null): boolean {
+  if (!legacy || plan.source === 'none' || legacy.kind === 'done') return false;
+  if (legacy.kind === 'rest') return plan.activities.length === 0 && plan.marker === 'rest';
+  return plan.activities.some(
+    (a) => a.entry.routineId === legacy.routineId && ((a.followsRotation && legacy.source === 'rotation') || (!a.followsRotation && a.entry.workoutId === legacy.workoutId)),
+  );
 }
 
 /** Resolve os dias de `from` a `to` (inclusive), sob demanda. Nada é gravado. */

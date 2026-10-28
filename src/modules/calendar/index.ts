@@ -23,3 +23,4 @@ export {
   shiftMonth,
   summarize,
 } from './resolve';
+export { conflictCounts, groupConflicts, type ConflictAction, type ConflictGroup, type ConflictGroupDay } from './conflictCenter';

@@ -144,6 +144,11 @@ export interface ResolvedDay {
   conflicts: CalendarConflict[];
   /** Há conflito com severidade `warning`. */
   hasWarning: boolean;
+  /**
+   * P15: a agenda anterior indica o mesmo que o planejamento (ex.: depois de importar a agenda anterior). As telas
+   * mostram a atividade uma vez só e dizem "a agenda anterior indica o mesmo".
+   */
+  legacyAgrees: boolean;
 }
 
 export interface CalendarSummary {

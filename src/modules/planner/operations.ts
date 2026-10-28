@@ -105,7 +105,8 @@ export const sameActivity = (a: Pick<PlanEntry, 'routineId' | 'workoutId'>, b: P
 // ---------------------------------------------------------------------------------------------
 // Construção e conferência
 
-function build(id: string, slot: PlanSlot, kind: PlanKind, activity: PlanActivityInput | null, ctx: PlanContext, extra: Partial<PlanEntry> = {}): PlanEntry {
+/** Uso interno do módulo (importação da agenda anterior, P15). */
+export function build(id: string, slot: PlanSlot, kind: PlanKind, activity: PlanActivityInput | null, ctx: PlanContext, extra: Partial<PlanEntry> = {}): PlanEntry {
   const entry: PlanEntry = {
     id,
     scope: slot.scope,
@@ -132,7 +133,7 @@ function assertValid(entries: PlanEntry[]) {
   }
 }
 
-function assertSlotEditable(slot: PlanSlot, ctx: PlanContext) {
+export function assertSlotEditable(slot: PlanSlot, ctx: PlanContext) {
   if (slot.scope === 'date') {
     if (!isPlanDate(slot.date)) throw conflict('invalid', ['Data inválida.']);
     if (slot.date < ctx.today) throw conflict('past');
@@ -144,7 +145,7 @@ function assertFresh(all: readonly PlanEntry[], slot: PlanSlot, expected: string
 }
 
 /** Mutável durante a construção de um conjunto de mudanças (aplica em memória para as regras seguintes). */
-class Draft {
+export class Draft {
   private map: Map<string, PlanEntry>;
   readonly put = new Map<string, PlanEntry>();
   readonly del = new Set<string>();
@@ -182,7 +183,7 @@ const bump = (e: PlanEntry, patch: Partial<PlanEntry>, ctx: PlanContext): PlanEn
 });
 
 /** Tira uma entrada recorrente da agenda de hoje em diante sem mudar o passado. */
-function retireWeekly(d: Draft, e: PlanEntry, ctx: PlanContext) {
+export function retireWeekly(d: Draft, e: PlanEntry, ctx: PlanContext) {
   if (!e.validFrom || e.validFrom >= ctx.today) d.remove(e.id);
   else if (e.validUntil === null || e.validUntil >= ctx.today) d.set(bump(e, { validUntil: planAddDays(ctx.today, -1) }, ctx));
 }
@@ -396,4 +397,36 @@ export function clearException(all: readonly PlanEntry[], input: { date: string;
   if (!ex.length) return { put: [], delete: [], result: null };
   assertFresh(all, slot, input.expected, ctx);
   return { put: [], delete: ex.map((e) => e.id), result: null };
+}
+
+export interface ReplaceDateInput {
+  /** ID da nova exceção (gerado uma vez pela tela). */
+  id: string;
+  date: string;
+  kind: Exclude<PlanKind, 'free'>;
+  activity?: PlanActivityInput;
+  /** Impressão digital da data que a tela mostrava. */
+  expected?: string;
+}
+
+/**
+ * P15 (central de divergências): "usar a agenda anterior só neste dia". A data passa a ter exatamente uma exceção
+ * (o treino ou o descanso escolhido); o planejamento semanal não muda. Decisão explícita, confirmada na tela.
+ */
+export function replaceDate(all: readonly PlanEntry[], input: ReplaceDateInput, ctx: PlanContext): PlanChanges {
+  const slot: PlanSlot = { scope: 'date', date: input.date };
+  assertSlotEditable(slot, ctx);
+  const existing = all.find((e) => e.id === input.id);
+  if (existing) {
+    const same = existing.scope === 'date' && existing.date === input.date && existing.kind === input.kind && (input.kind !== 'workout' || sameActivity(existing, input.activity!));
+    if (same) return { put: [], delete: [], result: existing };
+    throw conflict('exists');
+  }
+  assertFresh(all, slot, input.expected, ctx);
+  if (input.kind === 'workout' && !input.activity) throw conflict('invalid', ['Treino sem rotina.']);
+  const d = new Draft(all);
+  for (const e of all.filter((x) => x.scope === 'date' && x.date === input.date)) d.remove(e.id);
+  const entry = build(input.id, slot, input.kind, input.kind === 'workout' ? input.activity! : null, ctx);
+  d.set(entry);
+  return d.changes(entry);
 }

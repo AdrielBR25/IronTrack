@@ -10,6 +10,8 @@ import {
   addActivity,
   clearException,
   removeEntry,
+  replaceDate,
+  type ReplaceDateInput,
   setMarker,
   updateActivity,
   type AddActivityInput,
@@ -62,3 +64,6 @@ export const removePlanEntry = (input: RemoveEntryInput, clock?: PlanClock) => r
 
 /** Desfaz as exceções de uma data (volta ao modelo recorrente). */
 export const clearPlanException = (input: { date: string; expected?: string }, clock?: PlanClock) => run((all, ctx) => clearException(all, input, ctx), clock);
+
+/** P15: a data passa a ter só a atividade escolhida (ex.: "usar a agenda anterior só neste dia"). */
+export const replacePlanDate = (input: ReplaceDateInput, clock?: PlanClock) => run((all, ctx) => replaceDate(all, input, ctx), clock);
