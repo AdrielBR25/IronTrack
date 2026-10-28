@@ -130,7 +130,7 @@ export function previousConfig(key: LibraryKey, routines: readonly Routine[], mo
   for (const r of sorted)
     for (const w of r.workouts ?? [])
       for (const t of w.exercises ?? []) {
-        if (libraryKeyOf(t) !== key || t.modality !== modality) continue;
+        if (libraryKeyOf(t) !== key || (t.modality ?? 'resistance') !== modality) continue;
         return { config: configOf(t), source: { routineId: r.id, routineName: r.name, workoutLabel: w.label, workoutName: w.name, exerciseName: t.name } };
       }
   return null;

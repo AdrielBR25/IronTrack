@@ -147,7 +147,7 @@ export default function ExerciseLibraryPage() {
           <span className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
             <Badge variant="secondary">{item.primaryMuscles.map((m) => MUSCLE_NAME[m]).join(', ')}</Badge>
             <span>{EQUIPMENT_NAME[item.equipment[0]]}</span>
-            <span>· {MODALITY_FILTER_LABEL[item.modality]}</span>
+            {MODALITY_FILTER_LABEL[item.modality] !== EQUIPMENT_NAME[item.equipment[0]] && <span>· {MODALITY_FILTER_LABEL[item.modality]}</span>}
             {item.laterality === 'unilateral' && item.modality !== 'cardio' && <Badge variant="outline">unilateral</Badge>}
             {item.kind === 'custom' && <Badge variant="outline">meu</Badge>}
             {item.archived && <Badge variant="warn">arquivado</Badge>}
