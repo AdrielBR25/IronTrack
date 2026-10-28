@@ -194,3 +194,20 @@ export function fmtDurationSec(sec: number): string {
   const r = String(s % 60).padStart(2, '0');
   return h ? `${h}:${String(m).padStart(2, '0')}:${r}` : `${m}:${r}`;
 }
+
+/**
+ * Ritmo (segundos por unidade de distância) derivado só da duração e da distância registradas. Null se faltar uma
+ * delas ou se o resultado não fizer sentido. Não estima nada além disso (sem calorias, sem frequência cardíaca).
+ */
+export function paceSecPerUnit(durationSec: number | null | undefined, distanceM: number | null | undefined, unit: DistanceUnit): number | null {
+  if (!isValidDurationSec(durationSec) || !isValidDistanceM(distanceM)) return null;
+  const units = fromMetersTo(distanceM, unit);
+  if (!(units > 0)) return null;
+  const pace = durationSec / units;
+  return Number.isFinite(pace) && pace > 0 ? pace : null;
+}
+
+/** Lado oposto (atalho de alternância). "Ambos" e ausente não têm oposto. */
+export function oppositeSide(side: SetSide | null | undefined): SetSide | null {
+  return side === 'direito' ? 'esquerdo' : side === 'esquerdo' ? 'direito' : null;
+}

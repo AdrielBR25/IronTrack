@@ -13,3 +13,6 @@ export * from './progression';
 export * from './volume';
 export * from './stats';
 export * from './restTimer';
+export * from './setTimer';
+export * from './sessionMerge';
+export * from './modelCompat';
