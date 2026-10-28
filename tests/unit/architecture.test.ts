@@ -115,6 +115,9 @@ describe('arquitetura', () => {
       if (ownModule === 'modules/calendar' && ['modules/training/index.ts', 'modules/goals/index.ts', 'modules/planner/index.ts'].includes(e.target)) return false;
       // P17: a biblioteca cria instâncias no modelo da ficha (treinamento) e reutiliza a normalização muscular do analytics.
       if (ownModule === 'modules/exercises' && ['modules/training/index.ts', 'modules/analytics/index.ts'].includes(e.target)) return false;
+      // P19: o desempenho por exercício lê sessões pela API pública do treinamento e reutiliza o 1RM canônico, os
+      // limiares de tendência e o calendário do analytics (sem fórmula paralela).
+      if (ownModule === 'modules/performance' && ['modules/training/index.ts', 'modules/analytics/index.ts'].includes(e.target)) return false;
       return !inDir(e.target, ownModule) && !allowedShared.has(e.target);
     });
     expect(bad.map(fmt)).toEqual([]);
