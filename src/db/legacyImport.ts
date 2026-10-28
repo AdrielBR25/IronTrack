@@ -18,6 +18,7 @@ import {
   importFingerprint,
   planUndoImport,
   previewLegacyImport,
+  previewUndoImport,
   type ConflictDecision,
   type ImportMode,
   type ImportPreview,
@@ -25,6 +26,7 @@ import {
   type PlanContext,
   type PlanImportRecord,
   type UndoPlan,
+  type UndoPreview,
 } from '@/modules/planner';
 
 export const IMPORT_RECORD_PREFIX = 'planImport.last.';
@@ -35,7 +37,7 @@ interface StoredImportRecord {
   record: PlanImportRecord;
 }
 
-export type LegacyImportErrorKind = 'changed' | 'nothing' | 'no_profile' | 'view_only' | 'undo_blocked' | 'undo_missing' | 'undo_changed';
+export type LegacyImportErrorKind = 'changed' | 'nothing' | 'no_profile' | 'view_only' | 'undo_blocked' | 'undo_missing' | 'undo_changed' | 'undo_nothing';
 
 const MESSAGES: Record<LegacyImportErrorKind, string> = {
   changed: 'O planejamento ou a agenda anterior mudaram desde a prévia (talvez em outra aba). Nada foi gravado: confira a prévia atualizada.',
@@ -44,7 +46,8 @@ const MESSAGES: Record<LegacyImportErrorKind, string> = {
   view_only: 'No modo "Apenas visualizar" nada é gravado.',
   undo_blocked: 'Não foi possível desfazer: houve alterações depois da importação. Nada foi revertido.',
   undo_missing: 'Não há importação para desfazer.',
-  undo_changed: 'A importação mudou desde que você abriu esta tela (talvez em outra aba). Nada foi revertido.',
+  undo_changed: 'A importação ou o planejamento mudaram desde a prévia do desfazer (talvez em outra aba). Nada foi revertido: confira a prévia atualizada.',
+  undo_nothing: 'Nenhum item pode ser desfeito com segurança agora. Nada foi revertido.',
 };
 
 export class LegacyImportError extends Error {
@@ -164,35 +167,66 @@ export async function applyImport(input: ApplyImportInput, clock?: ImportClock):
   });
 }
 
-/** Confere (sem gravar) se a última importação pode ser desfeita agora e o que mudaria. */
-export async function checkUndoImport(clock?: ImportClock): Promise<{ record: PlanImportRecord | null; plan: UndoPlan | null }> {
+/**
+ * Confere (sem gravar) se a última importação pode ser desfeita agora e o que mudaria: o plano "desfazer tudo"
+ * (contrato do P15) e, desde o P16, a prévia item a item (seguros, alterados, excluídos, passados, já revertidos).
+ */
+export async function checkUndoImport(clock?: ImportClock): Promise<{ record: PlanImportRecord | null; plan: UndoPlan | null; preview: UndoPreview | null }> {
   const ctx = ctxOf(clock);
-  return db.transaction('r', [db.planEntries, db.settings], async () => {
+  return db.transaction('r', [db.planEntries, db.settings, db.routines], async () => {
     const record = await readLastImport();
-    if (!record) return { record: null, plan: null };
+    if (!record) return { record: null, plan: null, preview: null };
     const entries = await db.planEntries.where('profileId').equals(record.profileId).toArray();
-    return { record, plan: planUndoImport(record, entries, ctx) };
+    const routines = await db.routines.where('profileId').equals(record.profileId).toArray();
+    return { record, plan: planUndoImport(record, entries, ctx), preview: previewUndoImport(record, entries, ctx, routines) };
   });
 }
 
+export interface UndoImportInput {
+  recordId: string;
+  /** `all` (padrão, contrato do P15): só se TODOS os itens forem seguros · `safe` (P16): só os itens seguros. */
+  mode?: 'all' | 'safe';
+  /** Impressão digital da prévia que a pessoa confirmou: qualquer mudança desde então cancela (nada revertido). */
+  expectedFingerprint?: string;
+}
+
 /**
- * Desfaz a última importação. Na mesma transação: confere que o registro é o que a tela mostrava, recalcula o plano de
- * reversão com o planejamento atual e só reverte se nada foi alterado depois (senão, nada é revertido).
+ * Desfaz a última importação, inteira ou só os itens seguros. Na mesma transação: confere que o registro é o que a
+ * tela mostrava, recalcula a prévia com o planejamento atual (revisões e impressões digitais), recusa se ela mudou
+ * desde a confirmação e só então reverte. O modo parcial nunca toca um lugar alterado depois; o registro guarda o que
+ * foi revertido e fica "desfeito em parte" enquanto houver itens pendentes (para revisão). Sessões, rotação, agenda
+ * anterior e fichas nunca são tocadas.
  */
-export async function undoLastImport(input: { recordId: string }, clock?: ImportClock): Promise<UndoPlan> {
+export async function undoLastImport(input: UndoImportInput, clock?: ImportClock): Promise<UndoPlan> {
   const ctx = ctxOf(clock);
+  const mode = input.mode ?? 'all';
   return db.transaction('rw', [db.planEntries, db.settings], async () => {
     const pid = db.currentProfileId;
     if (!pid) throw new LegacyImportError('no_profile');
     const record = await readLastImport();
-    if (!record || record.status !== 'applied') throw new LegacyImportError(record ? 'undo_changed' : 'undo_missing');
+    if (!record || record.status === 'undone') throw new LegacyImportError(record ? 'undo_changed' : 'undo_missing');
     if (record.id !== input.recordId) throw new LegacyImportError('undo_changed');
     const entries = await db.planEntries.where('profileId').equals(pid).toArray();
-    const plan = planUndoImport(record, entries, ctx);
-    if (!plan.ok) throw new LegacyImportError('undo_blocked', plan.problems);
-    if (plan.delete.length) await db.planEntries.bulkDelete(plan.delete);
-    if (plan.put.length) await db.planEntries.bulkPut(plan.put);
-    await settingsTable().put({ id: recordKey(pid), kind: 'planImport', record: { ...record, status: 'undone', undoneAt: ctx.now } } satisfies StoredImportRecord);
-    return plan;
+    const preview = previewUndoImport(record, entries, ctx);
+    if (input.expectedFingerprint !== undefined && preview.fingerprint !== input.expectedFingerprint) throw new LegacyImportError('undo_changed');
+    let changes: { put: PlanEntry[]; delete: string[] };
+    let reverted: string[];
+    if (mode === 'all') {
+      if (!preview.allSafe) throw new LegacyImportError('undo_blocked', [...new Set(preview.items.flatMap((i) => i.problems))]);
+      changes = preview.all;
+      reverted = preview.revertsAll;
+    } else {
+      if (!preview.safeCount) throw new LegacyImportError('undo_nothing');
+      changes = preview.safe;
+      reverted = preview.revertsSafe;
+    }
+    if (changes.delete.length) await db.planEntries.bulkDelete(changes.delete);
+    if (changes.put.length) await db.planEntries.bulkPut(changes.put);
+    const done = new Set([...(record.reverted ?? []), ...reverted]);
+    // "Desfeita" só quando não resta nenhum item pendente; senão, "desfeita em parte" (os pendentes ficam para revisão).
+    const pending = preview.items.filter((i) => !done.has(i.key) && i.status !== 'past');
+    const status: PlanImportRecord['status'] = pending.length ? 'partial' : 'undone';
+    await settingsTable().put({ id: recordKey(pid), kind: 'planImport', record: { ...record, status, reverted: [...done].sort(), undoneAt: ctx.now } } satisfies StoredImportRecord);
+    return { ok: true, problems: [], put: changes.put, delete: changes.delete, keptPast: preview.keptPast };
   });
 }

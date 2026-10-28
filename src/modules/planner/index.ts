@@ -50,6 +50,7 @@ export { weeklyGoalsForWeek, type WeeklyGoalView } from './goals';
 export {
   previewLegacyImport,
   planUndoImport,
+  previewUndoImport,
   importFingerprint,
   importWeekdayName,
   shortHash,
@@ -69,6 +70,9 @@ export {
   type ImportPreview,
   type PlanImportRecord,
   type UndoPlan,
+  type UndoPreview,
+  type UndoItem,
+  type UndoItemStatus,
 } from './legacyImport';
 export { DECISION_CONFLICT_KINDS, DECISION_SCOPES, DECISION_VALUES } from './types';
 export {

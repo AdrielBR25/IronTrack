@@ -13,7 +13,7 @@ import { useToday } from '@/hooks/data';
 import { fmtDayLong } from '@/features/planner/plannerFormat';
 import { fmtDateTime, weekdayShort } from '@/lib/dates';
 import { cn, uid } from '@/lib/utils';
-import { importWeekdayName, previewLegacyImport, type ConflictDecision, type ImportItem, type ImportMode, type ImportOutcome, type ImportPreview, type UndoPlan } from '@/modules/planner';
+import { importWeekdayName, previewLegacyImport, type ConflictDecision, type ImportItem, type ImportMode, type ImportOutcome, type ImportPreview, type UndoItemStatus, type UndoPreview } from '@/modules/planner';
 
 // Importar agenda antiga para o planejamento (IronTrack 2.0 F01/P15, #/planejamento/importar,
 // docs/CONSOLIDACAO_AGENDAS.md). Iniciada só pela pessoa; prévia obrigatória; confirmação explícita; nada da agenda
@@ -46,6 +46,15 @@ const DECISIONS: { value: ConflictDecision; label: string }[] = [
   { value: 'skip', label: 'Não importar este dia' },
 ];
 
+// P16: grupos da prévia do desfazer, na ordem em que aparecem (cada um com rótulo em texto, não só cor).
+const UNDO_GROUPS: { status: UndoItemStatus; title: string; testId: string }[] = [
+  { status: 'safe', title: 'Podem ser desfeitos', testId: 'undo-safe' },
+  { status: 'modified', title: 'Alterados depois da importação (ficam como estão)', testId: 'undo-modified' },
+  { status: 'deleted', title: 'Excluídos depois da importação (ficam como estão)', testId: 'undo-deleted' },
+  { status: 'past', title: 'Datas que já passaram (ficam como estão)', testId: 'undo-past' },
+  { status: 'reverted', title: 'Já desfeitos antes', testId: 'undo-reverted' },
+];
+
 const itemTitle = (it: ImportItem) => (it.kind === 'weekday' ? importWeekdayName(it.weekday!).replace(/^./, (c) => c.toUpperCase()) : it.kind === 'date' ? fmtDayLong(it.date!) : 'Outros registros');
 
 export default function LegacyImportPage() {
@@ -58,7 +67,7 @@ export default function LegacyImportPage() {
   const [confirm, setConfirm] = useState<{ preview: ImportPreview; operationId: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [seenFingerprint, setSeenFingerprint] = useState<string | null>(null);
-  const [undo, setUndo] = useState<{ plan: UndoPlan; recordId: string } | null>(null);
+  const [undo, setUndo] = useState<{ preview: UndoPreview; recordId: string } | null>(null);
 
   // O mesmo motor nos três modos (IDs provisórios: a gravação recalcula tudo dentro da transação).
   const preview = useMemo(() => (source ? previewLegacyImport(source, { mode, decisions }, { today, now: 0, newId: () => 'prévia' }) : null), [source, mode, decisions, today]);
@@ -102,16 +111,21 @@ export default function LegacyImportPage() {
 
   async function askUndo() {
     const r = await checkUndoImport();
-    if (!r.record || !r.plan) return void toast.error('Não há importação para desfazer.');
-    setUndo({ plan: r.plan, recordId: r.record.id });
+    if (!r.record || !r.preview) return void toast.error('Não há importação para desfazer.');
+    setUndo({ preview: r.preview, recordId: r.record.id });
   }
 
-  async function runUndo() {
+  async function runUndo(mode: 'all' | 'safe') {
     if (!undo) return;
     setBusy(true);
     try {
-      await undoLastImport({ recordId: undo.recordId });
-      toast.success('Importação desfeita. A agenda antiga, as sessões e a rotação não mudaram.');
+      // A transação confere que nada mudou desde esta prévia (outra aba, edição): senão, nada é revertido.
+      await undoLastImport({ recordId: undo.recordId, mode, expectedFingerprint: undo.preview.fingerprint });
+      toast.success(
+        mode === 'all'
+          ? 'Importação desfeita. A agenda antiga, as sessões e a rotação não mudaram.'
+          : 'Itens seguros desfeitos. O que você alterou depois ficou como estava; a agenda antiga, as sessões e a rotação não mudaram.',
+      );
     } catch (e) {
       toast.error(e instanceof LegacyImportError ? e.message : 'Não foi possível desfazer. Nada foi revertido.', { description: e instanceof LegacyImportError ? e.details.join('\n') : undefined });
     } finally {
@@ -214,15 +228,17 @@ export default function LegacyImportPage() {
             {fmtDateTime(last.createdAt)} · {last.counts.create + last.counts.replace} {last.counts.create + last.counts.replace === 1 ? 'entrada criada' : 'entradas criadas'} ·{' '}
             {last.mode === 'review' ? 'revisando conflitos' : 'só dias vazios'}
             {last.status === 'undone' && last.undoneAt ? ` · desfeita em ${fmtDateTime(last.undoneAt)}` : ''}
+            {last.status === 'partial' && last.undoneAt ? ` · desfeita em parte em ${fmtDateTime(last.undoneAt)}` : ''}
           </p>
-          {last.status === 'applied' && (
+          {last.status !== 'undone' && (
             <>
               <p className="text-xs text-muted-foreground">
-                Desfazer remove só o que esta importação criou ou alterou. Se você mexeu nesses dias depois, o desfazer é bloqueado e nada é revertido. Fica disponível
-                mesmo depois de fechar o app, até a próxima importação ou uma restauração por substituição.
+                {last.status === 'partial'
+                  ? 'Os itens seguros já foram desfeitos. Os que você alterou depois ficaram como estavam e podem ser revistos aqui.'
+                  : 'Desfazer remove só o que esta importação criou ou alterou. Antes, uma prévia mostra o que pode voltar e o que você mexeu depois (isso fica como está). Fica disponível mesmo depois de fechar o app, até a próxima importação ou uma restauração por substituição.'}
               </p>
               <Button variant="outline" className="w-full sm:w-auto" disabled={busy} onClick={() => void askUndo()} data-testid="import-undo">
-                <Undo2 /> Desfazer importação
+                <Undo2 /> {last.status === 'partial' ? 'Rever itens pendentes' : 'Desfazer importação'}
               </Button>
             </>
           )}
@@ -264,38 +280,63 @@ export default function LegacyImportPage() {
       </Dialog>
 
       <Dialog open={!!undo} onOpenChange={(v) => !v && !busy && setUndo(null)}>
-        <DialogContent data-testid="import-undo-dialog" data-ok={undo?.plan.ok ? 'true' : 'false'}>
+        <DialogContent data-testid="import-undo-dialog" data-ok={undo?.preview.allSafe ? 'true' : 'false'} data-safe={undo?.preview.safeCount ?? 0}>
           <DialogHeader>
-            <DialogTitle>{undo?.plan.ok ? 'Desfazer a última importação?' : 'Não é possível desfazer agora'}</DialogTitle>
-            <DialogDescription asChild>
-              <div className="space-y-2 text-sm">
-                {undo?.plan.ok ? (
-                  <>
-                    <p>
-                      Saem do planejamento só as entradas criadas pela importação
-                      {undo.plan.put.length ? ', e o que ela substituiu volta como estava' : ''}. Sessões, rotação e a agenda antiga não mudam.
-                    </p>
-                    {undo.plan.keptPast > 0 && <p className="text-muted-foreground">Dias que já passaram continuam como estavam ({undo.plan.keptPast}).</p>}
-                  </>
-                ) : (
-                  <>
-                    <p>Houve alterações depois da importação. Para não apagar mudanças suas, nada será revertido:</p>
-                    <ul className="list-disc space-y-1 pl-5" data-testid="import-undo-problems">
-                      {undo?.plan.problems.map((p) => <li key={p}>{p}</li>)}
-                    </ul>
-                    <p>Ajuste esses dias diretamente no Planejamento, se quiser.</p>
-                  </>
-                )}
-              </div>
+            <DialogTitle>{undo?.preview.allSafe ? 'Desfazer a última importação?' : undo?.preview.safeCount ? 'Desfazer só os itens seguros?' : 'Não é possível desfazer agora'}</DialogTitle>
+            <DialogDescription>
+              {undo?.preview.allSafe
+                ? 'Prévia do que volta ao planejamento de antes. Nada muda até você confirmar.'
+                : undo?.preview.safeCount
+                  ? 'Parte do que foi importado foi alterada depois. Dá para desfazer só o resto; suas alterações posteriores ficam como estão.'
+                  : 'Para não apagar mudanças suas, nada será revertido.'}
             </DialogDescription>
           </DialogHeader>
+          {undo && (
+            <div className="max-h-[55vh] space-y-3 overflow-y-auto pr-1 text-sm" data-testid="import-undo-preview">
+              {UNDO_GROUPS.map((g) => {
+                const list = undo.preview.items.filter((i) => i.status === g.status);
+                if (!list.length) return null;
+                return (
+                  <section key={g.status} aria-label={g.title} data-testid={g.testId} className="space-y-1.5">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      {g.title} · {list.length}
+                    </h3>
+                    <ul className="space-y-1.5">
+                      {list.map((i) => (
+                        <li key={i.key} className={cn('rounded-xl border p-2.5 text-xs', g.status === 'safe' ? 'border-primary/40' : g.status === 'modified' || g.status === 'deleted' ? 'border-warn/40' : 'border-dashed')} data-testid="undo-item" data-status={i.status} data-key={i.key}>
+                          <p className="font-semibold first-letter:uppercase">{i.label}</p>
+                          <p className="text-muted-foreground">Importação: {i.imported}</p>
+                          <p>{i.consequence}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                );
+              })}
+              {!undo.preview.allSafe && (
+                <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground" data-testid="import-undo-problems" aria-label="Alterações posteriores">
+                  {[...new Set(undo.preview.items.flatMap((i) => i.problems))].map((p) => (
+                    <li key={p}>{p}</li>
+                  ))}
+                </ul>
+              )}
+              <p className="rounded-xl bg-secondary/50 p-2.5 text-xs" data-testid="import-undo-intact">
+                Permanecem intactos: sessões registradas, rotação, agenda antiga, fichas, dias que a importação não mexeu{undo.preview.allSafe ? '' : ' e tudo o que você alterou depois'}.
+              </p>
+            </div>
+          )}
           <DialogFooter>
-            <Button variant="secondary" disabled={busy} onClick={() => setUndo(null)}>
-              {undo?.plan.ok ? 'Cancelar' : 'Fechar'}
+            <Button variant="secondary" disabled={busy} onClick={() => setUndo(null)} data-testid="import-undo-cancel">
+              {undo?.preview.safeCount ? 'Cancelar' : 'Fechar'}
             </Button>
-            {undo?.plan.ok && (
-              <Button variant="destructive" disabled={busy} onClick={() => void runUndo()} data-testid="import-undo-apply">
-                <Undo2 /> Desfazer
+            {undo?.preview.allSafe && (
+              <Button variant="destructive" disabled={busy} onClick={() => void runUndo('all')} data-testid="import-undo-apply">
+                <Undo2 /> Desfazer tudo
+              </Button>
+            )}
+            {undo && !undo.preview.allSafe && undo.preview.safeCount > 0 && (
+              <Button variant="destructive" disabled={busy} onClick={() => void runUndo('safe')} data-testid="import-undo-partial">
+                <Undo2 /> Desfazer só {undo.preview.safeCount === 1 ? 'o item seguro' : `os ${undo.preview.safeCount} itens seguros`}
               </Button>
             )}
           </DialogFooter>

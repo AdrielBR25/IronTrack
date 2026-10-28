@@ -504,8 +504,11 @@ export interface PlanImportRecord {
   counts: ImportCounts;
   changes: ImportChangeLog;
   slotsAfter: Record<string, string>;
-  status: 'applied' | 'undone';
+  /** P16: `partial` = parte dos lugares foi revertida (os demais foram alterados depois e ficam para revisão). */
+  status: 'applied' | 'partial' | 'undone';
   undoneAt: number | null;
+  /** P16: lugares já revertidos (chaves de `slotsAfter`). Ausente em registros do P15 (= nenhum). */
+  reverted?: string[];
 }
 
 export interface UndoPlan {
@@ -518,48 +521,91 @@ export interface UndoPlan {
   keptPast: number;
 }
 
+/**
+ * P16: situação de cada lugar afetado pela importação:
+ * - `safe`: nada mudou depois; pode voltar ao que era;
+ * - `modified`: o dia foi editado depois (atividade nova, alterada ou que voltou a existir) — não é revertido;
+ * - `deleted`: uma entrada criada pela importação foi excluída depois — não é revertido (a exclusão foi sua);
+ * - `past`: exceção de uma data que já passou — fica como está (o passado não é reescrito);
+ * - `reverted`: já revertido por um desfazer parcial anterior.
+ */
+export type UndoItemStatus = 'safe' | 'modified' | 'deleted' | 'past' | 'reverted';
+
+export interface UndoItem {
+  /** Chave do lugar (`weekly:1`, `date:2026-11-03`). */
+  key: string;
+  label: string;
+  status: UndoItemStatus;
+  /** O que a importação fez neste lugar. */
+  imported: string;
+  /** O que o desfazer faria (ou por que não faz). */
+  consequence: string;
+  /** Motivos de bloqueio (alterações posteriores). */
+  problems: string[];
+  /** A reversão ENCERRA uma repetição semanal (ontem) em vez de apagá-la: semanas anteriores continuam como estavam. */
+  endsRecurrence: boolean;
+}
+
+export interface UndoPreview {
+  recordId: string;
+  items: UndoItem[];
+  /** Todos os lugares pendentes são seguros (ou passados): "Desfazer tudo" disponível. */
+  allSafe: boolean;
+  safeCount: number;
+  /** Mudanças de cada modo (vazias quando o modo não está disponível). */
+  all: { put: PlanEntry[]; delete: string[] };
+  safe: { put: PlanEntry[]; delete: string[] };
+  /** Lugares que ficariam revertidos depois de cada modo (para atualizar o registro). */
+  revertsAll: string[];
+  revertsSafe: string[];
+  /** Impressão digital do que a prévia viu (registro, situação e versão de cada lugar). Muda → prévia desatualizada. */
+  fingerprint: string;
+  keptPast: number;
+}
+
 const slotOfKey = (k: string): PlanSlot => (k.startsWith('weekly:') ? { scope: 'weekly', weekday: Number(k.slice(7)) } : { scope: 'date', date: k.slice(5) });
 const slotLabel = (slot: PlanSlot) => (slot.scope === 'weekly' ? `toda ${importWeekdayName(slot.weekday)}` : `o dia ${fmtDate(slot.date)}`);
+const keyOfEntry = (e: PlanEntry) => slotKey(e.scope === 'weekly' ? { scope: 'weekly', weekday: e.weekday! } : { scope: 'date', date: e.date! });
 
-/**
- * Plano de reversão da última importação, conferido contra o planejamento ATUAL. Só reverte o que a importação criou
- * ou alterou, e só se nada foi mexido depois (impressão digital de cada lugar afetado + revisão de cada entrada).
- * Qualquer alteração posterior bloqueia o desfazer inteiro (nada é revertido pela metade).
- * Dias passados não mudam: se o desfazer acontece em outro dia, as entradas semanais criadas são encerradas ontem
- * (as semanas anteriores continuam mostrando o que estava planejado nelas).
- */
-export function planUndoImport(record: PlanImportRecord, entries: readonly PlanEntry[], ctx: PlanContext): UndoPlan {
-  const problems: string[] = [];
-  if (record.status !== 'applied') return { ok: false, problems: ['Esta importação já foi desfeita.'], put: [], delete: [], keptPast: 0 };
-  const byId = new Map(entries.map((e) => [e.id, e]));
-  for (const [k, fp] of Object.entries(record.slotsAfter)) {
-    const slot = slotOfKey(k);
-    if (slotFingerprint(entries, slot, record.day) !== fp) problems.push(`O planejamento de ${slotLabel(slot)} foi alterado depois da importação.`);
-  }
-  for (const e of record.changes.created) {
-    const cur = byId.get(e.id);
-    if (cur && cur.revision !== e.revision) problems.push(`Uma atividade criada pela importação (${e.scope === 'weekly' ? `toda ${importWeekdayName(e.weekday!)}` : fmtDate(e.date!)}) foi alterada depois.`);
-  }
-  for (const u of record.changes.updated) {
-    const cur = byId.get(u.after.id);
-    if (!cur || cur.revision !== u.after.revision) problems.push('Uma atividade substituída pela importação foi alterada ou removida depois.');
-  }
-  for (const e of record.changes.deleted) if (byId.has(e.id)) problems.push('Uma atividade substituída pela importação voltou a existir (talvez por um backup).');
-  const unique = [...new Set(problems)];
-  if (unique.length) return { ok: false, problems: unique, put: [], delete: [], keptPast: 0 };
+interface SlotChanges {
+  created: PlanEntry[];
+  updated: { before: PlanEntry; after: PlanEntry }[];
+  deleted: PlanEntry[];
+}
 
+function changesBySlot(record: PlanImportRecord): Map<string, SlotChanges> {
+  const map = new Map<string, SlotChanges>();
+  const get = (k: string) => {
+    let c = map.get(k);
+    if (!c) map.set(k, (c = { created: [], updated: [], deleted: [] }));
+    return c;
+  };
+  for (const k of Object.keys(record.slotsAfter)) get(k);
+  for (const e of record.changes.created) get(keyOfEntry(e)).created.push(e);
+  for (const u of record.changes.updated) get(keyOfEntry(u.after)).updated.push(u);
+  for (const e of record.changes.deleted) get(keyOfEntry(e)).deleted.push(e);
+  return map;
+}
+
+const describe = (e: PlanEntry, routineName: string, routines?: readonly ImportRoutine[]) =>
+  e.kind === 'rest' ? 'descanso' : e.kind === 'free' ? 'dia livre' : routines ? workoutText(routines, e.routineId, e.workoutId) : e.workoutId === null ? `${routineName}: próximo da rotação` : 'treino escolhido';
+
+/** Aplica no rascunho a reversão de UM lugar (mesmas regras do P15, restritas às mudanças daquele lugar). */
+function revertSlot(d: Draft, ch: SlotChanges, byId: Map<string, PlanEntry>, record: PlanImportRecord, ctx: PlanContext): { keptPast: number; endsRecurrence: boolean } {
   const today = ctx.today;
   const sameDay = record.day === today;
-  const d = new Draft(entries);
   let keptPast = 0;
-  for (const e of record.changes.created) {
+  let endsRecurrence = false;
+  for (const e of ch.created) {
     const cur = byId.get(e.id);
-    if (!cur) continue; // já removida (ex.: o dia foi limpo e voltou ao mesmo estado): nada a desfazer
-    if (cur.scope === 'weekly') retireWeekly(d, cur, ctx);
-    else if (cur.date! >= today) d.remove(cur.id);
+    if (!cur) continue;
+    if (cur.scope === 'weekly') {
+      if (cur.validFrom && cur.validFrom < today) endsRecurrence = true;
+      retireWeekly(d, cur, ctx);
+    } else if (cur.date! >= today) d.remove(cur.id);
     else keptPast++;
   }
-  for (const u of record.changes.updated) {
+  for (const u of ch.updated) {
     const cur = byId.get(u.after.id)!;
     if (sameDay) d.set({ ...u.before, updatedAt: Math.max(ctx.now, cur.updatedAt + 1), revision: cur.revision + 1 });
     else if (u.before.scope === 'weekly' && (u.before.validUntil === null || u.before.validUntil >= today)) {
@@ -567,13 +613,125 @@ export function planUndoImport(record: PlanImportRecord, entries: readonly PlanE
       d.set({ ...u.before, id: ctx.newId(), validFrom: today, createdAt: ctx.now, updatedAt: ctx.now, revision: 1 });
     } else keptPast++;
   }
-  for (const e of record.changes.deleted) {
+  for (const e of ch.deleted) {
     if (e.scope === 'date') {
       if (e.date! >= today) d.set(e);
       else keptPast++;
     } else if (e.validUntil === null || e.validUntil >= today) d.set(sameDay || (e.validFrom ?? today) >= today ? e : { ...e, validFrom: today });
     else keptPast++;
   }
-  const changes = d.changes(null);
-  return { ok: true, problems: [], put: changes.put, delete: changes.delete, keptPast };
+  return { keptPast, endsRecurrence };
+}
+
+/**
+ * P16: prévia do desfazer, lugar por lugar, contra o planejamento ATUAL. Cada lugar afetado é classificado (seguro,
+ * alterado depois, excluído depois, passado, já revertido) e as mudanças de "desfazer tudo" (só se TODOS os pendentes
+ * forem seguros) e "desfazer só os seguros" são calculadas. Nenhum lugar alterado depois é tocado: o modo parcial
+ * nunca apaga mudanças posteriores. Dias passados não mudam; uma repetição semanal criada antes de hoje é ENCERRADA
+ * ontem (não apagada), para as semanas anteriores continuarem mostrando o que estava planejado.
+ */
+export function previewUndoImport(record: PlanImportRecord, entries: readonly PlanEntry[], ctx: PlanContext, routines?: readonly ImportRoutine[]): UndoPreview {
+  const byId = new Map(entries.map((e) => [e.id, e]));
+  const reverted = new Set(record.reverted ?? []);
+  const slots = changesBySlot(record);
+  const items: UndoItem[] = [];
+  const fpParts: string[] = [record.id, record.status, ctx.today];
+  const safeKeys: string[] = [];
+  let pendingBlocked = 0;
+  for (const [key, ch] of [...slots].sort(([a], [b]) => a.localeCompare(b))) {
+    const slot = slotOfKey(key);
+    const label = slotLabel(slot);
+    const nowFp = slotFingerprint(entries, slot, record.day);
+    fpParts.push(`${key}=${nowFp}`);
+    const importedParts = [
+      ...ch.created.map((e) => `criou ${describe(e, record.routineName, routines)}`),
+      ...ch.updated.map((u) => `trocou ${describe(u.before, record.routineName, routines)}`),
+      ...ch.deleted.map((e) => `tirou ${describe(e, record.routineName, routines)}`),
+    ];
+    const imported = importedParts.join('; ') || 'nenhuma mudança';
+    const base = { key, label, imported, endsRecurrence: false };
+    if (record.status === 'undone' || reverted.has(key)) {
+      items.push({ ...base, status: 'reverted', consequence: 'Já foi desfeito.', problems: [] });
+      continue;
+    }
+    const problems: string[] = [];
+    let deleted = false;
+    if (nowFp !== record.slotsAfter[key]) problems.push(`O planejamento de ${label} foi alterado depois da importação.`);
+    for (const e of ch.created) {
+      const cur = byId.get(e.id);
+      if (!cur) {
+        deleted = true;
+        problems.push(`Uma atividade criada pela importação (${label}) foi excluída depois.`);
+      } else if (cur.revision !== e.revision) problems.push(`Uma atividade criada pela importação (${e.scope === 'weekly' ? `toda ${importWeekdayName(e.weekday!)}` : fmtDate(e.date!)}) foi alterada depois.`);
+    }
+    for (const u of ch.updated) {
+      const cur = byId.get(u.after.id);
+      if (!cur || cur.revision !== u.after.revision) problems.push('Uma atividade substituída pela importação foi alterada ou removida depois.');
+    }
+    for (const e of ch.deleted) if (byId.has(e.id)) problems.push('Uma atividade substituída pela importação voltou a existir (talvez por um backup).');
+    if (problems.length) {
+      pendingBlocked++;
+      items.push({
+        ...base,
+        status: deleted ? 'deleted' : 'modified',
+        consequence: deleted ? 'Fica como está: você excluiu uma entrada importada depois. Ajuste no Planejamento, se quiser.' : 'Fica como está: o dia foi alterado depois da importação. Ajuste no Planejamento, se quiser.',
+        problems: [...new Set(problems)],
+      });
+      continue;
+    }
+    if (slot.scope === 'date' && slot.date < ctx.today) {
+      items.push({ ...base, status: 'past', consequence: 'Fica como está: a data já passou (o desfazer não reescreve o passado).', problems: [] });
+      continue;
+    }
+    // Simula a reversão do lugar sozinho, só para descrever a consequência.
+    const sim = revertSlot(new Draft(entries), ch, byId, record, { ...ctx, newId: () => 'simulacao' });
+    const restores = ch.updated.length + ch.deleted.length > 0;
+    const removes = ch.created.length > 0;
+    const consequence = [
+      removes ? (sim.endsRecurrence ? 'A repetição criada pela importação termina ontem (semanas anteriores continuam como estavam)' : 'Sai do planejamento o que a importação criou') : null,
+      restores ? 'volta o que havia antes' : null,
+    ]
+      .filter(Boolean)
+      .join('; ')
+      .concat('.');
+    items.push({ ...base, status: 'safe', consequence: consequence.charAt(0).toUpperCase() + consequence.slice(1), problems: [], endsRecurrence: sim.endsRecurrence });
+    safeKeys.push(key);
+  }
+
+  const build = (keys: readonly string[]) => {
+    const d = new Draft(entries);
+    let keptPast = 0;
+    for (const k of keys) keptPast += revertSlot(d, slots.get(k)!, byId, record, ctx).keptPast;
+    const c = d.changes(null);
+    return { put: c.put, delete: c.delete, keptPast };
+  };
+  const pastKeys = items.filter((i) => i.status === 'past').map((i) => i.key);
+  const allSafe = record.status !== 'undone' && pendingBlocked === 0 && safeKeys.length + pastKeys.length > 0;
+  const safe = build(safeKeys);
+  const all = allSafe ? safe : { put: [], delete: [], keptPast: 0 };
+  return {
+    recordId: record.id,
+    items,
+    allSafe,
+    safeCount: safeKeys.length,
+    all: { put: all.put, delete: all.delete },
+    safe: { put: safe.put, delete: safe.delete },
+    revertsAll: allSafe ? [...safeKeys, ...pastKeys] : [],
+    revertsSafe: [...safeKeys],
+    fingerprint: shortHash(fpParts.join('#')),
+    keptPast: safe.keptPast + pastKeys.length,
+  };
+}
+
+/**
+ * Plano de reversão da última importação no modo "desfazer tudo" (contrato do P15): só reverte se nada foi mexido
+ * depois em nenhum lugar afetado; qualquer alteração posterior bloqueia tudo e lista os motivos. Para reverter só os
+ * itens seguros, use `previewUndoImport` (P16).
+ */
+export function planUndoImport(record: PlanImportRecord, entries: readonly PlanEntry[], ctx: PlanContext): UndoPlan {
+  if (record.status === 'undone') return { ok: false, problems: ['Esta importação já foi desfeita.'], put: [], delete: [], keptPast: 0 };
+  const p = previewUndoImport(record, entries, ctx);
+  const problems = [...new Set(p.items.flatMap((i) => i.problems))];
+  if (!p.allSafe) return { ok: false, problems: problems.length ? problems : ['Não há o que desfazer.'], put: [], delete: [], keptPast: 0 };
+  return { ok: true, problems: [], put: p.all.put, delete: p.all.delete, keptPast: p.keptPast };
 }
