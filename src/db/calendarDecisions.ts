@@ -47,7 +47,7 @@ export async function listCalendarDecisions(): Promise<StoredDecisions> {
   return { decisions, invalidIds };
 }
 
-async function readSources(pid: string): Promise<DecisionSources> {
+export async function readDecisionSources(pid: string): Promise<DecisionSources> {
   const settings = mergeSettings(await db.settings.get('settings'));
   const [entries, sessions, routines, rotations] = await Promise.all([
     db.planEntries.where('profileId').equals(pid).toArray(),
@@ -73,7 +73,7 @@ export async function mutateCalendarDecisions(fn: (ctx: { sources: DecisionSourc
   return db.transaction('rw', sourceTables(), async () => {
     const pid = db.currentProfileId;
     if (!pid) throw new CalendarDecisionError('no_profile');
-    const [sources, stored] = await Promise.all([readSources(pid), listCalendarDecisions()]);
+    const [sources, stored] = await Promise.all([readDecisionSources(pid), listCalendarDecisions()]);
     const m = fn({ sources, stored });
     for (const d of m.put) {
       const issues = calendarDecisionIssues(d);
