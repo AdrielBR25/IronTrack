@@ -49,9 +49,9 @@ export const INDICATOR_GUIDE: readonly IndicatorGuide[] = [
     id: 'series',
     title: 'Séries',
     measures: 'Séries de trabalho concluídas.',
-    calculation: 'Séries marcadas como feitas, sem aquecimento, com repetições válidas. Drop-sets contam como séries.',
+    calculation: 'Séries marcadas como feitas, sem aquecimento, com repetições válidas (ou, em exercícios por tempo e cardio, com duração ou distância válidas). Drop-sets contam como séries.',
     comparable: 'Entre períodos de mesma duração.',
-    limitations: 'Uma série de exercício unilateral conta uma vez; o app não registra o lado.',
+    limitations: 'Uma série de exercício unilateral conta uma vez, com o lado registrado (nunca é duplicada). Séries por tempo e de cardio contam como séries, sem repetições.',
   },
   {
     id: 'grupos',
@@ -60,7 +60,7 @@ export const INDICATOR_GUIDE: readonly IndicatorGuide[] = [
     calculation:
       'O texto do grupo é normalizado (maiúsculas, acentos, espaços e sinônimos, como Peito → Peitoral). Cada série conta uma vez, no grupo principal do exercício.',
     comparable: 'Só entre grupos reconhecidos. Textos desconhecidos ou que citam vários grupos aparecem à parte.',
-    limitations: 'A ficha tem um grupo por exercício: músculos auxiliares não recebem séries. A ficha original não é alterada.',
+    limitations: 'Cada série conta só no grupo principal: grupos secundários informados no editor não recebem séries. A ficha original não é alterada.',
   },
   {
     id: 'e1rm',
@@ -133,20 +133,43 @@ export function exerciseAnalyses(ex: Pick<ExerciseSummary, 'classification'>): A
         ? { kind: 'carga_adicional', title: 'Carga adicional', available: true }
         : { kind: 'carga_adicional', title: 'Carga adicional', available: false, reason: 'Nenhuma série com carga adicional registrada.' },
     );
+  // P10: tempo, cardio e lados vêm dos registros do modelo v3; sem eles, o motivo diz o que registrar.
+  const timed = c.modalities.includes('timed');
+  const cardio = c.modalities.includes('cardio');
   out.push(
-    c.measures.duration
+    timed && c.measures.duration
       ? { kind: 'duracao', title: 'Duração', available: true }
-      : { kind: 'duracao', title: 'Duração', available: false, reason: 'O app ainda não registra a duração de cada série. Repetições não são convertidas em segundos.' },
+      : {
+          kind: 'duracao',
+          title: 'Duração',
+          available: false,
+          reason: timed
+            ? 'Nenhuma série com duração registrada no período.'
+            : 'Para medir duração, marque o exercício como "Por tempo" no editor e registre a duração das séries. Repetições não são convertidas em segundos.',
+        },
   );
   out.push(
-    c.measures.distance
+    cardio && (c.measures.duration || c.measures.distance)
       ? { kind: 'cardio', title: 'Distância e ritmo', available: true }
-      : { kind: 'cardio', title: 'Distância e ritmo', available: false, reason: 'O app ainda não registra distância nem duração por exercício.' },
+      : {
+          kind: 'cardio',
+          title: 'Distância e ritmo',
+          available: false,
+          reason: cardio ? 'Nenhum registro de duração ou distância no período.' : 'Só para exercícios marcados como "Cardio" no editor, com duração ou distância registradas.',
+        },
   );
   out.push(
-    c.measures.side
+    c.laterality === 'unilateral' && c.measures.side
       ? { kind: 'lados', title: 'Comparação entre lados', available: true }
-      : { kind: 'lados', title: 'Comparação entre lados', available: false, reason: 'O app ainda não registra o lado (direito ou esquerdo) de cada série.' },
+      : {
+          kind: 'lados',
+          title: 'Comparação entre lados',
+          available: false,
+          reason:
+            c.laterality === 'unilateral'
+              ? 'Registre o lado (direito ou esquerdo) das séries no treino para comparar.'
+              : 'Só para exercícios marcados como unilaterais no editor, com o lado registrado em cada série.',
+        },
   );
   return out;
 }

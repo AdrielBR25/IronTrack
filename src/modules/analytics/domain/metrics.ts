@@ -1,14 +1,16 @@
 // Métricas de treino calculadas a partir das sessões concluídas (ver docs/ANALYTICS_TREINAMENTO.md).
 // Funções puras e determinísticas. Uma passada normaliza o histórico (O(séries)); cada período
 // reaproveita esse índice e só percorre as sessões da janela.
-import type { WorkoutSession } from '@/modules/training';
-import { classifyExercise, type ExerciseClassification } from './classification';
+import { LATERALITIES, LOAD_MODES, MODALITIES, isSetSide, isValidAssistanceKg, isValidDistanceM, isValidDurationSec, type SessionExercise, type WorkoutSession } from '@/modules/training';
+import { classifyExercise, type ExerciseClassification, type ExplicitExerciseAttributes } from './classification';
+import { bodyweightMetrics, cardioMetrics, compareSides, timedMetrics } from './modalities';
 import { createMuscleNormalizer, normalizeMuscleGroup, type NormalizedMuscle } from './muscles';
 import { canonicalE1rmKg, E1RM_METHOD_ID, E1RM_RANGE_MAX_REPS } from './oneRepMax';
 import { computeTrend, type TrendObservation } from './trends';
 import { dayNumber, localDate, makeRange, monthStart, nextMonthStart, previousRange, shiftDays, weekStart } from './periods';
 import type {
   Bucket,
+  CardioObs,
   ConsistencyMetrics,
   DataQuality,
   DateRange,
@@ -18,6 +20,7 @@ import type {
   ExerciseSummary,
   FrequencyMetrics,
   MetricDelta,
+  ModalityMetrics,
   MuscleDistribution,
   MuscleDistributionRow,
   MuscleGroupSets,
@@ -63,8 +66,20 @@ export interface NormalizedHistory {
  * concluídas que não são aquecimento e têm repetições válidas. Sessões em andamento ou descartadas e séries
  * planejadas, puladas ou pendentes nunca contam como realizadas.
  */
+/** P10: atributos explícitos válidos da cópia do exercício na sessão (valores fora do vocabulário são ignorados). */
+export function explicitOf(ex: Pick<SessionExercise, 'modality' | 'laterality' | 'loadMode'>): ExplicitExerciseAttributes | null {
+  const out: ExplicitExerciseAttributes = {};
+  if ((MODALITIES as readonly unknown[]).includes(ex.modality)) out.modality = ex.modality;
+  if ((LATERALITIES as readonly unknown[]).includes(ex.laterality)) out.laterality = ex.laterality;
+  if ((LOAD_MODES as readonly unknown[]).includes(ex.loadMode)) out.loadMode = ex.loadMode;
+  return Object.keys(out).length ? out : null;
+}
+
+/** Séries de trabalho do exercício na sessão: com repetições, por tempo e de cardio. */
+export const workSetsOf = (ex: Pick<ExerciseObs, 'sets' | 'durations' | 'cardio'>) => ex.sets.length + ex.durations.length + (ex.cardio?.sets ?? 0);
+
 export function normalizeSessions(sessions: readonly WorkoutSession[]): NormalizedHistory {
-  const quality: DataQuality = { completedSessions: 0, ignoredSessions: 0, invalidRepSets: 0, invalidLoadSets: 0 };
+  const quality: DataQuality = { completedSessions: 0, ignoredSessions: 0, invalidRepSets: 0, invalidLoadSets: 0, invalidModalitySets: 0 };
   const out: SessionObs[] = [];
   for (const s of sessions) {
     if (s?.status !== 'completed' || !Number.isFinite(s.startedAt)) {
@@ -75,8 +90,32 @@ export function normalizeSessions(sessions: readonly WorkoutSession[]): Normaliz
     const byKey = new Map<string, ExerciseObs>();
     for (const ex of s.exercises ?? []) {
       const sets: SetObs[] = [];
+      const durations: number[] = [];
+      const explicit = explicitOf(ex);
+      // P10: tempo e cardio são lidos só quando a modalidade foi gravada no exercício; sem ela, a série é lida
+      // como antes (repetições e carga). Nada é deduzido do nome nem de números ambíguos.
+      const mode = explicit?.modality === 'timed' || explicit?.modality === 'cardio' ? explicit.modality : null;
+      let cardio: CardioObs | null = null;
       for (const set of ex.sets ?? []) {
         if (set.status !== 'done' || set.type === 'warmup') continue;
+        if (mode === 'timed') {
+          if (isValidDurationSec(set.durationSec)) durations.push(set.durationSec);
+          else quality.invalidModalitySets++;
+          continue;
+        }
+        if (mode === 'cardio') {
+          const d = isValidDurationSec(set.durationSec) ? set.durationSec : null;
+          const m = isValidDistanceM(set.distance) ? set.distance : null;
+          if (d === null && m === null) {
+            quality.invalidModalitySets++;
+            continue;
+          }
+          cardio ??= { durationSec: null, distanceM: null, sets: 0 };
+          cardio.sets++;
+          if (d !== null) cardio.durationSec = (cardio.durationSec ?? 0) + d;
+          if (m !== null) cardio.distanceM = (cardio.distanceM ?? 0) + m;
+          continue;
+        }
         if (!isPositiveNumber(set.reps)) {
           quality.invalidRepSets++;
           continue;
@@ -85,14 +124,25 @@ export function normalizeSessions(sessions: readonly WorkoutSession[]): Normaliz
         let load: number | null = null;
         if (isPositiveNumber(w)) load = w;
         else if (w !== null && w !== undefined && w !== 0) quality.invalidLoadSets++;
-        sets.push({ reps: set.reps, load });
+        const obs: SetObs = { reps: set.reps, load };
+        if (isSetSide(set.side)) obs.side = set.side;
+        if (isValidAssistanceKg(set.assistanceKg) && set.assistanceKg > 0) obs.assistanceKg = set.assistanceKg;
+        sets.push(obs);
       }
-      if (!sets.length) continue;
+      if (!sets.length && !durations.length && !cardio) continue;
       const key = ex.exerciseKey || ex.name.trim().toLowerCase();
       const cur = byKey.get(key);
       // O mesmo exercício duas vezes na sessão (ex.: repetido na ficha) vira uma observação só.
-      if (cur) cur.sets.push(...sets);
-      else
+      if (cur) {
+        cur.sets.push(...sets);
+        cur.durations.push(...durations);
+        if (cardio) {
+          const c = (cur.cardio ??= { durationSec: null, distanceM: null, sets: 0 });
+          c.sets += cardio.sets;
+          if (cardio.durationSec !== null) c.durationSec = (c.durationSec ?? 0) + cardio.durationSec;
+          if (cardio.distanceM !== null) c.distanceM = (c.distanceM ?? 0) + cardio.distanceM;
+        }
+      } else
         byKey.set(key, {
           key,
           name: ex.name,
@@ -100,6 +150,9 @@ export function normalizeSessions(sessions: readonly WorkoutSession[]): Normaliz
           bodyweight: ex.equipment === 'bodyweight',
           equipment: typeof ex.equipment === 'string' ? ex.equipment : null,
           sets,
+          explicit,
+          durations,
+          cardio,
         });
     }
     const date = localDate(s.startedAt);
@@ -127,7 +180,8 @@ export function exercisePoint(session: Pick<SessionObs, 'ts' | 'date'>, ex: Exer
     reps += s.reps;
     bestReps = Math.max(bestReps, s.reps);
     if (s.load === null) {
-      bestUnloadedReps = Math.max(bestUnloadedReps ?? 0, s.reps);
+      // P10: repetições com assistência não se comparam com repetições só com o corpo.
+      if (s.assistanceKg === undefined) bestUnloadedReps = Math.max(bestUnloadedReps ?? 0, s.reps);
       continue;
     }
     const v = s.load * s.reps;
@@ -143,7 +197,26 @@ export function exercisePoint(session: Pick<SessionObs, 'ts' | 'date'>, ex: Exer
     const band = repBand(s.reps);
     topLoadByBand[band] = Math.max(topLoadByBand[band] ?? 0, s.load);
   }
-  return { ts: session.ts, date: session.date, sets: ex.sets.length, loadedSets, reps, volume, topLoad, topLoadReps, bestSetVolume, e1rm, bestReps, bestUnloadedReps, topLoadByBand };
+  const durations = ex.durations ?? [];
+  return {
+    ts: session.ts,
+    date: session.date,
+    sets: ex.sets.length,
+    loadedSets,
+    reps,
+    volume,
+    topLoad,
+    topLoadReps,
+    bestSetVolume,
+    e1rm,
+    bestReps,
+    bestUnloadedReps,
+    topLoadByBand,
+    setObs: ex.sets,
+    durations,
+    bestDurationSec: durations.length ? Math.max(...durations) : null,
+    cardio: ex.cardio ?? null,
+  };
 }
 
 export interface ExerciseHistory {
@@ -157,6 +230,8 @@ export interface ExerciseHistory {
   records: ExerciseRecords;
   muscle: NormalizedMuscle;
   classification: ExerciseClassification;
+  /** P10: atributos explícitos mais recentes (null em exercícios nunca classificados). */
+  explicit: ExplicitExerciseAttributes | null;
 }
 
 const mark = (p: ExercisePoint, value: number, extra: Partial<RecordMark> = {}): RecordMark => ({ value, ts: p.ts, date: p.date, ...extra });
@@ -186,17 +261,23 @@ export function computeExerciseRecords(points: readonly ExercisePoint[]): Exerci
 }
 
 /**
- * Classificação a partir do equipamento mais recente e das cargas registradas em todo o histórico. Hoje não
- * existem duração, distância nem lado por série (Dexie v2), então essas medidas ficam sempre indisponíveis.
+ * Classificação a partir dos atributos gravados mais recentes (P10), do equipamento e dos dados registrados em
+ * todo o histórico. Duração, distância e lado só contam quando foram registrados de fato.
  */
-export function classifyHistory(h: Pick<ExerciseHistory, 'equipment' | 'points'>): ExerciseClassification {
+export function classifyHistory(h: Pick<ExerciseHistory, 'equipment' | 'points'> & { explicit?: ExplicitExerciseAttributes | null }): ExerciseClassification {
   let loaded = false;
   let unloaded = false;
+  let duration = false;
+  let distance = false;
+  let side = false;
   for (const p of h.points) {
     if (p.loadedSets > 0) loaded = true;
     if (p.sets > p.loadedSets) unloaded = true;
+    if (p.durations?.length || p.cardio?.durationSec != null) duration = true;
+    if (p.cardio?.distanceM != null) distance = true;
+    if (p.setObs?.some((s) => s.side === 'direito' || s.side === 'esquerdo')) side = true;
   }
-  return classifyExercise({ equipment: h.equipment, hasLoadedSets: loaded, hasUnloadedSets: unloaded });
+  return classifyExercise({ equipment: h.equipment, hasLoadedSets: loaded, hasUnloadedSets: unloaded, hasDuration: duration, hasDistance: distance, hasSide: side, explicit: h.explicit ?? null });
 }
 
 export function buildExerciseHistories(sessions: readonly SessionObs[]): Map<string, ExerciseHistory> {
@@ -216,6 +297,7 @@ export function buildExerciseHistories(sessions: readonly SessionObs[]): Map<str
           records: computeExerciseRecords([]),
           muscle: normalizeMuscleGroup(null),
           classification: classifyExercise({ hasLoadedSets: false, hasUnloadedSets: false }),
+          explicit: null,
         };
         map.set(ex.key, h);
       }
@@ -224,6 +306,8 @@ export function buildExerciseHistories(sessions: readonly SessionObs[]): Map<str
       h.muscleGroup = ex.muscleGroup ?? h.muscleGroup;
       h.bodyweight = ex.bodyweight;
       h.equipment = ex.equipment ?? h.equipment;
+      // Atributos explícitos: vale a classificação mais recente gravada (registros antigos sem ela não apagam).
+      if (ex.explicit) h.explicit = ex.explicit;
       h.points.push(exercisePoint(s, ex));
     }
   for (const h of map.values()) {
@@ -256,20 +340,26 @@ export function sliceRange<T extends { date: string }>(items: readonly T[], rang
 
 export interface Totals {
   sessions: number;
+  /** Séries com repetições + séries por tempo/cardio (P10). */
   sets: number;
   reps: number;
   volume: number;
   loadedSets: number;
   unloadedSets: number;
+  /** P10: séries por tempo e de cardio (sem repetições; não entram em volume nem em repetições). */
+  modalitySets: number;
   distinctDays: number;
 }
 
 export function totalsOf(sessions: readonly SessionObs[]): Totals {
-  const t: Totals = { sessions: sessions.length, sets: 0, reps: 0, volume: 0, loadedSets: 0, unloadedSets: 0, distinctDays: 0 };
+  const t: Totals = { sessions: sessions.length, sets: 0, reps: 0, volume: 0, loadedSets: 0, unloadedSets: 0, modalitySets: 0, distinctDays: 0 };
   const days = new Set<string>();
   for (const s of sessions) {
     days.add(s.date);
-    for (const ex of s.exercises)
+    for (const ex of s.exercises) {
+      const modal = (ex.durations?.length ?? 0) + (ex.cardio?.sets ?? 0);
+      t.modalitySets += modal;
+      t.sets += modal;
       for (const set of ex.sets) {
         t.sets++;
         t.reps += set.reps;
@@ -279,6 +369,7 @@ export function totalsOf(sessions: readonly SessionObs[]): Totals {
           t.volume += set.load * set.reps;
         }
       }
+    }
   }
   t.distinctDays = days.size;
   return t;
@@ -355,8 +446,9 @@ export function muscleGroupsOf(sessions: readonly SessionObs[]): { groups: Muscl
   let unclassified = 0;
   for (const s of sessions)
     for (const ex of s.exercises) {
-      if (ex.muscleGroup) map.set(ex.muscleGroup, (map.get(ex.muscleGroup) ?? 0) + ex.sets.length);
-      else unclassified += ex.sets.length;
+      const n = workSetsOf(ex);
+      if (ex.muscleGroup) map.set(ex.muscleGroup, (map.get(ex.muscleGroup) ?? 0) + n);
+      else unclassified += n;
     }
   const groups = [...map.entries()].map(([group, sets]) => ({ group, sets })).sort((a, b) => b.sets - a.sets || a.group.localeCompare(b.group));
   return { groups, unclassified };
@@ -372,13 +464,14 @@ export function muscleDistributionOf(sessions: readonly SessionObs[], normalize 
   for (const s of sessions)
     for (const ex of s.exercises) {
       const m = normalize(ex.muscleGroup);
+      const n = workSetsOf(ex);
       if (!m.key) {
-        emptySets += ex.sets.length;
+        emptySets += n;
         continue;
       }
       let row = rows.get(m.key);
       if (!row) rows.set(m.key, (row = { key: m.key, group: m.label, sets: 0, originals: [], match: m.match }));
-      row.sets += ex.sets.length;
+      row.sets += n;
       const original = m.original.trim();
       if (!row.originals.includes(original)) row.originals.push(original);
     }
@@ -482,8 +575,33 @@ export function exerciseSummary(h: ExerciseHistory, range: DateRange): ExerciseS
     },
     records: h.records,
     newLoadRecordInPeriod,
-    trend: trendFor(pts, { loadMetrics: !h.classification.modalities.includes('bodyweight') }),
+    ...modalityOf(h.classification, pts, range),
   };
+}
+
+/**
+ * P10: métricas por modalidade com os contratos do P09 (timedMetrics, cardioMetrics, compareSides,
+ * bodyweightMetrics) e a tendência na métrica própria da modalidade. Uma tendência usa uma métrica só: tempo não
+ * se mistura com repetições, cardio não se mistura com carga.
+ */
+function modalityOf(c: ExerciseClassification, pts: readonly ExercisePoint[], range: DateRange): { modality: ModalityMetrics; modalitySets: number; trend: Trend } {
+  const has = (m: ExerciseClassification['modalities'][number]) => c.modalities.includes(m);
+  const sets = pts.flatMap((p) => p.setObs ?? []);
+  const timed = has('timed') ? timedMetrics(pts.filter((p) => p.durations?.length).map((p) => ({ date: p.date, durationsSec: p.durations }))) : null;
+  const cardio = has('cardio')
+    ? cardioMetrics(
+        pts.filter((p) => p.cardio).map((p) => ({ date: p.date, durationSec: p.cardio!.durationSec, distance: p.cardio!.distanceM !== null ? { value: p.cardio!.distanceM, unit: 'm' as const } : null })),
+        range.days,
+      )
+    : null;
+  const sides = c.laterality === 'unilateral' ? compareSides(sets.map((s) => ({ side: s.side, reps: s.reps, load: s.load }))) : null;
+  const bodyweight = has('bodyweight') ? bodyweightMetrics(sets.map((s) => ({ reps: s.reps, load: s.load, assistanceKg: s.assistanceKg ?? null }))) : null;
+  const modalitySets = pts.reduce((a, p) => a + (p.durations?.length ?? 0) + (p.cardio?.sets ?? 0), 0);
+  let trend: Trend;
+  if (timed) trend = timed.trend;
+  else if (cardio) trend = cardio.sessionsWithDistance >= cardio.sessionsWithDuration && cardio.sessionsWithDistance > 0 ? cardio.distanceTrend : cardio.durationTrend;
+  else trend = trendFor(pts, { loadMetrics: !has('bodyweight') });
+  return { modality: { timed, cardio, sides, bodyweight }, modalitySets, trend };
 }
 
 /** Reduz uma série longa a no máximo `max` pontos, mantendo o maior valor de cada bloco consecutivo. */

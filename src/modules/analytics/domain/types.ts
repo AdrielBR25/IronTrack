@@ -1,7 +1,7 @@
 // Tipos do motor de análise de treinos (IronTrack 2.0 F01/P08). Ver docs/ANALYTICS_TREINAMENTO.md.
 // Só leitura: nada aqui é persistido. Pesos sempre em kg (carga externa); a conversão para lb é da interface.
 // Datas de calendário como yyyy-mm-dd no fuso local do aparelho; semanas começam na segunda-feira.
-import type { ExerciseClassification } from './classification';
+import type { ExerciseClassification, ExplicitExerciseAttributes } from './classification';
 import type { NormalizedMuscle } from './muscles';
 import type { E1rmMethodId } from './oneRepMax';
 
@@ -22,6 +22,18 @@ export interface SetObs {
   reps: number;
   /** Carga externa em kg; null quando a série não tem carga válida (peso corporal, vazia ou inválida). */
   load: number | null;
+  /** P10: lado registrado (só valores válidos; ausente = não informado). */
+  side?: Side;
+  /** P10: assistência em kg (> 0) registrada na série. */
+  assistanceKg?: number;
+}
+
+/** P10: registro de cardio de um exercício numa sessão (somas das séries válidas). */
+export interface CardioObs {
+  durationSec: number | null;
+  distanceM: number | null;
+  /** Séries de cardio válidas (com duração ou distância). */
+  sets: number;
 }
 
 export interface ExerciseObs {
@@ -32,7 +44,14 @@ export interface ExerciseObs {
   bodyweight: boolean;
   /** Equipamento da ficha, como registrado (P09: usado só pela classificação analítica). */
   equipment: string | null;
+  /** Séries com repetições (musculação, peso corporal e exercícios sem modalidade). */
   sets: SetObs[];
+  /** P10: atributos gravados no exercício (cópia da sessão); null em registros antigos. */
+  explicit: ExplicitExerciseAttributes | null;
+  /** P10: durações válidas (s) das séries de exercício por tempo. Repetições nunca viram segundos. */
+  durations: number[];
+  /** P10: cardio registrado; null quando o exercício não é cardio ou não tem séries válidas. */
+  cardio: CardioObs | null;
 }
 
 /** Sessão concluída já normalizada (sem IDs, só o necessário para os cálculos). */
@@ -53,6 +72,8 @@ export interface DataQuality {
   invalidRepSets: number;
   /** Séries aceitas cuja carga era inválida (negativa ou não numérica) e ficou fora do volume de carga. */
   invalidLoadSets: number;
+  /** P10: séries concluídas de exercício por tempo ou cardio sem duração/distância válidas (ficam fora de tudo). */
+  invalidModalitySets: number;
 }
 
 /** Ponto de um exercício numa sessão. */
@@ -79,6 +100,21 @@ export interface ExercisePoint {
   bestUnloadedReps: number | null;
   /** Maior carga por faixa de repetições (séries comparáveis). */
   topLoadByBand: Partial<Record<RepBand, number>>;
+  /** P10: séries com repetições, com lado e assistência (base de compareSides e bodyweightMetrics). */
+  setObs: SetObs[];
+  /** P10: durações válidas das séries por tempo; maior duração da sessão (null sem duração). */
+  durations: number[];
+  bestDurationSec: number | null;
+  /** P10: cardio da sessão. */
+  cardio: CardioObs | null;
+}
+
+/** P10: métricas específicas da modalidade, calculadas pelos contratos do P09 só quando a modalidade se aplica. */
+export interface ModalityMetrics {
+  timed: TimedMetrics | null;
+  cardio: CardioMetrics | null;
+  sides: SideComparison | null;
+  bodyweight: BodyweightMetrics | null;
 }
 
 /** Faixas de repetições usadas para comparar séries equivalentes. */
@@ -169,6 +205,10 @@ export interface ExerciseSummary {
   /** Recorde de carga absoluto batido dentro do período. */
   newLoadRecordInPeriod: RecordMark | null;
   trend: Trend;
+  /** P10: métricas por modalidade no período (tempo, cardio, lados, peso corporal). */
+  modality: ModalityMetrics;
+  /** P10: séries por tempo ou cardio no período (não entram em `sets` de repetições do exercício). */
+  modalitySets: number;
 }
 
 export interface Bucket {
@@ -266,7 +306,8 @@ export interface TrainingReport {
   hasData: boolean;
   frequency: FrequencyMetrics;
   consistency: ConsistencyMetrics;
-  totals: PeriodTotals & { loadedSets: number; unloadedSets: number; reps: number };
+  /** `sets` = séries com carga + sem carga + por tempo/cardio (`modalitySets`, P10). */
+  totals: PeriodTotals & { loadedSets: number; unloadedSets: number; reps: number; modalitySets: number };
   buckets: Bucket[];
   /** Séries por grupo, pelo texto exato da ficha (P08, mantido por compatibilidade). */
   muscleGroups: MuscleGroupSets[];
@@ -301,4 +342,119 @@ export interface Insight {
   metric: string;
   evidence: InsightEvidence[];
   confidence: Confidence | null;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Contratos por modalidade (P09; implementação em ./modalities.ts)
+
+export type DistanceUnit = 'm' | 'km' | 'mi';
+export type Side = 'direito' | 'esquerdo' | 'ambos' | 'desconhecido';
+export type BodyweightSetKind = 'somente_corporal' | 'com_carga_adicional' | 'com_assistencia' | 'incompativel';
+
+/** Uma sessão de exercício temporizado: duração de cada série, em segundos (null = não registrada). */
+export interface TimedSessionObs {
+  date: string;
+  durationsSec: readonly (number | null | undefined)[];
+}
+
+export interface TimedMetrics {
+  available: boolean;
+  reason?: 'sem_duracao';
+  sessions: number;
+  sets: number;
+  /** Séries sem duração válida (vazia, zero, negativa ou não numérica): não entram em nada. */
+  invalidSets: number;
+  longestSec: number | null;
+  totalSec: number | null;
+  /** Tendência da maior duração por sessão (métrica `duracao`, nunca misturada com carga). */
+  trend: Trend;
+}
+
+export interface CardioEntry {
+  date: string;
+  durationSec?: number | null;
+  distance?: { value: number; unit: DistanceUnit } | null;
+}
+
+export interface CardioPoint {
+  date: string;
+  durationSec: number | null;
+  distanceM: number | null;
+  /** Segundos por km; só com duração e distância válidas. */
+  paceSecPerKm: number | null;
+  speedKmh: number | null;
+}
+
+export interface CardioMetrics {
+  available: boolean;
+  reason?: 'sem_dados_de_cardio';
+  sessions: number;
+  points: CardioPoint[];
+  /** Somas só das sessões que registraram o campo (com a contagem ao lado). */
+  totalDurationSec: number | null;
+  sessionsWithDuration: number;
+  totalDistanceM: number | null;
+  sessionsWithDistance: number;
+  /** Ritmo médio ponderado = duração ÷ distância, só nas sessões com os dois campos. */
+  averagePaceSecPerKm: number | null;
+  averageSpeedKmh: number | null;
+  /** Sessões por semana na janela informada; null com menos de 7 dias. */
+  weeklyFrequency: number | null;
+  durationTrend: Trend;
+  distanceTrend: Trend;
+}
+
+/** Uma série registrada com lado. Uma série é uma série: nunca vira duas (uma por lado). */
+export interface SidedSetObs {
+  side: Side | null | undefined;
+  reps: number;
+  /** kg; null sem carga. */
+  load: number | null;
+}
+
+export interface SideStats {
+  sets: number;
+  reps: number;
+  volume: number;
+  topLoad: number | null;
+  bestReps: number | null;
+}
+
+export interface SideDelta {
+  /** direito − esquerdo. */
+  diff: number;
+  /** Diferença relativa ao maior dos dois lados (%), null quando ambos são zero. */
+  pct: number | null;
+}
+
+export interface SideComparison {
+  available: boolean;
+  reason?: 'sem_lado' | 'um_lado_so';
+  direito: SideStats;
+  esquerdo: SideStats;
+  /** Séries registradas como "ambos" ou sem lado: não são atribuídas a um lado nem duplicadas. */
+  ambos: SideStats;
+  desconhecido: SideStats;
+  /** Diferenças registradas (não é diagnóstico de desequilíbrio). */
+  differences: { reps: SideDelta; volume: SideDelta; topLoad: SideDelta | null } | null;
+}
+
+/** Série de peso corporal. `assistanceKg` só existiria no modelo futuro (não há campo hoje). */
+export interface BodyweightSetObs {
+  reps: number;
+  /** Carga adicional externa em kg (cinto, colete, anilha); null sem carga. */
+  load: number | null;
+  assistanceKg?: number | null;
+}
+
+export interface BodyweightMetrics {
+  sets: number;
+  reps: number;
+  bySetKind: Record<BodyweightSetKind, number>;
+  /** Melhor série por condição: repetições só se comparam dentro da mesma condição. */
+  bestRepsBodyOnly: number | null;
+  bestAddedLoad: { load: number; reps: number } | null;
+  bestAssisted: { assistanceKg: number; reps: number } | null;
+  /** Peso corporal nunca vira quilos de volume. */
+  volumeKg: null;
 }

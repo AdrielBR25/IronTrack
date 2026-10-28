@@ -3,31 +3,47 @@
 // modelo futuro (docs/MODELO_EXERCICIOS_V2.md) e só rodam hoje nos testes, com dados fictícios. Peso corporal
 // usa os campos existentes. Nada aqui inventa duração, distância, calorias, frequência cardíaca ou lado.
 import { computeTrend, type TrendObservation } from './trends';
-import type { Trend } from './types';
+import type {
+  BodyweightMetrics,
+  BodyweightSetKind,
+  BodyweightSetObs,
+  CardioEntry,
+  CardioMetrics,
+  CardioPoint,
+  DistanceUnit,
+  Side,
+  SideComparison,
+  SideDelta,
+  SidedSetObs,
+  SideStats,
+  TimedMetrics,
+  TimedSessionObs,
+} from './types';
+
+// Os tipos dos contratos ficam em ./types.ts (evita ciclo com ExerciseSummary) e são reexportados aqui.
+export type {
+  BodyweightMetrics,
+  BodyweightSetKind,
+  BodyweightSetObs,
+  CardioEntry,
+  CardioMetrics,
+  CardioPoint,
+  DistanceUnit,
+  Side,
+  SideComparison,
+  SideDelta,
+  SidedSetObs,
+  SideStats,
+  TimedMetrics,
+  TimedSessionObs,
+};
 
 const isPos = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0;
 
 // ---------------------------------------------------------------------------------------------
 // Exercícios por tempo
 
-/** Uma sessão de exercício temporizado: duração de cada série, em segundos (null = não registrada). */
-export interface TimedSessionObs {
-  date: string;
-  durationsSec: readonly (number | null | undefined)[];
-}
 
-export interface TimedMetrics {
-  available: boolean;
-  reason?: 'sem_duracao';
-  sessions: number;
-  sets: number;
-  /** Séries sem duração válida (vazia, zero, negativa ou não numérica): não entram em nada. */
-  invalidSets: number;
-  longestSec: number | null;
-  totalSec: number | null;
-  /** Tendência da maior duração por sessão (métrica `duracao`, nunca misturada com carga). */
-  trend: Trend;
-}
 
 export function timedMetrics(sessions: readonly TimedSessionObs[]): TimedMetrics {
   let sets = 0;
@@ -59,46 +75,14 @@ export function timedMetrics(sessions: readonly TimedSessionObs[]): TimedMetrics
 // ---------------------------------------------------------------------------------------------
 // Cardio
 
-export type DistanceUnit = 'm' | 'km' | 'mi';
 export const METERS_PER_MILE = 1609.344;
 
 export function toMeters(value: number, unit: DistanceUnit): number {
   return unit === 'm' ? value : unit === 'km' ? value * 1000 : value * METERS_PER_MILE;
 }
 
-export interface CardioEntry {
-  date: string;
-  durationSec?: number | null;
-  distance?: { value: number; unit: DistanceUnit } | null;
-}
 
-export interface CardioPoint {
-  date: string;
-  durationSec: number | null;
-  distanceM: number | null;
-  /** Segundos por km; só com duração e distância válidas. */
-  paceSecPerKm: number | null;
-  speedKmh: number | null;
-}
 
-export interface CardioMetrics {
-  available: boolean;
-  reason?: 'sem_dados_de_cardio';
-  sessions: number;
-  points: CardioPoint[];
-  /** Somas só das sessões que registraram o campo (com a contagem ao lado). */
-  totalDurationSec: number | null;
-  sessionsWithDuration: number;
-  totalDistanceM: number | null;
-  sessionsWithDistance: number;
-  /** Ritmo médio ponderado = duração ÷ distância, só nas sessões com os dois campos. */
-  averagePaceSecPerKm: number | null;
-  averageSpeedKmh: number | null;
-  /** Sessões por semana na janela informada; null com menos de 7 dias. */
-  weeklyFrequency: number | null;
-  durationTrend: Trend;
-  distanceTrend: Trend;
-}
 
 /** Métricas de cardio. Sem calorias, sem frequência cardíaca e sem avaliação de condicionamento. */
 export function cardioMetrics(entries: readonly CardioEntry[], windowDays: number | null = null): CardioMetrics {
@@ -143,42 +127,10 @@ export function cardioMetrics(entries: readonly CardioEntry[], windowDays: numbe
 // ---------------------------------------------------------------------------------------------
 // Unilaterais
 
-export type Side = 'direito' | 'esquerdo' | 'ambos' | 'desconhecido';
 
-/** Uma série registrada com lado. Uma série é uma série: nunca vira duas (uma por lado). */
-export interface SidedSetObs {
-  side: Side | null | undefined;
-  reps: number;
-  /** kg; null sem carga. */
-  load: number | null;
-}
 
-export interface SideStats {
-  sets: number;
-  reps: number;
-  volume: number;
-  topLoad: number | null;
-  bestReps: number | null;
-}
 
-export interface SideDelta {
-  /** direito − esquerdo. */
-  diff: number;
-  /** Diferença relativa ao maior dos dois lados (%), null quando ambos são zero. */
-  pct: number | null;
-}
 
-export interface SideComparison {
-  available: boolean;
-  reason?: 'sem_lado' | 'um_lado_so';
-  direito: SideStats;
-  esquerdo: SideStats;
-  /** Séries registradas como "ambos" ou sem lado: não são atribuídas a um lado nem duplicadas. */
-  ambos: SideStats;
-  desconhecido: SideStats;
-  /** Diferenças registradas (não é diagnóstico de desequilíbrio). */
-  differences: { reps: SideDelta; volume: SideDelta; topLoad: SideDelta | null } | null;
-}
 
 const emptySide = (): SideStats => ({ sets: 0, reps: 0, volume: 0, topLoad: null, bestReps: null });
 const sideDelta = (r: number, l: number): SideDelta => {
@@ -217,15 +169,7 @@ export function compareSides(sets: readonly SidedSetObs[]): SideComparison {
 // ---------------------------------------------------------------------------------------------
 // Peso corporal
 
-/** Série de peso corporal. `assistanceKg` só existiria no modelo futuro (não há campo hoje). */
-export interface BodyweightSetObs {
-  reps: number;
-  /** Carga adicional externa em kg (cinto, colete, anilha); null sem carga. */
-  load: number | null;
-  assistanceKg?: number | null;
-}
 
-export type BodyweightSetKind = 'somente_corporal' | 'com_carga_adicional' | 'com_assistencia' | 'incompativel';
 
 /** Carga adicional e assistência ao mesmo tempo é incompatível: a série não é interpretada. */
 export function bodyweightSetKind(s: BodyweightSetObs): BodyweightSetKind {
@@ -235,17 +179,6 @@ export function bodyweightSetKind(s: BodyweightSetObs): BodyweightSetKind {
   return added ? 'com_carga_adicional' : assisted ? 'com_assistencia' : 'somente_corporal';
 }
 
-export interface BodyweightMetrics {
-  sets: number;
-  reps: number;
-  bySetKind: Record<BodyweightSetKind, number>;
-  /** Melhor série por condição: repetições só se comparam dentro da mesma condição. */
-  bestRepsBodyOnly: number | null;
-  bestAddedLoad: { load: number; reps: number } | null;
-  bestAssisted: { assistanceKg: number; reps: number } | null;
-  /** Peso corporal nunca vira quilos de volume. */
-  volumeKg: null;
-}
 
 export function bodyweightMetrics(sets: readonly BodyweightSetObs[]): BodyweightMetrics {
   const bySetKind: Record<BodyweightSetKind, number> = { somente_corporal: 0, com_carga_adicional: 0, com_assistencia: 0, incompativel: 0 };

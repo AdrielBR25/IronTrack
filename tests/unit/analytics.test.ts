@@ -391,7 +391,7 @@ describe('dados reais imperfeitos', () => {
     ]);
     const broken = { ...sess('2026-10-21', [{ sets: [[60, 8]] }]), startedAt: Number.NaN };
     const r = analyzeTraining([bad, broken], '30d', '2026-10-27');
-    expect(r.quality).toEqual({ completedSessions: 1, ignoredSessions: 1, invalidRepSets: 5, invalidLoadSets: 3 });
+    expect(r.quality).toEqual({ completedSessions: 1, ignoredSessions: 1, invalidRepSets: 5, invalidLoadSets: 3, invalidModalitySets: 0 });
     expect(r.totals).toMatchObject({ sets: 4, loadedSets: 1, unloadedSets: 3, volume: 480 });
     assertFinite(r);
     assertFinite(buildInsights(r));
