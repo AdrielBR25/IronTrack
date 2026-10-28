@@ -177,9 +177,10 @@ A sessão em andamento é gravada a cada ação (`saveSession`) e recuperada ao 
 
 ## 5. Persistência
 
-- Banco `irontrack`, Dexie **v5** (P12: tabela `goals`; P13: `planEntries`; P14 e P15 não mudaram o esquema; P16:
-  `calendarDecisions`): tabelas `settings`, `profiles`, `routines`, `sessions`, `rotations`, `overrides`, `bodyEntries`,
-  `photos`, `goals`, `planEntries`, `calendarDecisions`. Histórico em [MIGRACOES.md](MIGRACOES.md).
+- Banco `irontrack`, Dexie **v6** (P12: tabela `goals`; P13: `planEntries`; P14 e P15 não mudaram o esquema; P16:
+  `calendarDecisions`; P17: `customExercises`, `exerciseFavorites`): tabelas `settings`, `profiles`, `routines`,
+  `sessions`, `rotations`, `overrides`, `bodyEntries`, `photos`, `goals`, `planEntries`, `calendarDecisions`,
+  `customExercises`, `exerciseFavorites`. Histórico em [MIGRACOES.md](MIGRACOES.md).
 - A instância `db` e o esquema ficam só em `src/db/db.ts`. As telas não a importam (regra testada).
 - Repositórios por domínio, com funções explícitas (`completeSession`, `importBodyEvaluations`). Não há
   repositório genérico: cada operação mantém sua regra de negócio e sua transação.
@@ -235,6 +236,11 @@ digitação, conforme `distanceUnit` do exercício).
   `modules/analytics/index.ts` (exceção documentada: as metas reutilizam as medidas e o 1RM canônico do analytics em
   vez de recalcular). `lib/integrity.ts` → `modules/goals/index.ts` (validação das metas no backup, como já fazia com
   `modules/training`). IA, integrações e assistente **não** importam metas (privacidade, testado).
+- `modules/exercises` (P17) → o próprio módulo, `zod`, `lib/utils` e as APIs públicas de `training` e `analytics`
+  (exceção documentada: a instância na ficha é um `ExerciseTemplate` e os grupos reutilizam a normalização do P09).
+  O catálogo é uma sub-entrada (`@/modules/exercises/catalog/index.ts`) que o `index.ts` do módulo **não** reexporta,
+  para não entrar no pacote principal. `lib/integrity.ts` → `modules/exercises/index.ts` (validação dos personalizados
+  e favoritos no backup). IA e assistente não importam a biblioteca.
 
 ## 8. Dependências proibidas (testadas)
 
@@ -462,3 +468,27 @@ Detalhes em [DECISOES_CALENDARIO.md](DECISOES_CALENDARIO.md).
   entra na transação como função (`mutateCalendarDecisions(fn)`).
 - **Dexie v5** e **backup v6** (`data.calendarDecisions`). O registro do desfazer continua em `settings`, fora do backup.
 - Decisões nunca escrevem fora de `calendarDecisions`; desfazer só escreve `planEntries` e o próprio registro.
+
+## 19. Biblioteca de exercícios e construtor de fichas (P17)
+
+Detalhes em [BIBLIOTECA_EXERCICIOS.md](BIBLIOTECA_EXERCICIOS.md).
+
+| Camada | Arquivo | Responsabilidade |
+| --- | --- | --- |
+| Domínio (puro) | `modules/exercises/types.ts`, `vocab.ts` | modelo do catálogo, personalizado, favorito; vocabulário de grupos e equipamentos |
+| Domínio (puro) | `modules/exercises/catalog/index.ts` | catálogo estático versionado (`getCatalog`, sob demanda, fora do pacote principal) |
+| Domínio (puro) | `modules/exercises/search.ts` | índice, busca sem acentos com relevância determinística, filtros |
+| Domínio (puro) | `modules/exercises/custom.ts`, `favorites.ts` | Zod, limites, ciclo de vida do personalizado, ID determinístico do favorito |
+| Domínio (puro) | `modules/exercises/instance.ts` | item → instância da ficha, configuração anterior (sem carga), prévia da substituição |
+| Domínio (puro) | `modules/exercises/workoutOps.ts` | operações da ficha (`add`, `update`, `remove`, `move`, `reorder`, `duplicate`, `replace`, `meta`) |
+| Domínio (puro) | `modules/exercises/suggestions.ts`, `references.ts` | sugestões locais com motivo; referências pela origem |
+| Banco | `db/library.ts` | CRUD com revisão, exclusão restrita, favoritos, `mutateWorkout` (operação na versão gravada) |
+| Aplicação | `hooks/useLibrary.ts` | catálogo + personalizados + favoritos + recentes observados (`liveQuery`), índice memorizado |
+| Interface | `pages/ExerciseLibraryPage.tsx` (rota sob demanda), `pages/WorkoutEditorPage.tsx`, `features/library/*`, `features/routines/ExerciseDialog.tsx` | biblioteca, detalhes, formulário, adicionar, substituir, prévia |
+
+- **Identidades separadas**: item do catálogo (`catalogId`), personalizado (`cx_…`), instância na ficha
+  (`ExerciseTemplate.id`) e exercício executado (`SessionExercise`). A origem na instância e na sessão é opcional
+  (`catalogId` + `catalogVersion` ou `customExerciseId`); nada é associado por nome.
+- **Dexie v6** e **backup v7** (`data.customExercises`, `data.exerciseFavorites`). O catálogo não vai para o banco nem
+  para o backup.
+- O editor de fichas passou a gravar por operações (`mutateWorkout`) em vez de regravar a rotina inteira da tela.

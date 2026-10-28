@@ -189,3 +189,16 @@ O calendário unificado ([CALENDARIO_UNIFICADO.md](CALENDARIO_UNIFICADO.md)) nã
 semanais continuam vindo de `computeGoalProgress` via `weeklyGoalsForWeek`, e as sessões contadas pelo calendário,
 pela Início e pelo Planejamento são as de `countableSessions`. Sugestões da agenda anterior e previsões da rotação não
 entram em nenhum cálculo de meta nem na contagem de atividades planejadas.
+
+## 16. Biblioteca de exercícios (P17)
+
+A biblioteca ([BIBLIOTECA_EXERCICIOS.md](BIBLIOTECA_EXERCICIOS.md)) não mudou nenhuma regra de metas:
+
+- a meta continua ligada aos `templateIds` da ficha. Adicionar o mesmo item do catálogo noutra ficha, ou noutro treino,
+  cria uma instância com ID novo e **não** liga a meta a ela; a origem (`catalogId`/`customExerciseId`) nunca é usada
+  para casar metas;
+- **substituir** um exercício na ficha dá ID novo ao substituto. A prévia avisa "N metas continuam ligadas a X"; a meta
+  fica no exercício antigo (estado "exercício removido da ficha") e continua usando o histórico já registrado. Nada é
+  redirecionado sozinho;
+- duplicar uma instância também não liga a meta à cópia;
+- backup atual: v7 (metas continuam em `data.goals`, sem mudança de formato).

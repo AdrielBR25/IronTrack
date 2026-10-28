@@ -204,7 +204,7 @@ test('consolidação: prévia, importação segura, desfazer, reimportar, prefer
   const file = info.outputPath('backup-consolidacao.json');
   await download.saveAs(file);
   const backup = JSON.parse(readFileSync(file, 'utf8'));
-  expect(backup.schemaVersion).toBe(6);
+  expect(backup.schemaVersion).toBe(7); // P17: v7 (biblioteca de exercícios)
   expect(backup.data.planEntries).toHaveLength(9);
   expect(backup.data.overrides).toHaveLength(2);
   expect(JSON.stringify(backup)).not.toMatch(/planImport|calendarPrefs/);

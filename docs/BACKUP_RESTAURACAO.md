@@ -8,7 +8,8 @@ Interface em **Configurações › Dados e backup**.
 
 | Formato | Identificação | Situação |
 | ------- | ------------- | -------- |
-| Backup v6 (atual, P16) | igual ao v5 com `"schemaVersion": 6` e `data.calendarDecisions` (decisões lembradas do calendário) | Exportado e importado (ver seção "Decisões do calendário"). |
+| Backup v7 (atual, P17) | igual ao v6 com `"schemaVersion": 7`, `data.customExercises` e `data.exerciseFavorites` (biblioteca de exercícios) | Exportado e importado (ver seção "Biblioteca de exercícios"). |
+| Backup v6 (P16) | igual ao v5 com `data.calendarDecisions` (decisões lembradas do calendário) | Importado; v6 → v7 acrescenta `customExercises: []` e `exerciseFavorites: []`. |
 | Backup v5 (P13) | igual ao v4 com `data.planEntries` (planejamento semanal) | Importado; v5 → v6 acrescenta `calendarDecisions: []`. |
 | Backup v4 (P12) | igual ao v3 com `data.goals` | Importado; v4 → v5 acrescenta `planEntries: []`. |
 | Backup v3 (P10) | igual ao v2 com `"schemaVersion": 3`; exercícios e séries podem ter os campos de modalidade (`modality`, `laterality`, `loadMode`, `secondaryMuscles`, `distanceUnit`, `targetDurationSec`, `targetDistance`, `durationSec`, `distance`, `side`, `assistanceKg`), ver [MIGRACAO_EXERCICIOS_V3.md](MIGRACAO_EXERCICIOS_V3.md) | Exportado e importado. Valores inválidos bloqueiam (`INVALID_MODALITY_FIELD`); contradições são aviso (`MODALITY_CONTRADICTION`). |
@@ -19,7 +20,7 @@ Interface em **Configurações › Dados e backup**.
 | Avaliações `irontrack.avaliacoes` v1 | — | Importadas em Evolução › Corpo (contrato inalterado). |
 | `schemaVersion` maior que o suportado | — | Recusado: "Atualize o IronTrack antes de importar". |
 
-`data` contém `settings`, `routines`, `sessions`, `rotations`, `overrides`, `bodyEntries`, `photos`, `goals` (v4+), `planEntries` (v5+) e `calendarDecisions` (v6+).
+`data` contém `settings`, `routines`, `sessions`, `rotations`, `overrides`, `bodyEntries`, `photos`, `goals` (v4+), `planEntries` (v5+), `calendarDecisions` (v6+), `customExercises` e `exerciseFavorites` (v7+).
 Campos desconhecidos são preservados (`.passthrough()`), para que backups de versões futuras compatíveis não percam dados.
 
 ## Versionamento
@@ -27,6 +28,8 @@ Campos desconhecidos são preservados (`.passthrough()`), para que backups de ve
 - `BACKUP_SCHEMA_VERSION` (formato JSON) e `DB_SCHEMA_VERSION` (IndexedDB) são **independentes**.
 - Mudou o formato do arquivo? Incremente `BACKUP_SCHEMA_VERSION` e acrescente uma função em `MIGRATIONS`
   (chave = versão de origem) que leve à versão seguinte. Nunca remova migrações antigas.
+- v6 → v7 (P17) acrescenta `data.customExercises: []` e `data.exerciseFavorites: []` (biblioteca de exercícios; ver
+  [BIBLIOTECA_EXERCICIOS.md](BIBLIOTECA_EXERCICIOS.md) §14). Um app anterior recusa arquivos v7 com a orientação de atualizar.
 - v5 → v6 (P16) acrescenta `data.calendarDecisions: []` (decisões lembradas; ver [DECISOES_CALENDARIO.md](DECISOES_CALENDARIO.md) §9).
   Um app anterior recusa arquivos v6 com a orientação de atualizar.
 - v4 → v5 (P13) acrescenta `data.planEntries: []` (planejamento semanal; ver [PLANEJAMENTO_SEMANAL.md](PLANEJAMENTO_SEMANAL.md) §8).
@@ -208,3 +211,16 @@ mesmo se um treino for concluído durante a exportação. O JSON é indentado (l
 - Uma decisão restaurada só vale se o conflito for idêntico ao que existia quando foi tomada (impressão digital); se o
   planejamento restaurado for outro, ela aparece como invalidada ou resolvida, sem esconder nenhum aviso.
 - Backups v0–v5 continuam importáveis (sem decisões). Ver [DECISOES_CALENDARIO.md](DECISOES_CALENDARIO.md).
+
+## Biblioteca de exercícios (backup v7, P17)
+
+- `data.customExercises`: exercícios personalizados (limite de 2.000 no arquivo), validados com as mesmas regras da
+  tela (Zod estrito, sem HTML, tipo de carga compatível). Qualquer registro inválido bloqueia a restauração.
+- `data.exerciseFavorites`: favoritos (limite de 5.000 no arquivo), com ID `<perfil>~<alvo>`. Ao restaurar com
+  transferência de perfil, `assignOwner` troca o dono **e** refaz o ID.
+- Substituir: restaura as duas tabelas com o dono local. Mesclar: só acrescenta por ID; o personalizado local nunca é
+  sobrescrito (o do backup aparece como duplicata ou conflito na prévia).
+- O catálogo padrão não vai no backup (é estático). As fichas e sessões levam a origem gravada nelas (`catalogId`,
+  `catalogVersion`, `customExerciseId`); nada é associado por nome. Origem que aponta para item inexistente só gera
+  aviso informativo (`LIBRARY_REF_MISSING`) e não bloqueia.
+- Backups v0–v6 continuam importáveis (sem biblioteca). Ver [BIBLIOTECA_EXERCICIOS.md](BIBLIOTECA_EXERCICIOS.md).

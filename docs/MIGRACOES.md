@@ -11,6 +11,7 @@ Implementação em `src/db/db.ts`; testes em `tests/unit/migrations.test.ts`.
 | 3 | IronTrack 2.0 F01/P12 | Tabela `goals` (`id, profileId, status, updatedAt`), sem função de upgrade; nenhuma tabela antiga muda (ver [METAS_TREINAMENTO.md](METAS_TREINAMENTO.md) §4). |
 | 4 | IronTrack 2.0 F01/P13 | Tabela `planEntries` (`id, profileId, scope, date, routineId, updatedAt`), sem função de upgrade; nenhuma tabela antiga muda (ver [PLANEJAMENTO_SEMANAL.md](PLANEJAMENTO_SEMANAL.md) §7). |
 | 5 | IronTrack 2.0 F01/P16 | Tabela `calendarDecisions` (`id, profileId, date, updatedAt`), sem função de upgrade; nenhuma tabela antiga muda (ver [DECISOES_CALENDARIO.md](DECISOES_CALENDARIO.md) §8). |
+| 6 | IronTrack 2.0 F01/P17 | Tabelas `customExercises` (`id, profileId, updatedAt`) e `exerciseFavorites` (`id, profileId, target`), sem função de upgrade; nenhuma tabela antiga muda (ver [BIBLIOTECA_EXERCICIOS.md](BIBLIOTECA_EXERCICIOS.md) §13). |
 
 O Prompt 01 não alterou o esquema (só criou a infraestrutura). O Prompt 02 criou a versão 2 (`DB_SCHEMA_VERSION = 2`).
 O Prompt 10 (modelo de exercícios v3) **não** criou versão nova: os campos de modalidade ficam dentro dos registros,
@@ -23,6 +24,10 @@ O Prompt 13 criou a versão 4 (`DB_SCHEMA_VERSION = 4`) só para a tabela do pla
 abrindo v4 testado em `tests/unit/planner-db.test.ts`).
 O Prompt 16 criou a versão 5 (`DB_SCHEMA_VERSION = 5`) só para as decisões lembradas do calendário; mesmas garantias
 (migração aditiva, sem transformar registros; declarações v1–v4 intactas, testado em `tests/unit/migrations.test.ts`).
+O Prompt 17 criou a versão 6 (`DB_SCHEMA_VERSION = 6`) só para a biblioteca de exercícios (personalizados e
+favoritos); mesmas garantias. As fichas ganharam campos opcionais (`catalogId`, `catalogVersion`, `customExerciseId`)
+dentro dos registros, sem índice e sem transformação: fichas antigas não são reescritas nem associadas ao catálogo por
+nome. App do P16 abrindo o banco v6 e migração v5 → v6 testados em `tests/unit/library-db.test.ts`.
 
 ## Migração v1 → v2 (perfil local)
 
