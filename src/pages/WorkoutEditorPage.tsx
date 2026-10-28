@@ -1,17 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowDown, ArrowLeft, ArrowUp, Copy, Eye, Library, MoreHorizontal, Pencil, Plus, Replace, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowUp, Copy, Eye, Info, Library, Link2, Link2Off, ListChecks, MoreHorizontal, Pencil, Plus, Replace, ScanSearch, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { mutateWorkout } from '@/db/library';
+import { customExerciseById, mutateWorkout, unlinkExercise } from '@/db/library';
 import { useActiveSession, useRoutine } from '@/hooks/data';
 import { useUnits } from '@/hooks/useUnits';
 import type { ExerciseTemplate } from '@/lib/types';
 import { cn, fmtClock, uid } from '@/lib/utils';
 import { MODALITY_LABEL } from '@/modules/training';
-import { originLabel, type WorkoutOp } from '@/modules/exercises';
+import { catalogItem, customItem, instanceFingerprint, libraryKeyOf, originLabel, plannedSets, type LibraryItem, type WorkoutOp } from '@/modules/exercises';
 import { planSummary } from '@/features/workout/modelFormat';
 import { ExerciseDialog } from '@/features/routines/ExerciseDialog';
 import { WorkoutPreviewDialog } from '@/features/library/WorkoutPreviewDialog';
+import { ExerciseDetailDialog } from '@/features/library/ExerciseDetailDialog';
 import { useStartWorkout } from '@/features/routines/useStartWorkout';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -33,6 +34,8 @@ export default function WorkoutEditorPage() {
   const [toDelete, setToDelete] = useState<ExerciseTemplate | null>(null);
   const [actionsFor, setActionsFor] = useState<ExerciseTemplate | null>(null);
   const [preview, setPreview] = useState(false);
+  const [toUnlink, setToUnlink] = useState<ExerciseTemplate | null>(null);
+  const [detail, setDetail] = useState<LibraryItem | null>(null);
   const [meta, setMeta] = useState({ label: '', name: '', notes: '' });
   const { fmtW } = useUnits();
   const outdated = useModelCapability().newer;
@@ -74,6 +77,40 @@ export default function WorkoutEditorPage() {
   const libraryLink = (extra = '') => `/exercicios?para=${encodeURIComponent(`${routine.id}/${workout.id}`)}${extra}`;
   const sessionHere = active && active.routineId === routine.id && active.workoutId === workout.id;
   const n = workout.exercises.length;
+  const unlinked = workout.exercises.filter((e) => !libraryKeyOf(e)).length;
+  const here = `${routine.id}/${workout.id}`;
+
+  /**
+   * P18: abre os detalhes da origem SEM sair do editor (o que está sendo digitado continua aqui). O catálogo é carregado
+   * sob demanda (fica fora do pacote principal); personalizados vêm do banco.
+   */
+  const openOrigin = async (ex: ExerciseTemplate) => {
+    try {
+      if (ex.catalogId) {
+        const { catalogById } = await import('@/modules/exercises/catalog');
+        const c = catalogById(ex.catalogId);
+        if (c) return setDetail(catalogItem(c));
+      } else if (ex.customExerciseId) {
+        const c = await customExerciseById(ex.customExerciseId);
+        if (c) return setDetail(customItem(c));
+      }
+      toast.error('A origem deste exercício não está mais na biblioteca. A ficha guarda a própria cópia e continua funcionando.');
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+  const unlink = async (ex: ExerciseTemplate) => {
+    if (outdated) {
+      toast.error('Atualize o IronTrack antes de editar: estes dados já foram usados por uma versão mais nova.');
+      return;
+    }
+    try {
+      const r = await unlinkExercise(routine.id, workout.id, ex.id, instanceFingerprint(ex));
+      if (r.changed) toast.success(`Associação de ${ex.name} desfeita. A ficha, as metas e o histórico não mudaram.`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -111,9 +148,20 @@ export default function WorkoutEditorPage() {
       )}
 
       <section className="space-y-2">
-        <h2 className="text-sm font-semibold text-muted-foreground">
-          {n} {n === 1 ? 'exercício' : 'exercícios'} · use as setas ou arraste <span aria-hidden>⋮⋮</span> para reordenar
-        </h2>
+        <div className="flex flex-wrap gap-x-3 gap-y-1 rounded-2xl border p-3 text-sm" data-testid="editor-summary" aria-label="Resumo da ficha">
+          <span>
+            <span className="font-semibold tabular">{n}</span> {n === 1 ? 'exercício' : 'exercícios'}
+          </span>
+          <span title="Soma das séries planejadas na ficha; não é volume executado.">
+            <span className="font-semibold tabular">{plannedSets(workout.exercises)}</span> séries planejadas <span className="text-muted-foreground">(estimativa)</span>
+          </span>
+          {unlinked > 0 && (
+            <button className="font-medium text-warn underline-offset-2 hover:underline" onClick={() => navigate(`/exercicios/reconhecer?treino=${encodeURIComponent(here)}`)} data-testid="editor-unlinked">
+              {unlinked} sem vínculo com a biblioteca
+            </button>
+          )}
+        </div>
+        <h2 className="text-sm font-semibold text-muted-foreground">Use as setas ou arraste <span aria-hidden>⋮⋮</span> para reordenar</h2>
         <SortableList
           items={workout.exercises}
           onReorder={(exs) => void apply({ type: 'reorder', order: exs.map((e) => e.id) })}
@@ -138,7 +186,7 @@ export default function WorkoutEditorPage() {
                     {ex.modality !== 'cardio' && ex.modality !== 'timed' && (
                       <span className={cn(ex.category === 'compound' ? 'text-primary' : '')}>{ex.category === 'compound' ? 'composto' : 'isolador'}</span>
                     )}
-                    {origin && <span className="italic">{origin}</span>}
+                    {origin ? <span className="italic">{origin}</span> : <Badge variant="warn">sem vínculo</Badge>}
                   </span>
                 </button>
                 <Button size="icon-sm" variant="ghost" aria-label={`Mover ${ex.name} para cima`} disabled={i === 0} onClick={() => void apply({ type: 'move', id: ex.id, delta: -1 })}>
@@ -161,6 +209,21 @@ export default function WorkoutEditorPage() {
           <Button size="lg" variant="outline" className="w-full border-dashed" onClick={() => setEditing({ open: true, ex: null })} data-testid="add-exercise">
             <Plus /> Criar manualmente
           </Button>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={() => navigate(libraryLink('&varios=1'))} data-testid="add-many">
+            <ListChecks /> Adicionar vários
+          </Button>
+          {n > 0 && (
+            <Button variant="outline" size="sm" onClick={() => navigate(`/treinos/${routine.id}/${workout.id}/substituir`)} data-testid="bulk-replace">
+              <Replace /> Substituir vários
+            </Button>
+          )}
+          {unlinked > 0 && (
+            <Button variant="outline" size="sm" onClick={() => navigate(`/exercicios/reconhecer?treino=${encodeURIComponent(here)}`)} data-testid="open-recognition-editor">
+              <ScanSearch /> Reconhecer {unlinked} {unlinked === 1 ? 'antigo' : 'antigos'}
+            </Button>
+          )}
         </div>
       </section>
 
@@ -189,6 +252,20 @@ export default function WorkoutEditorPage() {
               <Button variant="secondary" size="lg" className="justify-start" onClick={() => navigate(libraryLink(`&substituir=${encodeURIComponent(actionsFor.id)}`))}>
                 <Replace /> Substituir por outro da biblioteca
               </Button>
+              {libraryKeyOf(actionsFor) ? (
+                <>
+                  <Button variant="secondary" size="lg" className="justify-start" onClick={() => (void openOrigin(actionsFor), setActionsFor(null))} data-testid="open-origin">
+                    <Info /> Ver detalhes na biblioteca
+                  </Button>
+                  <Button variant="ghost" size="lg" className="justify-start" onClick={() => (setToUnlink(actionsFor), setActionsFor(null))} data-testid="unlink-origin">
+                    <Link2Off /> Desfazer associação com a biblioteca
+                  </Button>
+                </>
+              ) : (
+                <Button variant="secondary" size="lg" className="justify-start" onClick={() => navigate(`/exercicios/reconhecer?treino=${encodeURIComponent(here)}`)} data-testid="link-origin">
+                  <Link2 /> Associar à biblioteca
+                </Button>
+              )}
               <Button variant="ghost" size="lg" className="justify-start text-destructive" onClick={() => (setToDelete(actionsFor), setActionsFor(null))}>
                 <Trash2 /> Remover da ficha
               </Button>
@@ -217,6 +294,15 @@ export default function WorkoutEditorPage() {
           if (toDelete) void apply({ type: 'remove', id: toDelete.id });
         }}
       />
+      <ConfirmDialog
+        open={!!toUnlink}
+        onOpenChange={(o) => !o && setToUnlink(null)}
+        title={`Desfazer a associação de ${toUnlink?.name}?`}
+        description="Só a referência de origem sai. O exercício continua na ficha com o mesmo nome, ID e configuração; metas, sessões, histórico, favoritos e o exercício da biblioteca não mudam. Você pode associar de novo depois."
+        confirmLabel="Desfazer associação"
+        onConfirm={() => (toUnlink ? unlink(toUnlink) : undefined)}
+      />
+      <ExerciseDetailDialog item={detail} onOpenChange={(o) => !o && setDetail(null)} favorite={false} onToggleFavorite={() => undefined} hideFavorite />
       <WorkoutPreviewDialog
         open={preview}
         onOpenChange={setPreview}

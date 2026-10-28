@@ -1,10 +1,10 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Filter, Plus, Search, Star, X } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, Filter, ListChecks, Plus, ScanSearch, Search, Star, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { PageHeader } from '@/components/AppLayout';
 import { customExerciseReferences, deleteCustomExercise, removeFavoriteRecord, setCustomArchived, setFavorite } from '@/db/library';
-import { useRoutine } from '@/hooks/data';
+import { useCurrentProfile, useRoutine, useRoutines } from '@/hooks/data';
 import { useLibrary } from '@/hooks/useLibrary';
 import type { CustomExercise, ExerciseLaterality, LibraryEquipment, LibraryMuscle, TrainingModality } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -17,7 +17,9 @@ import {
   MODALITY_FILTER_LABEL,
   MUSCLE_NAME,
   SUGGESTION_REASON_LABEL,
+  USAGE_LABEL,
   activeFilterCount,
+  legacyInventory,
   anchorFromTemplate,
   duplicateFields,
   libraryKeyOf,
@@ -32,6 +34,7 @@ import { ExerciseDetailDialog } from '@/features/library/ExerciseDetailDialog';
 import { CustomExerciseDialog } from '@/features/library/CustomExerciseDialog';
 import { AddToWorkoutFlow, type WorkoutTarget } from '@/features/library/AddToWorkoutFlow';
 import { SubstituteDialog } from '@/features/library/SubstituteDialog';
+import { AddManyDialog } from '@/features/library/AddManyDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -72,7 +75,9 @@ const toggle = <T,>(list: readonly T[], v: T): T[] => (list.includes(v) ? list.f
 /**
  * Biblioteca de exercícios (IronTrack 2.0 F01/P17, docs/BIBLIOTECA_EXERCICIOS.md). Funciona offline: catálogo estático
  * no próprio pacote desta tela (carregada sob demanda) + personalizados e favoritos do perfil no IndexedDB.
- * Modos pela URL: `?para=<rotina>/<treino>` adiciona à ficha; `&substituir=<id do exercício>` troca um exercício.
+ * Modos pela URL: `?para=<rotina>/<treino>` adiciona à ficha; `&substituir=<id do exercício>` troca um exercício;
+ * `&varios=1` abre já na seleção múltipla (P18). P18 também acrescenta "Mais utilizados", o acesso ao reconhecimento de
+ * exercícios antigos e os rótulos de uso (ficha × sessão) nos detalhes.
  */
 export default function ExerciseLibraryPage() {
   const navigate = useNavigate();
@@ -100,6 +105,14 @@ export default function ExerciseLibraryPage() {
   const [form, setForm] = useState<{ open: boolean; editing: CustomExercise | null; initial: CustomFields | null }>({ open: false, editing: null, initial: null });
   const [usage, setUsage] = useState<{ templates: number; sessions: number } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<CustomExercise | null>(null);
+  const [multi, setMulti] = useState(params.get('varios') === '1');
+  const [picked, setPicked] = useState<LibraryKey[]>([]);
+  const [addMany, setAddMany] = useState<LibraryItem[] | null>(null);
+  const [showMostUsed, setShowMostUsed] = useState(false);
+  const routines = useRoutines();
+  const profile = useCurrentProfile();
+  const unlinkedCount = useMemo(() => legacyInventory(routines ?? [], profile?.id).unlinked.length, [routines, profile?.id]);
+  const multiOn = multi && !!target && !replaceId;
 
   const effective: LibraryFilters = useMemo(
     () => ({ ...filters, favoritesOnly: filters.favoritesOnly || tab === 'favoritos', customOnly: filters.customOnly || tab === 'meus', archived: tab === 'meus' && showArchived ? 'only' : 'hide' }),
@@ -120,7 +133,7 @@ export default function ExerciseLibraryPage() {
   const suggestions = useMemo(() => {
     if (!data || !showSuggestions) return [];
     const inWorkout = new Set((destWorkout?.exercises ?? []).map(libraryKeyOf).filter((k): k is LibraryKey => !!k));
-    return suggest({ items: data.items, favorites: data.favorites, recent: data.recent, anchor: replacing ? anchorFromTemplate(replacing) : null, exclude: replacing ? undefined : inWorkout, limit: 6 });
+    return suggest({ items: data.items, favorites: data.favorites, recent: data.recent, inSheets: replacing ? undefined : new Set(data.inSheets.keys()), anchor: replacing ? anchorFromTemplate(replacing) : null, exclude: replacing ? undefined : inWorkout, limit: 6 });
   }, [data, showSuggestions, replacing, destWorkout]);
 
   const toggleFavorite = async (item: LibraryItem) => {
@@ -135,6 +148,8 @@ export default function ExerciseLibraryPage() {
     if (replacing) setSubstitute(item);
     else setAdding(item);
   };
+  // Seleção múltipla: a ordem é a dos toques (previsível); tocar de novo desmarca. Repetir um item é só na confirmação.
+  const togglePick = (item: LibraryItem) => setPicked((p) => (p.includes(item.key) ? p.filter((k) => k !== item.key) : [...p, item.key]));
   const actionLabel = replacing ? 'Escolher como substituto' : target ? `Adicionar ao Treino ${destWorkout?.label}` : 'Adicionar à ficha';
 
   const listCard = (item: LibraryItem, reason?: string) => {
@@ -165,10 +180,24 @@ export default function ExerciseLibraryPage() {
         >
           <Star className={cn(fav && 'fill-current text-primary')} />
         </Button>
-        {(target || replacing) && !item.archived && (
-          <Button size="icon-sm" variant="secondary" aria-label={`${replacing ? 'Escolher' : 'Adicionar'} ${item.name}`} onClick={() => choose(item)} data-testid="library-choose">
-            <Plus />
+        {multiOn && !item.archived ? (
+          <Button
+            size="icon-sm"
+            variant={picked.includes(item.key) ? 'default' : 'outline'}
+            aria-pressed={picked.includes(item.key)}
+            aria-label={`${picked.includes(item.key) ? 'Desmarcar' : 'Selecionar'} ${item.name}`}
+            onClick={() => togglePick(item)}
+            data-testid="library-pick"
+          >
+            {picked.includes(item.key) ? <span className="text-xs font-bold tabular">{picked.indexOf(item.key) + 1}</span> : <Plus />}
           </Button>
+        ) : (
+          (target || replacing) &&
+          !item.archived && (
+            <Button size="icon-sm" variant="secondary" aria-label={`${replacing ? 'Escolher' : 'Adicionar'} ${item.name}`} onClick={() => choose(item)} data-testid="library-choose">
+              <Plus />
+            </Button>
+          )
         )}
       </Card>
     );
@@ -224,6 +253,28 @@ export default function ExerciseLibraryPage() {
                   ? <>Substituindo <span className="font-semibold">{replacing.name}</span> no Treino {destWorkout.label}: escolha o substituto.</>
                   : <>Adicionando ao <span className="font-semibold">Treino {destWorkout.label} · {destWorkout.name}</span> ({destRoutine.name}).</>}
           </p>
+        </div>
+      )}
+
+      {target && !replaceId && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant={multiOn ? 'secondary' : 'outline'}
+            size="sm"
+            aria-pressed={multiOn}
+            onClick={() => {
+              setMulti((m) => !m);
+              setPicked([]);
+            }}
+            data-testid="toggle-multi"
+          >
+            <ListChecks /> {multiOn ? 'Cancelar seleção' : 'Selecionar vários'}
+          </Button>
+          {multiOn && (
+            <span className="text-xs text-muted-foreground" aria-live="polite">
+              {picked.length} {picked.length === 1 ? 'selecionado' : 'selecionados'} (na ordem dos toques)
+            </span>
+          )}
         </div>
       )}
 
@@ -285,6 +336,48 @@ export default function ExerciseLibraryPage() {
             <Card className="p-4 text-sm">Catálogo indisponível neste momento. Recarregue a página.</Card>
           ) : (
             <>
+              {tab === 'todos' && !target && !deferredQuery.trim() && nFilters === 0 && (
+                <Button variant="outline" className="w-full justify-start" onClick={() => navigate('/exercicios/reconhecer')} data-testid="open-recognition">
+                  <ScanSearch /> Reconhecer exercícios antigos
+                  {unlinkedCount > 0 && (
+                    <Badge variant="warn" className="ml-auto">
+                      {unlinkedCount} sem vínculo
+                    </Badge>
+                  )}
+                </Button>
+              )}
+              {showSuggestions && (
+                <section className="space-y-2" aria-label="Mais utilizados">
+                  <Button variant="ghost" size="sm" aria-expanded={showMostUsed} aria-controls="most-used" onClick={() => setShowMostUsed((v) => !v)} data-testid="toggle-most-used">
+                    <ChevronDown className={cn('transition-transform', showMostUsed && 'rotate-180')} /> Mais utilizados
+                  </Button>
+                  {showMostUsed && (
+                    <div id="most-used" className="space-y-2" data-testid="most-used">
+                      <p className="text-xs text-muted-foreground">
+                        Contagem pelas sessões concluídas em que o exercício foi executado com origem registrada ({data.mostUsed.sessionsConsidered}{' '}
+                        {data.mostUsed.sessionsConsidered === 1 ? 'sessão considerada' : 'sessões consideradas'}). Fichas e exercícios só planejados não contam.
+                      </p>
+                      {data.mostUsed.ranked.length === 0 ? (
+                        <p className="rounded-xl border p-3 text-sm" data-testid="most-used-empty">
+                          Nenhum exercício da biblioteca executado ainda em sessões concluídas.
+                        </p>
+                      ) : (
+                        data.mostUsed.ranked.map((r) => {
+                          const it = data.byKey.get(r.key);
+                          return it ? listCard(it, `${r.sessions} ${r.sessions === 1 ? 'sessão concluída' : 'sessões concluídas'}`) : null;
+                        })
+                      )}
+                      {data.mostUsed.unlinkedExecutions > 0 && (
+                        <p className="rounded-xl border border-dashed p-3 text-xs" data-testid="most-used-unlinked">
+                          <span className="font-semibold">{USAGE_LABEL.unlinked}:</span> {data.mostUsed.unlinkedExecutions}{' '}
+                          {data.mostUsed.unlinkedExecutions === 1 ? 'exercício executado' : 'exercícios executados'} em {data.mostUsed.unlinkedSessions}{' '}
+                          {data.mostUsed.unlinkedSessions === 1 ? 'sessão' : 'sessões'}, sem origem registrada. Eles não entram na classificação (nada é deduzido pelo nome).
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </section>
+              )}
               {showSuggestions && suggestions.length > 0 && (
                 <div className="space-y-2" data-testid="library-suggestions">
                   <h2 className="text-sm font-semibold text-muted-foreground">{replacing ? 'Sugestões para substituir' : 'Sugestões'}</h2>
@@ -366,6 +459,11 @@ export default function ExerciseLibraryPage() {
         }
         onDelete={detailCustom ? () => setConfirmDelete(detailCustom) : undefined}
         usage={detail?.kind === 'custom' ? usage : null}
+        usageLines={
+          detail && data
+            ? [...(data.inSheets.has(detail.key) ? [USAGE_LABEL.inSheet] : []), ...(data.usedInSessions.has(detail.key) ? [USAGE_LABEL.inSession] : [])]
+            : []
+        }
       />
       <CustomExerciseDialog
         open={form.open}
@@ -397,6 +495,30 @@ export default function ExerciseLibraryPage() {
           } catch (e) {
             toast.error((e as Error).message);
           }
+        }}
+      />
+      {multiOn && (
+        <div className="sticky bottom-[calc(env(safe-area-inset-bottom)+4.5rem)] z-10 md:bottom-4">
+          <Button
+            size="lg"
+            className="w-full shadow-lg"
+            disabled={!picked.length}
+            onClick={() => data && setAddMany(picked.map((k) => data.byKey.get(k)).filter((i): i is LibraryItem => !!i))}
+            data-testid="add-many-open"
+          >
+            <Check /> Adicionar {picked.length || ''} ao Treino {destWorkout?.label}
+          </Button>
+        </div>
+      )}
+      <AddManyDialog
+        items={addMany}
+        target={target}
+        workout={destWorkout ?? null}
+        onClose={() => setAddMany(null)}
+        onDone={() => {
+          setAddMany(null);
+          setPicked([]);
+          backToEditor();
         }}
       />
       <AddToWorkoutFlow

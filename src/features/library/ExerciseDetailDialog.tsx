@@ -36,6 +36,8 @@ export function ExerciseDetailDialog({
   onArchive,
   onDelete,
   usage,
+  usageLines = [],
+  hideFavorite = false,
 }: {
   item: LibraryItem | null;
   onOpenChange: (o: boolean) => void;
@@ -49,6 +51,10 @@ export function ExerciseDetailDialog({
   onDelete?: () => void;
   /** Uso de um personalizado (fichas e treinos). undefined enquanto carrega. */
   usage?: { templates: number; sessions: number } | null;
+  /** P18: evidências de uso, separadas (presença em ficha × sessão registrada com esta origem). */
+  usageLines?: string[];
+  /** Só leitura (ex.: aberto do editor de fichas, P18): sem favoritar. */
+  hideFavorite?: boolean;
 }) {
   const it = item;
   const inUse = !!usage && (usage.templates > 0 || usage.sessions > 0);
@@ -105,6 +111,13 @@ export function ExerciseDetailDialog({
                 </>
               )}
             </dl>
+            {usageLines.length > 0 && (
+              <ul className="space-y-0.5 rounded-xl bg-secondary/60 p-3 text-xs" data-testid="detail-usage">
+                {usageLines.map((l) => (
+                  <li key={l}>{l}</li>
+                ))}
+              </ul>
+            )}
             <Section title="Como executar" items={it.instructions} />
             <Section title="Erros comuns" items={it.commonMistakes} />
             <Section title="Cuidados" items={it.safetyNotes} />
@@ -121,9 +134,11 @@ export function ExerciseDetailDialog({
               </p>
             )}
             <div className="flex flex-wrap gap-1.5">
-              <Button variant={favorite ? 'secondary' : 'outline'} size="sm" aria-pressed={favorite} onClick={onToggleFavorite} data-testid="detail-favorite">
-                <Star className={favorite ? 'fill-current' : ''} /> {favorite ? 'Favorito' : 'Favoritar'}
-              </Button>
+              {!hideFavorite && (
+                <Button variant={favorite ? 'secondary' : 'outline'} size="sm" aria-pressed={favorite} onClick={onToggleFavorite} data-testid="detail-favorite">
+                  <Star className={favorite ? 'fill-current' : ''} /> {favorite ? 'Favorito' : 'Favoritar'}
+                </Button>
+              )}
               {onDuplicate && (
                 <Button variant="outline" size="sm" onClick={onDuplicate}>
                   <Copy /> {it.kind === 'catalog' ? 'Duplicar como meu' : 'Duplicar'}

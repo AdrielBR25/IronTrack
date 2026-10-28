@@ -99,8 +99,8 @@ describe('biblioteca', () => {
   it('lista o catálogo, busca sem acento e filtra por grupo; limpar filtros volta tudo', async () => {
     await mountLibrary();
     const total = count();
-    expect(total).toMatch(/^5\d exercícios$/);
-    await setValue($('library-search'), 'triceps polia');
+    expect(total).toMatch(/^1\d\d exercícios$/);
+    await setValue($('library-search'), 'triceps barra reta');
     await waitFor(() => count() === '1 exercício');
     expect(itemNames()).toEqual(['Tríceps na polia']);
     await setValue($('library-search'), 'xyz inexistente');
@@ -167,7 +167,7 @@ describe('construtor de fichas', () => {
     await mountLibrary('/exercicios?para=r1/r1-A');
     expect($('library-destination')?.textContent).toMatch(/Treino A/);
     await setValue($('library-search'), 'leg press');
-    await waitFor(() => count() === '1 exercício');
+    await waitFor(() => count() === '2 exercícios');
     await click($('library-choose', item('Leg press')!));
     await waitFor(() => $('add-config-header'));
     expect((document.querySelector('#ex-name') as HTMLInputElement).value).toBe('Leg press');
@@ -190,7 +190,7 @@ describe('construtor de fichas', () => {
     await db.routines.put(r);
     await mountLibrary('/exercicios?para=r1/r1-A');
     await setValue($('library-search'), 'leg press');
-    await waitFor(() => count() === '1 exercício');
+    await waitFor(() => count() === '2 exercícios');
     await click($('library-choose', item('Leg press')!));
     const sug = await waitFor(() => $('config-suggestion'));
     expect(sug.textContent).toMatch(/5 × 10–15 · descanso 100 s/);
@@ -213,7 +213,7 @@ describe('construtor de fichas', () => {
     await mountLibrary('/exercicios?para=r1/r1-A&substituir=r1-A-e1');
     expect($('library-destination')?.textContent).toMatch(/Exercício r1-A1/);
     await waitFor(() => $('library-suggestions'));
-    await setValue($('library-search'), 'prancha');
+    await setValue($('library-search'), 'prancha isometrica');
     await waitFor(() => count() === '1 exercício');
     await click($('library-choose', item('Prancha')!));
     const dlg = await waitFor(() => $('substitute-dialog'));

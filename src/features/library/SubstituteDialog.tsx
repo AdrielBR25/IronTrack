@@ -6,7 +6,7 @@ import { useSettings } from '@/hooks/data';
 import type { ExerciseTemplate } from '@/lib/types';
 import { uid } from '@/lib/utils';
 import { MODALITY_LABEL } from '@/modules/training';
-import { substitutionPreview, type LibraryItem } from '@/modules/exercises';
+import { instanceFingerprint, substitutionPreview, type LibraryItem } from '@/modules/exercises';
 import { planSummary } from '@/features/workout/modelFormat';
 import { useModelCapability } from '@/features/compat/CompatGuard';
 import { Button } from '@/components/ui/button';
@@ -37,9 +37,12 @@ export function SubstituteDialog({
   const [goals, setGoals] = useState<number | null>(null);
   const [newId, setNewId] = useState(() => uid());
   const [busy, setBusy] = useState(false);
+  // P18: impressão digital do exercício quando a prévia abriu; se ele mudar em outra aba até a confirmação, nada é gravado.
+  const [expected, setExpected] = useState<string | null>(null);
   useEffect(() => {
     if (!current || !item) return;
     setNewId(uid());
+    setExpected(instanceFingerprint(current));
     setGoals(null);
     void goalsLinkedTo(current.id).then(setGoals);
   }, [current?.id, item?.key]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -56,7 +59,7 @@ export function SubstituteDialog({
     }
     setBusy(true);
     try {
-      await mutateWorkout(routineId, workoutId, { type: 'replace', id: preview.current.id, exercise: preview.next });
+      await mutateWorkout(routineId, workoutId, { type: 'replace', id: preview.current.id, exercise: preview.next, ...(expected ? { expected } : {}) });
       toast.success(`${preview.current.name} substituído por ${preview.next.name}`);
       onDone(preview.next);
     } catch (e) {
