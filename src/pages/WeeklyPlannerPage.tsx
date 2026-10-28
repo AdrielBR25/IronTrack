@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ArrowLeft, CalendarCheck2, CalendarClock, Check, ChevronLeft, ChevronRight, Circle, CircleDot, Coffee, Minus, Moon, Pause, Pencil, Play, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CalendarCheck2, CalendarClock, Check, ChevronLeft, ChevronRight, Circle, CircleDot, Coffee, Minus, Moon, Pause, Pencil, Play, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { PageHeader } from '@/components/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -9,16 +9,22 @@ import { ConfirmDialog } from '@/components/ui/confirm';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Segmented } from '@/components/ui/segmented';
 import { PlanConflictError, clearPlanException, removePlanEntry, setPlanMarker, updatePlanActivity } from '@/db/planner';
-import { useActiveSession, useCurrentProfile, useRoutines, useSettings, useToday } from '@/hooks/data';
-import { usePlanEntries, usePlannerSessions, useRotations } from '@/hooks/usePlanner';
+import { useActiveSession, useSettings, useToday } from '@/hooks/data';
+import { useCalendarInput } from '@/hooks/useCalendar';
 import { useGoals } from '@/hooks/useGoals';
 import { useStartWorkout } from '@/features/routines/useStartWorkout';
 import { ActivityForm, type ActivityFormMode } from '@/features/planner/ActivityForm';
 import { ConsistencyCard, WeeklyGoalsCard } from '@/features/planner/WeekSummary';
+import { ConflictNotice } from '@/features/calendar/ConflictNotice';
+import { CalendarLegend, MonthGrid } from '@/features/calendar/MonthGrid';
+import { StartChoiceDialog, type StartChoice } from '@/features/calendar/StartChoiceDialog';
+import { SourcesSummaryCard } from '@/features/calendar/SourcesSummary';
+import { CERTAINTY_HINT, STATUS_ICON, entryLine, forecastText } from '@/features/calendar/calendarFormat';
 import { ACTIVITY_TONE, DAY_STATE_SHORT, activityTitle, everyWeekday, fmtDayLong, fmtDayShort, fmtWeekRange } from '@/features/planner/plannerFormat';
 import { fmtTime, weekdayShort } from '@/lib/dates';
 import { cn, uid } from '@/lib/utils';
 import { normIndex, type Routine, type Workout } from '@/modules/training';
+import { DAY_STATUS_LABEL, monthOf, resolveMonth, resolveWeek, shiftMonth, type ResolvedDay } from '@/modules/calendar';
 import {
   ACTIVITY_STATUS_LABEL,
   DAY_STATE_LABEL,
@@ -26,13 +32,13 @@ import {
   compareWeeks,
   currentWeekly,
   describeEntry,
+  isPlanDate,
   planForDate,
   shiftWeek,
   slotFingerprint,
   weekOf,
   weeklyGoalsForWeek,
   type DayState,
-  type DayView,
   type PlanEntry,
   type PlanSlot,
   type PlannedActivity,
@@ -41,45 +47,57 @@ import {
 // Planejamento semanal (IronTrack 2.0 F01/P13, #/planejamento). Camada de planejamento sobre a rotação: nada aqui
 // avança a rotação, conclui sessões, cria treinos fictícios ou altera fichas. Tudo fica no aparelho (nunca vai para a
 // IA). Ver docs/PLANEJAMENTO_SEMANAL.md.
+// P14: a mesma tela é o calendário unificado (semana e mês). Cada dia é resolvido pelo domínio `@/modules/calendar`:
+// sessões reais, planejamento (exceção > semanal), agenda anterior como sugestão e rotação como previsão, com avisos
+// de divergência. Ver docs/CALENDARIO_UNIFICADO.md.
 
 const STATE_ICON: Record<DayState, typeof Check> = { concluido: Check, parcial: CircleDot, planejado: Circle, futuro: CalendarClock, sem_plano: Minus };
 
 type EditScope = 'weekly' | 'date';
+type CalendarView = 'week' | 'month';
+
+const fmtMonth = (month: string) => new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(new Date(+month.slice(0, 4), +month.slice(5, 7) - 1, 1));
 
 export default function WeeklyPlannerPage() {
   const today = useToday();
-  const entries = usePlanEntries();
-  const sessions = usePlannerSessions();
-  const routines = useRoutines();
-  const rotations = useRotations();
+  const input = useCalendarInput();
+  const entries = input?.entries;
+  const sessions = input?.sessions;
+  const routines = input?.routines;
+  const rotations = input?.rotations;
   const goals = useGoals();
   const active = useActiveSession();
-  const profile = useCurrentProfile();
   const settings = useSettings();
   const start = useStartWorkout();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const initialDate = isPlanDate(params.get('data')) ? params.get('data')! : today;
 
-  const [monday, setMonday] = useState(() => weekOf(today));
-  const [selected, setSelected] = useState(today);
+  const [view, setView] = useState<CalendarView>(params.get('visao') === 'mes' ? 'month' : 'week');
+  const [monday, setMonday] = useState(() => weekOf(initialDate));
+  const [month, setMonth] = useState(() => monthOf(initialDate));
+  const [selected, setSelected] = useState(initialDate);
+  const editRef = useRef<HTMLElement>(null);
   const [scope, setScope] = useState<EditScope>('weekly');
   const [form, setForm] = useState<ActivityFormMode | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [confirm, setConfirm] = useState<{ title: string; description: string; label: string; run: () => Promise<unknown> } | null>(null);
-  const [startChoice, setStartChoice] = useState<{ routine: Routine; planned: Workout; next: Workout } | null>(null);
+  const [startChoice, setStartChoice] = useState<StartChoice | null>(null);
   const [activeBlock, setActiveBlock] = useState(false);
 
   const isCurrentWeek = monday === weekOf(today);
-  const week = useMemo(
-    () => (entries && sessions && routines ? buildWeek({ entries, sessions, routines, week: monday, today, profileId: profile?.id }) : null),
-    [entries, sessions, routines, monday, today, profile?.id],
-  );
+  // Visão unificada (só leitura, sob demanda): a semana exibida e, na visão mensal, o mês.
+  const cal = useMemo(() => (input ? resolveWeek(input, monday) : null), [input, monday]);
+  const week = useMemo(() => (cal ? { days: cal.days.map((d) => d.plan), consistency: cal.consistency } : null), [cal]);
+  const monthCal = useMemo(() => (input && view === 'month' ? resolveMonth(input, month) : null), [input, view, month]);
   const prevWeek = useMemo(
-    () => (entries && sessions && routines ? buildWeek({ entries, sessions, routines, week: shiftWeek(monday, -1), today, profileId: profile?.id }) : null),
-    [entries, sessions, routines, monday, today, profile?.id],
+    () => (input ? buildWeek({ entries: input.entries, sessions: input.sessions, routines: input.routines, week: shiftWeek(monday, -1), today: input.today, profileId: input.profileId }) : null),
+    [input, monday],
   );
   const goalViews = useMemo(() => (goals && sessions ? weeklyGoalsForWeek(goals, sessions, monday, today) : []), [goals, sessions, monday, today]);
 
-  const day = week?.days.find((d) => d.date === selected) ?? week?.days[0] ?? null;
+  const rday: ResolvedDay | null = cal?.days.find((d) => d.date === selected) ?? cal?.days[0] ?? null;
+  const day = rday?.plan ?? null;
 
   // Escopo de edição padrão: a exceção do dia, se houver; senão o modelo semanal.
   useEffect(() => {
@@ -88,8 +106,26 @@ export default function WeeklyPlannerPage() {
   }, [day?.date]);
 
   const goWeek = (m: string) => {
+    const sel = m === weekOf(today) ? today : m;
     setMonday(m);
-    setSelected(m === weekOf(today) ? today : m);
+    setSelected(sel);
+    setMonth(monthOf(sel));
+  };
+  const selectDate = (d: string) => {
+    setSelected(d);
+    setMonday(weekOf(d));
+    if (view === 'month' && monthOf(d) !== month) setMonth(monthOf(d));
+  };
+  const goMonth = (m: string) => {
+    setMonth(m);
+    const sel = m === monthOf(today) ? today : `${m}-01`;
+    setSelected(sel);
+    setMonday(weekOf(sel));
+  };
+  const changeView = (v: CalendarView) => {
+    setView(v);
+    if (v === 'month') setMonth(monthOf(selected));
+    else setMonday(weekOf(selected));
   };
 
   const rotationNext = (routineId: string | null): Workout | null => {
@@ -118,7 +154,7 @@ export default function WeeklyPlannerPage() {
   }
 
   // ---------- Edição ----------
-  const slotOf = (d: DayView, s: EditScope): PlanSlot => (s === 'weekly' ? { scope: 'weekly', weekday: d.weekday } : { scope: 'date', date: d.date });
+  const slotOf = (d: { weekday: number; date: string }, s: EditScope): PlanSlot => (s === 'weekly' ? { scope: 'weekly', weekday: d.weekday } : { scope: 'date', date: d.date });
   const fp = (slot: PlanSlot) => slotFingerprint(entries ?? [], slot, today);
 
   async function guarded(fn: () => Promise<unknown>, ok: string) {
@@ -180,7 +216,7 @@ export default function WeeklyPlannerPage() {
     </>
   );
 
-  if (!week || !day || !routines) return <div className="space-y-4">{header}<div className="h-40 animate-pulse rounded-2xl bg-card" /></div>;
+  if (!week || !day || !rday || !routines || !cal) return <div className="space-y-4">{header}<div className="h-40 animate-pulse rounded-2xl bg-card" /></div>;
 
   const cmp = prevWeek ? compareWeeks(week.consistency, prevWeek.consistency) : null;
 
@@ -188,6 +224,18 @@ export default function WeeklyPlannerPage() {
     <div className="space-y-4" data-testid="planner-page">
       {header}
 
+      <Segmented<CalendarView>
+        aria-label="Visão do calendário"
+        value={view}
+        onChange={changeView}
+        options={[
+          { value: 'week', label: <span data-testid="view-week">Semana</span> },
+          { value: 'month', label: <span data-testid="view-month">Mês</span> },
+        ]}
+      />
+
+      {view === 'week' ? (
+        <>
       {/* Navegação semanal */}
       <div className="flex items-center gap-2">
         <Button variant="outline" size="icon" aria-label="Semana anterior" onClick={() => goWeek(shiftWeek(monday, -1))} data-testid="week-prev">
@@ -207,11 +255,36 @@ export default function WeeklyPlannerPage() {
         </Button>
       )}
 
-      <WeekStrip days={week.days} selected={day.date} onSelect={setSelected} routines={routines} />
+      <WeekStrip days={cal.days} selected={day.date} onSelect={selectDate} routines={routines} />
       <StripLegend />
+        </>
+      ) : (
+        monthCal && (
+          <section aria-label="Calendário do mês" className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="icon" aria-label="Mês anterior" onClick={() => goMonth(shiftMonth(month, -1))} data-testid="month-prev">
+                <ChevronLeft />
+              </Button>
+              <p className="min-w-0 flex-1 text-center font-display font-semibold first-letter:uppercase" aria-live="polite" data-testid="month-label">
+                {fmtMonth(month)}
+              </p>
+              <Button variant="outline" size="icon" aria-label="Próximo mês" onClick={() => goMonth(shiftMonth(month, 1))} data-testid="month-next">
+                <ChevronRight />
+              </Button>
+            </div>
+            {(month !== monthOf(today) || selected !== today) && (
+              <Button variant="secondary" size="sm" className="w-full" onClick={() => goMonth(monthOf(today))} data-testid="month-today">
+                <CalendarCheck2 /> Voltar para hoje
+              </Button>
+            )}
+            <MonthGrid month={monthCal} selected={selected} onSelect={selectDate} />
+            <CalendarLegend />
+          </section>
+        )
+      )}
 
       {/* Dia selecionado */}
-      <Card className="space-y-4 p-4" data-testid="plan-day" data-date={day.date} data-state={day.state}>
+      <Card className="space-y-4 p-4" data-testid="plan-day" data-date={day.date} data-state={day.state} data-status={rday.status} data-origin={rday.origin}>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0">
             <h2 className="font-display text-lg font-semibold first-letter:uppercase">{fmtDayLong(day.date)}</h2>
@@ -227,11 +300,26 @@ export default function WeeklyPlannerPage() {
             })()}
             {DAY_STATE_LABEL[day.state]}
           </span>
+          {rday.status !== 'planned' && rday.status !== 'empty' && DAY_STATUS_LABEL[rday.status] !== DAY_STATE_LABEL[day.state] && (
+            <span className="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium" data-testid="plan-day-status">
+              {(() => {
+                const I = STATUS_ICON[rday.status];
+                return <I className="h-3.5 w-3.5" aria-hidden />;
+              })()}
+              {DAY_STATUS_LABEL[rday.status]}
+            </span>
+          )}
         </div>
 
         {day.markerConflict && (
           <p className="rounded-xl bg-warn/15 p-3 text-sm text-warn">Este dia tem descanso e treinos ao mesmo tempo (ex.: depois de mesclar um backup). Os treinos valem; ajuste o dia abaixo.</p>
         )}
+
+        <ConflictNotice
+          day={rday}
+          onEditPlan={editable ? () => editRef.current?.scrollIntoView({ block: 'start' }) : undefined}
+          legacyHref="/treinos"
+        />
 
         <section aria-label="Planejado">
           <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Planejado</h3>
@@ -243,14 +331,14 @@ export default function WeeklyPlannerPage() {
           ) : (
             <ul className="space-y-2">
               {day.activities.map((a) => {
-                const next = a.followsRotation ? rotationNext(a.entry.routineId) : null;
+                const forecast = rday.forecasts[a.entry.id];
                 const canStart = day.isToday && a.status === 'pendente' && a.availability === 'ok';
                 const rotNext = !a.followsRotation && canStart ? rotationNext(a.entry.routineId) : null;
                 return (
                   <li key={a.entry.id} className="rounded-xl border p-3" data-testid="plan-activity" data-status={a.status}>
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="min-w-0 break-words font-medium" data-testid="plan-activity-title">
-                        {activityTitle(a, next)}
+                        {a.followsRotation && a.availability === 'ok' ? `${a.routineName} · ${forecastText(forecast)}` : activityTitle(a, null)}
                       </span>
                       <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium', ACTIVITY_TONE[a.status])} data-testid="plan-activity-status">
                         {a.status === 'realizada' && <Check className="h-3 w-3" aria-hidden />}
@@ -258,6 +346,11 @@ export default function WeeklyPlannerPage() {
                       </span>
                     </div>
                     {a.availability === 'ok' && a.routineName && !a.followsRotation && <p className="text-xs text-muted-foreground">{a.routineName}</p>}
+                    {a.followsRotation && a.availability === 'ok' && forecast && CERTAINTY_HINT[forecast.certainty] && (
+                      <p className="mt-1 text-xs text-muted-foreground" data-testid="plan-forecast-note" data-certainty={forecast.certainty}>
+                        {CERTAINTY_HINT[forecast.certainty]}
+                      </p>
+                    )}
                     {a.availability !== 'ok' && (
                       <p className="mt-1 text-xs text-warn">{a.availability === 'routine_missing' ? 'A rotina deste planejamento foi excluída. Remova ou troque a atividade.' : 'O treino foi removido da rotina. Escolha outro treino.'}</p>
                     )}
@@ -314,9 +407,14 @@ export default function WeeklyPlannerPage() {
           </section>
         )}
 
+        <LegacySection day={rday} />
+
         {/* Ajustes (só hoje e dias futuros) */}
         {editable ? (
-          <section aria-label="Ajustar planejamento" className="space-y-3 border-t pt-3" data-testid="plan-edit">
+          <section ref={editRef} aria-label="Ajustar planejamento" className="scroll-mt-4 space-y-3 border-t pt-3" data-testid="plan-edit">
+            <p className="text-xs font-medium text-foreground/80" data-testid="plan-edit-model">
+              Estes ajustes alteram só o planejamento semanal (ou uma exceção desta data). A agenda anterior e a rotação não mudam: elas ficam em Treinos.
+            </p>
             <Segmented<EditScope>
               aria-label="O que alterar"
               size="sm"
@@ -419,12 +517,20 @@ export default function WeeklyPlannerPage() {
       </Card>
 
       <div className="grid gap-4">
-        <ConsistencyCard c={week.consistency} cmp={cmp} isCurrent={isCurrentWeek} />
+        {view === 'month' && monthCal ? (
+          <SourcesSummaryCard summary={monthCal.summary} title={`Resumo de ${fmtMonth(month)}`} testId="month-summary" />
+        ) : (
+          <>
+            <ConsistencyCard c={week.consistency} cmp={cmp} isCurrent={isCurrentWeek} />
+            <SourcesSummaryCard summary={cal.summary} compact testId="week-sources" />
+          </>
+        )}
         <WeeklyGoalsCard views={goalViews} isFuture={monday > weekOf(today)} />
       </div>
 
       <p className="text-xs text-muted-foreground">
-        O planejamento fica só neste aparelho (e nos backups). Ele não avança a rotação, não conclui treinos, não altera fichas e não é enviado ao assistente de IA.
+        O planejamento fica só neste aparelho (e nos backups). Ele não avança a rotação, não conclui treinos, não altera fichas e não é enviado ao assistente de IA. O
+        calendário combina, só para exibir, o planejamento, a agenda anterior e a rotação; nenhum deles é alterado sem você pedir.
         {settings.activeRoutineId ? '' : ' Nenhuma rotina ativa: escolha uma em Treinos.'}
       </p>
 
@@ -448,43 +554,7 @@ export default function WeeklyPlannerPage() {
         onConfirm={async () => void (await confirm?.run())}
       />
 
-      <Dialog open={!!startChoice} onOpenChange={(o) => !o && setStartChoice(null)}>
-        <DialogContent data-testid="plan-start-choice">
-          <DialogHeader>
-            <DialogTitle>Qual treino iniciar?</DialogTitle>
-            <DialogDescription>
-              O planejado para hoje é o Treino {startChoice?.planned.label}, mas a rotação indica o Treino {startChoice?.next.label}. Nada é alterado até você escolher. Ao concluir,
-              a rotação segue a regra de sempre (continua a partir do treino realizado), igual a iniciar pela tela Treinos.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="sm:flex-col sm:items-stretch">
-            <Button
-              onClick={() => {
-                const c = startChoice!;
-                setStartChoice(null);
-                void start(c.routine.id, c.planned.id);
-              }}
-              data-testid="start-planned"
-            >
-              Iniciar Treino {startChoice?.planned.label} (planejado)
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                const c = startChoice!;
-                setStartChoice(null);
-                void start(c.routine.id, c.next.id);
-              }}
-              data-testid="start-rotation"
-            >
-              Iniciar Treino {startChoice?.next.label} (rotação)
-            </Button>
-            <Button variant="ghost" onClick={() => setStartChoice(null)}>
-              Cancelar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <StartChoiceDialog choice={startChoice} onClose={() => setStartChoice(null)} onStart={(r, w) => void start(r, w)} />
 
       <Dialog open={activeBlock} onOpenChange={setActiveBlock}>
         <DialogContent data-testid="plan-active-block">
@@ -509,7 +579,8 @@ export default function WeeklyPlannerPage() {
 }
 
 /** Faixa da semana: 7 dias compactos no celular, colunas com as atividades no computador. Setas do teclado navegam. */
-function WeekStrip({ days, selected, onSelect, routines }: { days: DayView[]; selected: string; onSelect: (d: string) => void; routines: Routine[] }) {
+function WeekStrip({ days: resolved, selected, onSelect, routines }: { days: ResolvedDay[]; selected: string; onSelect: (d: string) => void; routines: Routine[] }) {
+  const days = resolved.map((r) => r.plan);
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const onKey = (e: React.KeyboardEvent, i: number) => {
     const to = e.key === 'ArrowRight' ? i + 1 : e.key === 'ArrowLeft' ? i - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? 6 : null;
@@ -525,6 +596,9 @@ function WeekStrip({ days, selected, onSelect, routines }: { days: DayView[]; se
         const isSel = d.date === selected;
         const summary = d.activities.length ? `${d.activities.length} ${d.activities.length === 1 ? 'atividade planejada' : 'atividades planejadas'}` : d.marker === 'rest' ? 'descanso' : d.marker === 'free' ? 'dia livre' : 'nada planejado';
         const done = d.sessions.length ? `, ${d.sessions.length} ${d.sessions.length === 1 ? 'treino registrado' : 'treinos registrados'}` : '';
+        const r = resolved[i];
+        const legacyNote = r.origin === 'legacy' && r.legacy?.kind === 'workout' ? ', sugestão da agenda anterior' : '';
+        const warn = r.hasWarning ? ', divergência entre agendas' : '';
         return (
           <li key={d.date} className="min-w-0">
             <button
@@ -535,16 +609,19 @@ function WeekStrip({ days, selected, onSelect, routines }: { days: DayView[]; se
               tabIndex={isSel ? 0 : -1}
               aria-pressed={isSel}
               aria-current={d.isToday ? 'date' : undefined}
-              aria-label={`${fmtDayLong(d.date)}: ${DAY_STATE_LABEL[d.state]}, ${summary}${done}`}
+              aria-label={`${fmtDayLong(d.date)}: ${DAY_STATE_LABEL[d.state]}, ${summary}${done}${legacyNote}${warn}`}
               data-testid="week-day"
               data-date={d.date}
               data-state={d.state}
+              data-status={r.status}
+              data-warning={r.hasWarning ? 'true' : 'false'}
               className={cn(
-                'flex h-full min-h-[4.5rem] w-full flex-col items-center gap-0.5 rounded-xl border px-0.5 py-1.5 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:items-stretch md:px-2 md:text-left',
+                'relative flex h-full min-h-[4.5rem] w-full flex-col items-center gap-0.5 rounded-xl border px-0.5 py-1.5 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:items-stretch md:px-2 md:text-left',
                 isSel ? 'border-primary bg-primary/10' : 'bg-card hover:bg-accent',
                 d.isToday && !isSel && 'border-primary/50',
               )}
             >
+              {r.hasWarning && <AlertTriangle className="absolute right-0.5 top-0.5 h-3 w-3 text-warn" aria-hidden />}
               <span className="text-[11px] font-medium uppercase text-muted-foreground">{weekdayShort(d.weekday)}</span>
               <span className={cn('font-display text-lg font-bold leading-none tabular', d.isToday && 'text-primary')}>{Number(d.date.slice(8))}</span>
               <span className="mt-0.5 flex max-w-full items-center gap-0.5 text-xs leading-tight text-muted-foreground">
@@ -559,6 +636,9 @@ function WeekStrip({ days, selected, onSelect, routines }: { days: DayView[]; se
                   </li>
                 ))}
                 {d.activities.length === 0 && d.marker && <li className="truncate text-muted-foreground">{d.marker === 'rest' ? 'Descanso' : 'Livre'}</li>}
+                {r.origin === 'legacy' && r.legacy?.kind === 'workout' && (
+                  <li className="truncate italic text-muted-foreground">Sug. {r.legacy.workoutLabel ? `Treino ${r.legacy.workoutLabel}` : 'treino'}</li>
+                )}
                 {d.sessions.filter((s) => !s.entryId).length > 0 && <li className="truncate text-muted-foreground">+{d.sessions.filter((s) => !s.entryId).length} extra</li>}
               </ul>
             </button>
@@ -577,6 +657,7 @@ function StripLegend() {
     [Circle, 'planejado'],
     [Moon, 'descanso'],
     [CalendarClock, 'futuro'],
+    [AlertTriangle, 'divergência'],
     [Minus, 'sem plano'],
   ];
   return (
@@ -587,5 +668,30 @@ function StripLegend() {
         </li>
       ))}
     </ul>
+  );
+}
+
+/** Agenda anterior do dia: visível sempre, dizendo se define o dia (sem planejamento) ou não (planejamento tem prioridade). */
+function LegacySection({ day }: { day: ResolvedDay }) {
+  const e = day.entries.find((x) => x.origin.startsWith('legacy'));
+  if (!e || day.isPast) return null;
+  const defines = day.origin === 'legacy';
+  return (
+    <section aria-label="Agenda anterior" className="rounded-xl bg-secondary/40 p-3 text-sm" data-testid="plan-legacy" data-defines={defines ? 'true' : 'false'}>
+      <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Agenda anterior</h3>
+      <p className="break-words" data-testid="plan-legacy-text">
+        {entryLine(e)} · <span className="text-muted-foreground">{e.state}</span>
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        {defines
+          ? 'Sem planejamento para este dia: vale a sugestão da agenda anterior (dias de treino das Configurações e reagendamentos da tela Treinos). Ela não conta como atividade planejada.'
+          : 'O planejamento tem prioridade neste dia. A agenda anterior continua guardada, sem alteração.'}
+        {e.certainty === 'forecast' ? ' O treino indicado é previsão baseada na rotação atual.' : ''}
+        {e.certainty === 'undetermined' ? ' Treino a definir pela rotação.' : ''}
+      </p>
+      <Link to="/treinos" className="mt-1 inline-flex min-h-11 items-center text-xs font-medium text-primary underline-offset-4 hover:underline" data-testid="plan-legacy-link">
+        Consultar a agenda anterior em Treinos
+      </Link>
+    </section>
   );
 }

@@ -190,7 +190,10 @@ export default function SettingsPage() {
               );
             })}
           </div>
-          <p className="text-xs text-muted-foreground">A rotação segue nesses dias e continua de onde parou na semana seguinte.</p>
+          <p className="text-xs text-muted-foreground" data-testid="training-days-hint">
+            A rotação segue nesses dias e continua de onde parou na semana seguinte. Estes dias formam a agenda anterior: valem como sugestão nos dias sem planejamento
+            semanal (o planejamento tem prioridade no calendário).
+          </p>
         </div>
         <Row label="Descanso de compostos" hint="Padrão para novos exercícios">
           <NumField label="Descanso de compostos" integer max={900} value={s.restCompoundSec} onCommit={(v) => set({ restCompoundSec: v })} suffix="s" />
