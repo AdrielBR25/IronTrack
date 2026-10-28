@@ -182,3 +182,13 @@ mesmo se um treino for concluído durante a exportação. O JSON é indentado (l
 - Entrada inválida (`INVALID_PLAN_ENTRY`), ID repetido ou ligada a rotina de outro perfil bloqueia a restauração.
   Rotina ou treino inexistente gera aviso e a entrada é preservada (`PLAN_ROUTINE_MISSING`, `PLAN_WORKOUT_MISSING`).
 - Limite: 5000 entradas por arquivo.
+
+## Consolidação de agendas (P15)
+
+- Entradas criadas pela importação da agenda anterior são entradas de planejamento comuns: vão em `data.planEntries`
+  e seguem as regras acima (formato continua **v5**).
+- O registro do desfazer (`settings`, chave `planImport.last.<perfil>`) e as preferências do calendário
+  (`localStorage`) **não** entram no backup. "Substituir" e "Apagar tudo" apagam o registro do desfazer: depois disso a
+  última importação não pode mais ser desfeita (o planejamento pode ser editado normalmente).
+- Substituir por um backup anterior à importação volta ao planejamento antigo; a agenda anterior continua e pode ser
+  importada de novo. Ver [CONSOLIDACAO_AGENDAS.md](CONSOLIDACAO_AGENDAS.md).

@@ -181,3 +181,14 @@ anterior, seção "Agenda anterior" no dia selecionado, previsões da rotação 
 alteram só o planejamento semanal". O modelo `planEntries`, as regras de edição, o backup v5 e o Dexie v4 **não
 mudaram**. `?data=yyyy-mm-dd` abre um dia (usado pela Início e pela Treinos). Detalhes em
 [CALENDARIO_UNIFICADO.md](CALENDARIO_UNIFICADO.md).
+
+## 15. Consolidação de agendas (P15)
+
+- Nova operação pura `replaceDate` (`modules/planner/operations.ts`, gravada por `replacePlanDate`): deixa a data com
+  exatamente uma exceção (treino ou descanso), sem tocar o semanal; idempotente por ID e conferindo a frescura do dia.
+  Usada por "Usar a agenda antiga só neste dia" na central de divergências.
+- Importação assistida da agenda anterior (`modules/planner/legacyImport.ts`, `db/legacyImport.ts`): converte dias de
+  treino em entradas semanais "próximo da rotação" e reagendamentos em exceções, com prévia, três modos, transação
+  única, impressão digital e desfazer da última importação. As entradas criadas são entradas comuns de planejamento,
+  sem campo novo; Dexie v4 e backup v5 continuam.
+- Detalhes em [CONSOLIDACAO_AGENDAS.md](CONSOLIDACAO_AGENDAS.md).

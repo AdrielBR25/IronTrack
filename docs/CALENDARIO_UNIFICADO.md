@@ -190,9 +190,19 @@ Cada tela diz isso em texto. Não há migração automática do legado nem alter
 ## 15. Limitações
 
 - A agenda anterior considera só a **rotina ativa** (como sempre). Planejamento de outra rotina é comparado com ela.
-- "Manter planejamento atual" vale só enquanto a tela está aberta.
+- "Manter planejamento atual" vale só enquanto a tela está aberta (continua assim no P15, rotulado "só nesta tela").
 - Previsão: horizonte fixo de 14 dias; supõe que cada atividade planejada será concluída e avançará a rotação.
 - Conflitos com dias passados não são calculados (exceto treino fora do planejado).
 - A consistência de 4 semanas da Início, sem planejamento, continua a fórmula antiga (`consistency`) baseada nos dias de
   treino; com planejamento, a Início mostra os números do planejamento.
-- Não há "copiar agenda anterior para o planejamento" (seria migração; fica para uma etapa autorizada).
+- ~~Não há "copiar agenda anterior para o planejamento"~~ — desde o P15 existe a importação **assistida e opcional**
+  (prévia + confirmação), ver [CONSOLIDACAO_AGENDAS.md](CONSOLIDACAO_AGENDAS.md).
+
+## 16. Consolidação (P15)
+
+O P15 acrescentou, sem mudar as regras de precedência e de conflito acima: importação assistida da agenda anterior
+(`#/planejamento/importar`), central "Revisar divergências" (agrupa os conflitos deste documento, com "Usar a agenda
+antiga só neste dia" como única decisão gravada), preferências de exibição por aparelho (visão inicial Semana/Mês e
+o que mostrar) e `ResolvedDay.legacyAgrees` ("A agenda anterior indica o mesmo", sem repetir a atividade). `?visao=mes`
+e `?visao=semana` passaram a ser aceitos, e os links são aplicados também com a tela já aberta. Detalhes em
+[CONSOLIDACAO_AGENDAS.md](CONSOLIDACAO_AGENDAS.md).

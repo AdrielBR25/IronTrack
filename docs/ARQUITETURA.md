@@ -177,13 +177,15 @@ A sessão em andamento é gravada a cada ação (`saveSession`) e recuperada ao 
 
 ## 5. Persistência
 
-- Banco `irontrack`, Dexie **v4** (P12: tabela `goals`; P13: `planEntries`; P14 não mudou o esquema): tabelas
+- Banco `irontrack`, Dexie **v4** (P12: tabela `goals`; P13: `planEntries`; P14 e P15 não mudaram o esquema): tabelas
   `settings`, `profiles`, `routines`, `sessions`, `rotations`, `overrides`, `bodyEntries`, `photos`, `goals`, `planEntries`. Histórico em [MIGRACOES.md](MIGRACOES.md).
 - A instância `db` e o esquema ficam só em `src/db/db.ts`. As telas não a importam (regra testada).
 - Repositórios por domínio, com funções explícitas (`completeSession`, `importBodyEvaluations`). Não há
   repositório genérico: cada operação mantém sua regra de negócio e sua transação.
 - `dataTables()` é a lista única das tabelas de dados, usada pelo backup e por "apagar tudo".
 - Hooks Dexie de criação/atualização garantem o `profileId` (ver [PERFIL_LOCAL.md](PERFIL_LOCAL.md)).
+- P15: o registro do desfazer da importação mora em `settings` com a chave `planImport.last.<perfil>` (fora do backup,
+  apagado por "apagar tudo" e pela restauração por substituição). Ver [CONSOLIDACAO_AGENDAS.md](CONSOLIDACAO_AGENDAS.md).
 
 ## 6. Contratos e validações
 
@@ -419,3 +421,21 @@ Detalhes em [CALENDARIO_UNIFICADO.md](CALENDARIO_UNIFICADO.md).
 - **Reuso**: o dia do planejamento vem de `buildWeek` (P13); sessões de `countableSessions` (P12); agenda anterior de
   `projectSchedule`; rotação de `indexAfter`/`normIndex`. Nenhuma fórmula paralela.
 - **Navegação** continua com 6 itens.
+
+## 17. Consolidação de agendas (P15)
+
+Detalhes em [CONSOLIDACAO_AGENDAS.md](CONSOLIDACAO_AGENDAS.md).
+
+| Camada | Arquivo | Responsabilidade |
+| --- | --- | --- |
+| Domínio (puro) | `modules/planner/legacyImport.ts` | prévia determinística da importação (modos, decisões, impressão digital), plano do desfazer |
+| Domínio (puro) | `modules/planner/operations.ts` (`replaceDate`) | trocar as exceções de uma data por uma só |
+| Domínio (puro) | `modules/calendar/conflictCenter.ts` | agrupa os conflitos do P14 por tipo/gravidade, com origem, impacto e ações |
+| Banco | `db/legacyImport.ts` | leitura das fontes, aplicação e desfazer em transação `rw` única |
+| Hook | `hooks/useLegacyImport.ts` | fontes da importação e última importação (consultas ao vivo) |
+| Interface | `pages/LegacyImportPage.tsx` (rota sob demanda), `features/calendar/ConflictCenter.tsx`, `CalendarPrefsDialog.tsx`, `calendarPrefs.ts`, `MonthGrid.tsx` | prévia, central, preferências, grade mensal |
+
+- **Sem migração**: Dexie v4 e backup v5; o desfazer usa uma chave própria de `settings`.
+- **Preferências** em `localStorage` (`irontrack.calendarPrefs.v1`), por perfil, fora do banco e do backup.
+- **Regras testadas**: domínio puro; a importação só escreve `planEntries` e o registro; nada vai para IA ou rede;
+  `trainingDays`, `overrides`, sessões e rotação nunca são alterados.
