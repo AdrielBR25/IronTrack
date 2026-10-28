@@ -172,7 +172,9 @@ export async function markRestNotified(sessionId: string, endsAt: number, now = 
   return db.transaction('rw', db.sessions, async () => {
     const fresh = await db.sessions.get(sessionId);
     if (!fresh?.rest || fresh.rest.notified || fresh.rest.endsAt !== endsAt) return false;
-    await db.sessions.update(sessionId, { 'rest.notified': true, updatedAt: now } as never);
+    // A versão precisa avançar mesmo no mesmo milissegundo da gravação anterior: com `updatedAt` igual, a gravação
+    // protegida seguinte acharia que nada mudou e desfaria o aviso (P12: corrige teste intermitente do P11).
+    await db.sessions.update(sessionId, { 'rest.notified': true, updatedAt: Math.max(now, fresh.updatedAt + 1) } as never);
     return true;
   });
 }
