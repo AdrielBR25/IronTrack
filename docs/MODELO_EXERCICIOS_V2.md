@@ -1,8 +1,14 @@
-# Modelo de exercícios v2 (proposta)
+# Modelo de exercícios v2 (proposta do P09)
 
-IronTrack 2.0 · Fase 01 · Prompt 09. **Proposta para uma fase futura. Nada deste documento está implementado
-no banco, no editor ou no backup.** O banco continua na versão 2 do Dexie e o editor de treinos não grava
-nenhum campo novo. Os cálculos que usariam esses campos já existem como funções puras testadas com dados
+> **Situação (P10): implementado.** Os campos propostos aqui existem no app desde o Prompt 10, com as diferenças
+> registradas em [MIGRACAO_EXERCICIOS_V3.md](MIGRACAO_EXERCICIOS_V3.md), que é a referência atual:
+> distância gravada sempre em **metros** (`distanceUnit` só para exibição), metas de duração e distância por
+> exercício (`targetDurationSec`, `targetDistance`), assistência de 0 a 500 kg, **sem nova versão do Dexie**
+> (seção 4 abaixo foi revista: os campos não precisam de índice nem de transformação) e backup v3.
+> O texto abaixo é mantido como registro da proposta.
+
+IronTrack 2.0 · Fase 01 · Prompt 09. Proposta escrita quando nada disto estava implementado no banco, no editor
+ou no backup. Os cálculos que usariam esses campos já existem como funções puras testadas com dados
 fictícios em `src/modules/analytics/domain/modalities.ts` e `classification.ts` (ver
 [ANALYTICS_TREINAMENTO.md](ANALYTICS_TREINAMENTO.md), seções 15 a 22).
 

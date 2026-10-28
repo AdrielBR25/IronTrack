@@ -72,6 +72,8 @@ recomendada. As mensagens citam apenas coleção e ID — nunca nomes, medidas, 
 | `PROFILE_DEFAULT_DUPLICATE` | warning (local) | Mais de um perfil principal (o app usa o mais antigo). |
 | `RECORD_UNOWNED` | warning (local) / error (backup v2) | Registro sem `profileId`: legado não migrado no banco; arquivo adulterado no backup. |
 | `RECORD_PROFILE_UNKNOWN` | error | Dono inexistente; ou backup legado com `profileId` declarado. |
+| `INVALID_MODALITY_FIELD` | error | Campo de modalidade fora do vocabulário, do tipo ou dos limites (rotina ou treino; um problema por registro com até 3 exemplos). Ver [MIGRACAO_EXERCICIOS_V3.md](MIGRACAO_EXERCICIOS_V3.md) §2. |
+| `MODALITY_CONTRADICTION` | warning | Combinação contraditória (tipo de carga × modalidade, cardio unilateral, assistência com carga adicional, lado em exercício bilateral…). Dados preservados. |
 | `CROSS_PROFILE_REFERENCE` | error (warning em `settings`) | Treino → rotina ou foto → avaliação de outro perfil; rotina ativa de outro perfil. |
 
 As regras de perfil só rodam com contexto (`checkIntegrity(d, { scope, profiles })`): `local` (banco),

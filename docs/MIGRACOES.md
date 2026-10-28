@@ -10,6 +10,9 @@ Implementação em `src/db/db.ts`; testes em `tests/unit/migrations.test.ts`.
 | 2 | IronTrack 2.0 F01/P02 | Tabela `profiles` (`id`) e índice `profileId` em `routines`, `sessions`, `bodyEntries`, `photos` (ver [PERFIL_LOCAL.md](PERFIL_LOCAL.md)). |
 
 O Prompt 01 não alterou o esquema (só criou a infraestrutura). O Prompt 02 criou a versão 2 (`DB_SCHEMA_VERSION = 2`).
+O Prompt 10 (modelo de exercícios v3) **não** criou versão nova: os campos de modalidade ficam dentro dos registros,
+sem índice e sem transformação, e o app anterior continua abrindo o banco. Justificativa e testes em
+[MIGRACAO_EXERCICIOS_V3.md](MIGRACAO_EXERCICIOS_V3.md) §3.
 
 ## Migração v1 → v2 (perfil local)
 

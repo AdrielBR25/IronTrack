@@ -376,23 +376,36 @@ as métricas a partir dele (`exerciseAnalyses`).
 - Tendência: só repetições sem carga (condições comparáveis).
 - `bodyweightMetrics` (contrato) separa séries só com o corpo, com carga adicional, com assistência e
   incompatíveis (carga adicional e assistência ao mesmo tempo, descartadas). A melhor série é por condição;
-  `volumeKg` é sempre `null`. Assistência não existe no banco atual.
+  `volumeKg` é sempre `null`.
+- **P10:** a assistência (`assistanceKg`) é registrada no treino e chega a `bodyweightMetrics`. Séries assistidas
+  não contam como "repetições só com o corpo" (`maxUnloadedReps`). A página mostra o painel de peso corporal
+  (`bodyweight-metrics`): melhor série só com o corpo, com carga adicional e com menor assistência.
 
-## 18. Exercícios por tempo (P09, só contrato)
+## 18. Exercícios por tempo (P09 contrato; ligado no P10)
 
 `timedMetrics(sessões)` recebe a duração de cada série em segundos e devolve maior duração, duração total,
 séries e sessões com duração, séries inválidas e a tendência da maior duração por sessão (métrica `duracao`,
 limiar mínimo 5%). Durações vazias, zero, negativas ou não numéricas não entram. **Repetições nunca são lidas
-como segundos.** Como o banco não tem duração por série, a página mostra "Duração: indisponível".
+como segundos.**
 
-## 19. Unilaterais (P09, só contrato)
+**P10:** a duração por série (`durationSec`) existe e é lida **só** em exercícios com `modality = 'timed'`
+explícita; uma série por tempo sem duração válida fica fora e entra em `quality.invalidModalitySets`. A tendência
+do exercício passa a ser a de duração (`trend.metric = 'duracao'`); séries por tempo contam no total de séries e
+no grupo principal, mas nunca em repetições, volume ou 1RM. Exercícios antigos com o mesmo nome continuam com os
+números antigos: as repetições registradas antes da classificação não viram segundos.
+
+## 19. Unilaterais (P09 contrato; ligado no P10)
 
 `compareSides(séries)` agrupa séries por lado (`direito`, `esquerdo`, `ambos`, `desconhecido`) e compara
 repetições, volume e maior carga entre direito e esquerdo (`diff` = direito − esquerdo; `pct` relativo ao maior
 dos dois). Uma série registrada é uma série: nunca vira duas, e "ambos" ou lado desconhecido não são divididos.
 Disponível só com séries dos dois lados. É uma diferença registrada, **não** um diagnóstico de desequilíbrio.
 
-## 20. Cardio (P09, só contrato)
+**P10:** o lado (`side`) é escolhido em cada série de exercícios `laterality = 'unilateral'` (nunca pré-preenchido
+e nunca duplicado). `compareSides` roda só nesses exercícios; volume, séries e 1RM continuam contando cada série
+uma vez. Painel `side-metrics` na página.
+
+## 20. Cardio (P09 contrato; ligado no P10)
 
 `cardioMetrics(entradas, diasDaJanela)` aceita duração (s) e distância (`m`, `km`, `mi`, convertidas para
 metros; milha = 1609,344 m). Ritmo (s/km) e velocidade (km/h) só quando a mesma sessão tem os dois campos; as
@@ -400,7 +413,12 @@ médias são ponderadas (duração total ÷ distância total das sessões comple
 tinham o campo. Frequência semanal só com janela de 7 dias ou mais. Tendências separadas de duração e de
 distância. **Sem calorias, sem frequência cardíaca e sem avaliação de condicionamento.**
 
-## 21. Testes do P09
+**P10:** duração e distância (sempre em metros no registro) são lidas só com `modality = 'cardio'` explícita. A
+tendência do exercício usa uma métrica só: distância quando há ao menos tantas sessões com distância quanto com
+duração, senão duração. Cardio não tem volume, carga nem 1RM. Painel `cardio-metrics` (distância em km, ritmo
+em min/km e velocidade em km/h).
+
+## 21. Testes do P09 e do P10
 
 `tests/unit/analytics-advanced.test.ts`: normalização (acentos, caixa, espaços, sinônimos, desconhecidos,
 ambíguos, preservação do original, sem duplicar séries), classificação (carga, peso corporal, carga adicional,
@@ -413,12 +431,17 @@ intervalos irregulares, pausa no insight, modalidades separadas), explicações 
 desktop): nomes normalizados, tipo do exercício, método do 1RM, estados indisponíveis, explicações abertas pelo
 teclado, sem rolagem horizontal e sem `NaN`.
 
-## 22. Situação dos recursos (P09)
+P10: `tests/unit/exercise-model-analytics.test.ts` (tempo, cardio, lados, peso corporal, classificação explícita,
+registros antigos idênticos com e sem dados novos), `tests/unit/exercise-model-ui.test.tsx` (painel de
+modalidade) e `e2e/exercise-model.spec.ts`.
+
+## 22. Situação dos recursos (atualizada no P10)
 
 | Situação | Recursos |
 | --- | --- |
 | Implementado e disponível na tela | grupos normalizados com originais citados; ambíguos/desconhecidos à parte; tipo do exercício; métricas por tipo (carga externa × peso corporal); carga adicional separada; método do 1RM identificado; aviso de pausa longa; explicações dos indicadores; análises indisponíveis explicadas |
-| Implementado só como contrato/cálculo puro (testado com dados fictícios) | `timedMetrics`, `cardioMetrics`, `compareSides`, `bodyweightMetrics` com assistência, atributos explícitos de `classifyExercise`, `compareWithLegacyChart` |
-| Dependente de novos campos (MODELO_EXERCICIOS_V2.md) | duração por série, distância, lado, assistência, modalidade explícita, grupos secundários, unidades por exercício |
+| Implementado e ligado a dados reais (P10) | `timedMetrics`, `cardioMetrics`, `compareSides`, `bodyweightMetrics` com assistência, atributos explícitos de `classifyExercise`; métricas de duração e distância no gráfico do exercício; painel da modalidade ([MIGRACAO_EXERCICIOS_V3.md](MIGRACAO_EXERCICIOS_V3.md)) |
+| Implementado só como cálculo puro | `compareWithLegacyChart` |
+| Registrado mas sem análise própria | grupos secundários (informativos, não recebem séries) |
 | Adiado (precisa de autorização) | migração do 1RM do gráfico antigo e dos recordes antigos (seção 4); calibração dos limiares com dados reais; resumo para IA com os campos novos |
 

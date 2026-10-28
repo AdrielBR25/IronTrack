@@ -78,7 +78,8 @@ src/
       index.ts             API pública: importe sempre '@/modules/training'
       types.ts             Routine, Workout, ExerciseTemplate, WorkoutSession, SessionSet,
                            RestState, RotationState, DayOverride, ProgressionPrefs, RestDefaults…
-      routineSchema.ts     ficha JSON (irontrack.ficha v1): validação, importação, exportação
+      routineSchema.ts     ficha JSON (irontrack.ficha v1/v2): validação, importação, exportação
+      exerciseModel.ts     modalidades (P10): vocabulário, limites, validação e medidas por modalidade
       session.ts           montar, editar e concluir sessões; histórico; substituições
       rotation.ts          rotação ABC, políticas de avanço, agenda projetada
       progression.ts       motor de progressão dupla (determinístico)
@@ -114,7 +115,7 @@ src/
     profile.ts             LocalProfile e regras puras do perfil local
     integrity.ts           verificação de integridade referencial (pura)
     merge.ts               plano de mesclagem de backup (puro)
-    backupFormat.ts        contrato do backup JSON v0/v1/v2 (puro)
+    backupFormat.ts        contrato do backup JSON v0/v1/v2/v3 (puro)
     backup.ts              operações de backup no banco (transações); reexporta backupFormat
     alerts.ts, install.ts  APIs do navegador (som, vibração, notificação, instalação do PWA)
     session.ts, rotation.ts, … (11 arquivos)  reexportações @deprecated dos módulos (compatibilidade)
@@ -188,10 +189,10 @@ A sessão em andamento é gravada a cada ação (`saveSession`) e recuperada ao 
 
 | Contrato | Arquivo | Versões |
 | --- | --- | --- |
-| Ficha de treino `irontrack.ficha` | `modules/training/routineSchema.ts` | 1 ([FICHA_JSON.md](FICHA_JSON.md)) |
+| Ficha de treino `irontrack.ficha` | `modules/training/routineSchema.ts` | 1, 2 ([FICHA_JSON.md](FICHA_JSON.md)) |
 | Avaliações `irontrack.avaliacoes` | `modules/body/bodySchema.ts` | 1 |
-| Backup `irontrack` / `backup` | `lib/backupFormat.ts` | 0, 1, 2 ([BACKUP_RESTAURACAO.md](BACKUP_RESTAURACAO.md)) |
-| Registros persistidos | `modules/*/types.ts`, `lib/types.ts`, `lib/profile.ts` | Dexie v2 |
+| Backup `irontrack` / `backup` | `lib/backupFormat.ts` | 0, 1, 2, 3 ([BACKUP_RESTAURACAO.md](BACKUP_RESTAURACAO.md)) |
+| Registros persistidos | `modules/*/types.ts`, `lib/types.ts`, `lib/profile.ts` | Dexie v2 (campos de modalidade do P10 dentro dos registros) |
 
 Os três formatos usam `lib/validation.ts` (`parseJsonText`, `formatZodError`). Cada formato informa seus
 rótulos de caminho: a ficha usa "Treino N › Exercício N"; avaliações reescrevem "Avaliação N"; o backup
@@ -201,7 +202,8 @@ mostra o caminho técnico. As mensagens são as mesmas de antes (caracterizadas 
 Convenções de unidade: pesos sempre em **kg** no banco e nos arquivos (carga total externa); lb só na
 exibição (`lib/units.ts`, arredondamento de 0,01 na exibição e 0,001 na gravação). Circunferências em cm,
 dobras em mm, gordura em %, datas de avaliação e de agenda como `yyyy-mm-dd` local, instantes como
-timestamp em ms. Descansos em segundos.
+timestamp em ms. Descansos e durações em segundos; distâncias em **metros** (m, km ou milhas só na exibição e
+digitação, conforme `distanceUnit` do exercício).
 
 ## 7. Dependências permitidas
 
@@ -230,8 +232,9 @@ timestamp em ms. Descansos em segundos.
 3. `training` ↔ `body` em qualquer direção.
 4. Arquivo interno de um domínio importado de fora dele (só `index.ts` é público).
 5. Telas e componentes importando `dexie`, `dexie-react-hooks` ou a instância `db`.
-6. `src/lib` importando React, hooks ou telas; `src/lib` importando domínios (exceto `types.ts` e as
-   reexportações); regras puras (`validation`, `integrity`, `merge`, `profile`, `backupFormat`, `dates`,
+6. `src/lib` importando React, hooks ou telas; `src/lib` importando domínios (exceto `types.ts`, as
+   reexportações e `lib/integrity.ts` → `modules/training/index.ts`, exceção documentada no P10 para validar os
+   campos de modalidade com as mesmas regras do domínio, sem duplicá-las); regras puras (`validation`, `integrity`, `merge`, `profile`, `backupFormat`, `dates`,
    `units`, `defaults`, `types`, `utils`) importando o banco.
 7. `src/db` importando React, `sonner`, hooks ou telas.
 8. Código novo usando os caminhos `@deprecated` de `src/lib` (`session`, `rotation`, `progression`,
@@ -310,7 +313,13 @@ Nada disto existe ainda; estes são os lugares previstos, sem interfaces antecip
 | Fotos como data URL no IndexedDB | `ProgressPhoto.dataUrl` | Mudar o armazenamento exige migração e nova versão do backup. |
 | Remover os caminhos `@deprecated` | 11 arquivos em `src/lib` | Remover depois que os testes antigos migrarem para `@/modules/*`; o teste de arquitetura já impede usos novos. |
 
-## 12. Modelo de exercícios (P09)
+## 12. Modelo de exercícios (P09 → P10)
+
+> **P10:** o modelo foi implementado. Vocabulário, limites e validação em `modules/training/exerciseModel.ts`
+> (puro, exportado pelo `index.ts`); campos opcionais em `ExerciseTemplate`, `SessionExercise` e `SessionSet`;
+> integridade com `INVALID_MODALITY_FIELD` (erro) e `MODALITY_CONTRADICTION` (aviso); backup v3; ficha versão 2.
+> O Dexie **continua na v2** (campos dentro dos registros, sem índice). Detalhes em
+> [MIGRACAO_EXERCICIOS_V3.md](MIGRACAO_EXERCICIOS_V3.md). O parágrafo abaixo descreve a situação do P09.
 
 O banco continua na **v2** e o editor de treinos não grava campos novos. A análise avançada (P09) trabalha só
 com o que já existe por exercício (`muscleGroup`, `equipment`, `category`) e por série (`weight`, `reps`,

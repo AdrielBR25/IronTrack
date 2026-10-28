@@ -8,10 +8,11 @@ Interface em **Configurações › Dados e backup**.
 
 | Formato | Identificação | Situação |
 | ------- | ------------- | -------- |
-| Backup v2 (atual) | `{"app": "irontrack", "kind": "backup", "schemaVersion": 2, "exportedAt": "...", "profile": {"id", "displayName", "createdAt"}, "data": {...}}`; registros de `routines`, `sessions`, `bodyEntries` e `photos` com `profileId` | Exportado e importado. |
-| Backup v1 | `{"app": "irontrack", "kind": "backup", "schemaVersion": 1, "exportedAt": "...", "data": {...}}` | Importado; migrado em memória para v2 com `profile: null` (legado sem dono). |
-| Backup v0 (preliminar) | `{"app": "irontrack", ...tabelas na raiz}` sem `schemaVersion` | Importado; migrado em memória v0 → v1 → v2. |
-| Ficha `irontrack.ficha` v1 | — | Não é backup: recusada com orientação para Treinos › Importar ficha. |
+| Backup v3 (atual, P10) | igual ao v2 com `"schemaVersion": 3`; exercícios e séries podem ter os campos de modalidade (`modality`, `laterality`, `loadMode`, `secondaryMuscles`, `distanceUnit`, `targetDurationSec`, `targetDistance`, `durationSec`, `distance`, `side`, `assistanceKg`), ver [MIGRACAO_EXERCICIOS_V3.md](MIGRACAO_EXERCICIOS_V3.md) | Exportado e importado. Valores inválidos bloqueiam (`INVALID_MODALITY_FIELD`); contradições são aviso (`MODALITY_CONTRADICTION`). |
+| Backup v2 | `{"app": "irontrack", "kind": "backup", "schemaVersion": 2, "exportedAt": "...", "profile": {"id", "displayName", "createdAt"}, "data": {...}}`; registros de `routines`, `sessions`, `bodyEntries` e `photos` com `profileId` | Importado; migrado em memória v2 → v3 (identidade, nada muda). |
+| Backup v1 | `{"app": "irontrack", "kind": "backup", "schemaVersion": 1, "exportedAt": "...", "data": {...}}` | Importado; migrado em memória para v2 com `profile: null` (legado sem dono) e depois para v3. |
+| Backup v0 (preliminar) | `{"app": "irontrack", ...tabelas na raiz}` sem `schemaVersion` | Importado; migrado em memória v0 → v1 → v2 → v3. |
+| Ficha `irontrack.ficha` v1/v2 | — | Não é backup: recusada com orientação para Treinos › Importar ficha. |
 | Avaliações `irontrack.avaliacoes` v1 | — | Importadas em Evolução › Corpo (contrato inalterado). |
 | `schemaVersion` maior que o suportado | — | Recusado: "Atualize o IronTrack antes de importar". |
 
@@ -23,6 +24,8 @@ Campos desconhecidos são preservados (`.passthrough()`), para que backups de ve
 - `BACKUP_SCHEMA_VERSION` (formato JSON) e `DB_SCHEMA_VERSION` (IndexedDB) são **independentes**.
 - Mudou o formato do arquivo? Incremente `BACKUP_SCHEMA_VERSION` e acrescente uma função em `MIGRATIONS`
   (chave = versão de origem) que leve à versão seguinte. Nunca remova migrações antigas.
+- v2 → v3 (P10) é identidade: o incremento existe para que um app antigo recuse arquivos com campos de modalidade
+  em vez de restaurá-los sem entendê-los.
 - Os arquivos do usuário nunca são reescritos; a migração acontece apenas em memória.
 
 ## Fluxo de importação (nada é gravado antes do passo 8)
@@ -30,7 +33,7 @@ Campos desconhecidos são preservados (`.passthrough()`), para que backups de ve
 1. Tamanho do arquivo conferido antes da leitura (limite de 100 MB).
 2. Interpretação do JSON.
 3. Identificação do formato e da versão.
-4. Migrações de formato (v0 → v1 → v2).
+4. Migrações de formato (v0 → v1 → v2 → v3).
 5. Validação estrutural com Zod e limites de complexidade.
 6. Verificação de integridade semântica (`checkBackupIntegrity`, inclui as regras de dono do formato); erros bloqueiam.
 7. Prévia (`previewRestore`): mostra a relação de identidade (mesmo perfil, legado ou outro perfil), compara com os
