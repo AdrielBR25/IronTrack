@@ -8,7 +8,9 @@ Interface em **Configurações › Dados e backup**.
 
 | Formato | Identificação | Situação |
 | ------- | ------------- | -------- |
-| Backup v3 (atual, P10) | igual ao v2 com `"schemaVersion": 3`; exercícios e séries podem ter os campos de modalidade (`modality`, `laterality`, `loadMode`, `secondaryMuscles`, `distanceUnit`, `targetDurationSec`, `targetDistance`, `durationSec`, `distance`, `side`, `assistanceKg`), ver [MIGRACAO_EXERCICIOS_V3.md](MIGRACAO_EXERCICIOS_V3.md) | Exportado e importado. Valores inválidos bloqueiam (`INVALID_MODALITY_FIELD`); contradições são aviso (`MODALITY_CONTRADICTION`). |
+| Backup v5 (atual, P13) | igual ao v4 com `"schemaVersion": 5` e `data.planEntries` (planejamento semanal) | Exportado e importado (ver seção "Planejamento semanal"). |
+| Backup v4 (P12) | igual ao v3 com `data.goals` | Importado; v4 → v5 acrescenta `planEntries: []`. |
+| Backup v3 (P10) | igual ao v2 com `"schemaVersion": 3`; exercícios e séries podem ter os campos de modalidade (`modality`, `laterality`, `loadMode`, `secondaryMuscles`, `distanceUnit`, `targetDurationSec`, `targetDistance`, `durationSec`, `distance`, `side`, `assistanceKg`), ver [MIGRACAO_EXERCICIOS_V3.md](MIGRACAO_EXERCICIOS_V3.md) | Exportado e importado. Valores inválidos bloqueiam (`INVALID_MODALITY_FIELD`); contradições são aviso (`MODALITY_CONTRADICTION`). |
 | Backup v2 | `{"app": "irontrack", "kind": "backup", "schemaVersion": 2, "exportedAt": "...", "profile": {"id", "displayName", "createdAt"}, "data": {...}}`; registros de `routines`, `sessions`, `bodyEntries` e `photos` com `profileId` | Importado; migrado em memória v2 → v3 (identidade, nada muda). |
 | Backup v1 | `{"app": "irontrack", "kind": "backup", "schemaVersion": 1, "exportedAt": "...", "data": {...}}` | Importado; migrado em memória para v2 com `profile: null` (legado sem dono) e depois para v3. |
 | Backup v0 (preliminar) | `{"app": "irontrack", ...tabelas na raiz}` sem `schemaVersion` | Importado; migrado em memória v0 → v1 → v2 → v3. |
@@ -16,7 +18,7 @@ Interface em **Configurações › Dados e backup**.
 | Avaliações `irontrack.avaliacoes` v1 | — | Importadas em Evolução › Corpo (contrato inalterado). |
 | `schemaVersion` maior que o suportado | — | Recusado: "Atualize o IronTrack antes de importar". |
 
-`data` contém `settings`, `routines`, `sessions`, `rotations`, `overrides`, `bodyEntries` e `photos`.
+`data` contém `settings`, `routines`, `sessions`, `rotations`, `overrides`, `bodyEntries`, `photos`, `goals` (v4+) e `planEntries` (v5+).
 Campos desconhecidos são preservados (`.passthrough()`), para que backups de versões futuras compatíveis não percam dados.
 
 ## Versionamento
@@ -24,6 +26,8 @@ Campos desconhecidos são preservados (`.passthrough()`), para que backups de ve
 - `BACKUP_SCHEMA_VERSION` (formato JSON) e `DB_SCHEMA_VERSION` (IndexedDB) são **independentes**.
 - Mudou o formato do arquivo? Incremente `BACKUP_SCHEMA_VERSION` e acrescente uma função em `MIGRATIONS`
   (chave = versão de origem) que leve à versão seguinte. Nunca remova migrações antigas.
+- v4 → v5 (P13) acrescenta `data.planEntries: []` (planejamento semanal; ver [PLANEJAMENTO_SEMANAL.md](PLANEJAMENTO_SEMANAL.md) §8).
+  Um app anterior recusa arquivos v5 com a orientação de atualizar.
 - v3 → v4 (P12) acrescenta `data.goals: []` (metas de treinamento; ver [METAS_TREINAMENTO.md](METAS_TREINAMENTO.md) §5).
   Um app anterior recusa arquivos v4 com a orientação de atualizar.
 - v2 → v3 (P10) é identidade: o incremento existe para que um app antigo recuse arquivos com campos de modalidade
@@ -165,3 +169,16 @@ mesmo se um treino for concluído durante a exportação. O JSON é indentado (l
 - Meta inválida (`INVALID_GOAL`), com ID repetido ou de outro perfil bloqueia a restauração inteira; metas nunca são
   descartadas em silêncio. Meta cujo exercício não está mais na ficha só gera aviso (`GOAL_EXERCISE_UNAVAILABLE`).
 - Limite: 2000 metas por arquivo.
+
+## Planejamento semanal (backup v5, P13)
+
+- Exportado em `data.planEntries` com todos os campos (ID, vigência, versão, origem das exceções).
+- **Substituir** troca o planejamento pelo do arquivo; um backup v0–v4 não tem planejamento e substituir por ele
+  **apaga o planejamento local** (a prévia mostra a contagem "Planejamento").
+- **Mesclar:** ID novo acrescentado; ID igual com conteúdo diferente mantém o local (conflito, exige confirmar a
+  restauração parcial); conteúdo igual com outro ID, ou a mesma atividade vigente no mesmo dia, é duplicata; a rotina
+  é remapeada quando a do arquivo já existe aqui com outro ID; entrada de rotina em conflito cujo treino só existe na
+  versão do backup não é aplicada (`ROUTINE_CONFLICT_DEPENDENT`).
+- Entrada inválida (`INVALID_PLAN_ENTRY`), ID repetido ou ligada a rotina de outro perfil bloqueia a restauração.
+  Rotina ou treino inexistente gera aviso e a entrada é preservada (`PLAN_ROUTINE_MISSING`, `PLAN_WORKOUT_MISSING`).
+- Limite: 5000 entradas por arquivo.

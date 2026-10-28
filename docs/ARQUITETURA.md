@@ -1,6 +1,6 @@
 # Arquitetura
 
-IronTrack 2.0 · Fase 01 · Prompt 03 (atualizado nos Prompts 04–07 com o módulo de IA e o gateway, no Prompt 08 com o motor de análise de treinos e no Prompt 09 com a análise avançada de exercícios). Descreve a organização do
+IronTrack 2.0 · Fase 01 · Prompt 03 (atualizado nos Prompts 04–07 com o módulo de IA e o gateway, no Prompt 08 com o motor de análise de treinos e no Prompt 09 com a análise avançada de exercícios; seções 12–15 cobrem os Prompts 10–13). Descreve a organização do
 código depois da modularização incremental, as dependências permitidas e as que os testes bloqueiam. O
 módulo de IA tem documento próprio: [IA_ARQUITETURA.md](IA_ARQUITETURA.md); o de análise de treinos, [ANALYTICS_TREINAMENTO.md](ANALYTICS_TREINAMENTO.md). As regras automáticas estão em
 `tests/unit/architecture.test.ts`; a compatibilidade dos imports antigos, em `tests/unit/api-compat.test.ts`.
@@ -377,3 +377,23 @@ Detalhes em [METAS_TREINAMENTO.md](METAS_TREINAMENTO.md).
 - **Dexie v3** só acrescenta a tabela `goals`; nenhum registro antigo é transformado.
 - **Progresso nunca é gravado**: é recalculado a partir das sessões a cada leitura.
 - **Navegação** continua com 6 itens: `#/metas` abre por Evolução e Análise e destaca "Evolução".
+
+## 15. Planejamento semanal (P13)
+
+Detalhes em [PLANEJAMENTO_SEMANAL.md](PLANEJAMENTO_SEMANAL.md).
+
+| Camada | Arquivo | Responsabilidade |
+| --- | --- | --- |
+| Domínio (puro) | `modules/planner/types.ts`, `validation.ts`, `calendar.ts` | modelo, validação, calendário local (segunda a domingo) |
+| Domínio (puro) | `modules/planner/operations.ts` | recorrência com vigência, exceções, conflitos (revisão e impressão digital do dia) |
+| Domínio (puro) | `modules/planner/week.ts`, `goals.ts` | planejado × realizado, consistência, metas semanais (motor do P12) |
+| Persistência | `db/planner.ts` | aplica as regras numa transação rw; só escreve em `planEntries` |
+| Hook | `hooks/usePlanner.ts` | entradas, sessões e rotação (consultas ao vivo, só leitura fora do planejamento) |
+| Interface | `pages/WeeklyPlannerPage.tsx`, `features/planner/*` | tela `#/planejamento`, formulário, resumo |
+
+- **Dependências do domínio**: só as APIs públicas de `training`, `analytics` e `goals` (testado). Sem React, Dexie,
+  rede, storage, relógio ou aleatoriedade. `lib/integrity.ts` valida entradas pela API pública (mesma exceção do P12).
+- **Dexie v4** só acrescenta `planEntries`; **backup v5** acrescenta `data.planEntries`.
+- **Rotação**: o planejamento só lê o ponteiro; iniciar reutiliza `startSession`/`useStartWorkout`.
+- **Navegação** continua com 6 itens: `#/planejamento` abre por Treinos e Início e destaca "Treinos".
+- **Privacidade**: IA, integrações e assistente não importam o planejamento (testado).

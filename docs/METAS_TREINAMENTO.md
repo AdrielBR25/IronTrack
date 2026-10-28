@@ -175,3 +175,10 @@ alterada é recusada).
 - `tests/unit/architecture.test.ts`: pureza, privacidade, rota sob demanda.
 - `e2e/goals.spec.ts` (Android 360 px e desktop): perfil → ficha → meta → treino → atingida → conquista → backup →
   restauração → offline → duas abas → sem rolagem horizontal.
+
+## 14. Uso pelo planejamento semanal (P13)
+
+O painel `#/planejamento` mostra as metas de frequência semanal chamando `computeGoalProgress` e escolhendo a semana
+exibida em `weekly.weeks` (e até 4 anteriores). Nenhuma fórmula foi duplicada: as sessões contadas pelo painel usam
+`countableSessions`, exportado por este módulo. Descanso planejado não afeta metas; metas não leem o planejamento.
+Detalhes em [PLANEJAMENTO_SEMANAL.md](PLANEJAMENTO_SEMANAL.md) §6. Backup atual: v5 (metas continuam em `data.goals`).

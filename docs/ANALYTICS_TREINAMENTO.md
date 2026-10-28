@@ -471,3 +471,12 @@ modalidade) e `e2e/exercise-model.spec.ts`.
 - As metas são associadas aos exercícios pelo ID da ficha; o gráfico só recebe a linha quando alguma sessão da meta
   tem o mesmo `exerciseKey` do gráfico (nunca por nome digitado).
 - Detalhes em [METAS_TREINAMENTO.md](METAS_TREINAMENTO.md).
+
+## 25. Prompt 13: planejamento semanal
+
+- O planejamento (`src/modules/planner`) usa a API pública do analytics só para o calendário: `weekStart` (semana de
+  segunda a domingo) e `localDate` (dia local de uma sessão). Nenhuma métrica, fórmula ou limiar mudou; o 1RM
+  histórico continua como estava (decisão do P09 pendente).
+- A consistência do painel (sessões, dias com treino, planejadas, realizadas, extras) é calculada no planejamento,
+  com as sessões contadas pelas regras das metas; a frequência semanal da página de análise não mudou.
+- Detalhes em [PLANEJAMENTO_SEMANAL.md](PLANEJAMENTO_SEMANAL.md).
