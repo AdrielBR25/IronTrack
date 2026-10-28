@@ -11,7 +11,8 @@ import { Suspense, useEffect } from 'react';
 export const NAV: { to: string; label: string; icon: typeof Home; end?: boolean; title?: string; ariaLabel?: string; also?: string[] }[] = [
   { to: '/', label: 'Início', icon: Home, end: true },
   // P13: o planejamento semanal (#/planejamento) fica dentro de Treinos, sem novo item na barra.
-  { to: '/treinos', label: 'Treinos', icon: Dumbbell, also: ['/planejamento'] },
+  // P17: a biblioteca de exercícios (#/exercicios) também (a barra do celular já tem 6 itens em 360 px).
+  { to: '/treinos', label: 'Treinos', icon: Dumbbell, also: ['/planejamento', '/exercicios'] },
   { to: '/historico', label: 'Histórico', icon: History },
   // P12: as metas (#/metas) ficam dentro de Evolução, sem novo item na barra.
   { to: '/evolucao', label: 'Evolução', icon: BarChart3, also: ['/metas'] },

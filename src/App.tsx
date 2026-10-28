@@ -21,6 +21,8 @@ const WeeklyPlannerPage = lazy(() => import('@/pages/WeeklyPlannerPage'));
 const LegacyImportPage = lazy(() => import('@/pages/LegacyImportPage'));
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'));
 const AIAssistantPage = lazy(() => import('@/pages/AIAssistantPage'));
+// P17: biblioteca de exercícios sob demanda (o catálogo só é baixado com esta tela; depois fica no cache do PWA).
+const ExerciseLibraryPage = lazy(() => import('@/pages/ExerciseLibraryPage'));
 import { useSettings } from '@/hooks/data';
 
 export default function App() {
@@ -37,6 +39,7 @@ export default function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/treinos" element={<WorkoutsPage />} />
           <Route path="/treinos/:routineId/:workoutId" element={<WorkoutEditorPage />} />
+          <Route path="/exercicios" element={<ExerciseLibraryPage />} />
           <Route path="/historico" element={<HistoryPage />} />
           <Route path="/historico/:id" element={<SessionDetailPage />} />
           <Route path="/evolucao" element={<ProgressPage />} />

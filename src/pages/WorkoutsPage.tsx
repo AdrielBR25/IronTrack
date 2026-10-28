@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { AlertTriangle, CalendarClock, CalendarDays, Check, Coffee, Copy, Download, FileUp, Minus, MoreVertical, Moon, Pencil, Play, Plus, SkipForward, Sparkles, Trash2, Undo2 } from 'lucide-react';
+import { AlertTriangle, CalendarClock, CalendarDays, Check, Coffee, Copy, Download, Eye, FileUp, Library, Minus, MoreVertical, Moon, Pencil, Play, Plus, SkipForward, Sparkles, Trash2, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PageHeader } from '@/components/AppLayout';
+import { WorkoutPreviewDialog } from '@/features/library/WorkoutPreviewDialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -330,6 +331,7 @@ function WorkoutRow({ routine, workout, handle }: { routine: Routine; workout: W
   const active = useActiveSession();
   const [menu, setMenu] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [preview, setPreview] = useState(false);
   const groups = [...new Set(workout.exercises.map((e) => e.muscleGroup))];
   return (
     <Card className="flex items-center gap-2 p-2 pr-3">
@@ -359,6 +361,18 @@ function WorkoutRow({ routine, workout, handle }: { routine: Routine; workout: W
             </Button>
             <Button variant="secondary" size="lg" className="justify-start" onClick={() => navigate(`/treinos/${routine.id}/${workout.id}`)}>
               <Pencil /> Editar exercícios
+            </Button>
+            <Button
+              variant="secondary"
+              size="lg"
+              className="justify-start"
+              onClick={() => {
+                setMenu(false);
+                setPreview(true);
+              }}
+              data-testid="workout-preview-open"
+            >
+              <Eye /> Ver prévia da ficha
             </Button>
             <Button
               variant="secondary"
@@ -400,6 +414,17 @@ function WorkoutRow({ routine, workout, handle }: { routine: Routine; workout: W
           toast('Treino excluído');
         }}
       />
+      <WorkoutPreviewDialog
+        open={preview}
+        onOpenChange={setPreview}
+        workout={workout}
+        routineName={routine.name}
+        startDisabledReason={active ? 'Já há um treino em andamento: conclua ou descarte antes de iniciar outro.' : null}
+        onStart={() => {
+          setPreview(false);
+          void start(routine.id, workout.id);
+        }}
+      />
     </Card>
   );
 }
@@ -425,6 +450,9 @@ export default function WorkoutsPage() {
         subtitle="Rotinas, rotação e fichas"
         action={
           <div className="flex gap-2">
+            <Button variant="outline" size="icon" aria-label="Biblioteca de exercícios" title="Biblioteca de exercícios" onClick={() => navigate('/exercicios')} data-testid="open-library">
+              <Library />
+            </Button>
             <Button variant="outline" size="icon" aria-label="Planejamento semanal" title="Planejamento semanal" onClick={() => navigate('/planejamento')} data-testid="open-planner">
               <CalendarDays />
             </Button>
