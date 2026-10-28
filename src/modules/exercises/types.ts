@@ -88,6 +88,8 @@ export interface CatalogExercise {
   source: 'irontrack-base';
   /** Versão da entrada; sobe quando o conteúdo da entrada muda. A instância guarda a versão copiada. */
   version: number;
+  /** Versão do catálogo (CATALOG_VERSION) em que a entrada apareceu pela primeira vez (P18). */
+  since: number;
 }
 
 /** Exercício personalizado (tabela `customExercises`, Dexie v6, backup v7). */

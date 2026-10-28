@@ -10,18 +10,22 @@
 // dificuldade = complexidade técnica geral, nunca avaliação médica; nenhuma carga ou prescrição individual.
 // Exercícios citados em mais de uma categoria do prompt aparecem UMA vez (ex.: flexão, barra fixa, prancha, afundo):
 // as categorias são filtros (modalidade, lateralidade, equipamento), não cópias.
+//
+// Versionamento (P18, docs/BIBLIOTECA_EXERCICIOS.md §21): CATALOG_VERSION 1 = as 53 entradas do P17; 2 = expansão do
+// P18 (entradas em ./expansion.ts, com `since: 2`). IDs publicados nunca são removidos, renomeados nem reaproveitados;
+// uma entrada descontinuada iria para RETIRED_CATALOG_IDS (hoje vazia) e continuaria resolvível para as fichas antigas.
+// Nada é redirecionado sozinho: uma ficha que guarda `triceps-polia` v1 continua apontando para `triceps-polia`.
 import type { CatalogExercise } from '../types';
+import { buildExpansion } from './expansion';
+import { LOAD, PAIN, type Entry } from './entry';
 
 /** Versão do catálogo como um todo (sobe quando entradas são acrescentadas ou alteradas). */
-export const CATALOG_VERSION = 1;
+export const CATALOG_VERSION = 2;
 
-type Entry = Omit<CatalogExercise, 'source' | 'version' | 'aliases' | 'secondaryMuscles' | 'tags' | 'commonMistakes'> &
-  Partial<Pick<CatalogExercise, 'version' | 'aliases' | 'secondaryMuscles' | 'tags' | 'commonMistakes'>>;
+/** IDs retirados do catálogo (nunca reutilizados). Vazio: nenhuma entrada foi descontinuada até a versão 2. */
+export const RETIRED_CATALOG_IDS: readonly string[] = [];
 
-const e = (x: Entry): CatalogExercise => ({ aliases: [], secondaryMuscles: [], tags: [], commonMistakes: [], version: 1, ...x, source: 'irontrack-base' });
-
-const PAIN = 'Interrompa se sentir dor (diferente do esforço muscular).';
-const LOAD = 'Use uma carga que permita manter a técnica em todas as repetições.';
+const e = (x: Entry): CatalogExercise => ({ aliases: [], secondaryMuscles: [], tags: [], commonMistakes: [], version: 1, since: 1, ...x, source: 'irontrack-base' });
 
 // O catálogo é montado por uma função (sem efeitos no carregamento do módulo): assim o empacotador o elimina de quem
 // não o usa (ex.: a verificação de integridade no pacote principal) e ele só viaja no pedaço da tela da biblioteca.
@@ -350,8 +354,10 @@ const build = (): CatalogExercise[] => [
   // ---------- Tríceps ----------
   e({
     catalogId: 'triceps-polia',
+    // v2 (catálogo 2): o apelido "tríceps corda" virou a entrada própria `triceps-corda`; esta é a versão com barra.
+    version: 2,
     name: 'Tríceps na polia',
-    aliases: ['tríceps pulley', 'tríceps corda', 'tríceps barra na polia', 'pushdown'],
+    aliases: ['tríceps pulley', 'tríceps barra na polia', 'tríceps barra reta', 'pushdown'],
     modality: 'resistance',
     primaryMuscles: ['triceps'],
     equipment: ['polia'],
@@ -360,7 +366,7 @@ const build = (): CatalogExercise[] => [
     loadMode: 'externa',
     mechanics: 'isolation',
     difficulty: 'iniciante',
-    instructions: ['De frente para a polia, segure a barra ou corda com os cotovelos junto ao corpo.', 'Estenda os cotovelos levando as mãos para baixo.', 'Volte devagar sem afastar os cotovelos do corpo.'],
+    instructions: ['De frente para a polia, segure a barra com os cotovelos junto ao corpo.', 'Estenda os cotovelos levando as mãos para baixo.', 'Volte devagar sem afastar os cotovelos do corpo.'],
     commonMistakes: ['Inclinar o tronco sobre a carga.', 'Deixar os cotovelos subirem.'],
     safetyNotes: [PAIN],
   }),
@@ -488,8 +494,10 @@ const build = (): CatalogExercise[] => [
   }),
   e({
     catalogId: 'afundo',
+    // v2 (catálogo 2): o apelido "passada" virou a entrada própria `passada` (deslocando-se a cada passo).
+    version: 2,
     name: 'Afundo',
-    aliases: ['avanço', 'passada', 'lunge', 'afundo com halteres'],
+    aliases: ['avanço', 'lunge', 'afundo com halteres'],
     modality: 'resistance',
     primaryMuscles: ['quadriceps'],
     secondaryMuscles: ['gluteos', 'adutores'],
@@ -683,8 +691,10 @@ const build = (): CatalogExercise[] => [
   }),
   e({
     catalogId: 'elevacao-de-pernas',
+    // v2 (catálogo 2): o apelido "abdominal infra" passou para a entrada própria `abdominal-infra` (abdominal reverso).
+    version: 2,
     name: 'Elevação de pernas',
-    aliases: ['elevação de pernas deitado', 'abdominal infra', 'leg raise'],
+    aliases: ['elevação de pernas deitado', 'leg raise'],
     modality: 'bodyweight',
     primaryMuscles: ['abdomen'],
     equipment: ['peso_corporal'],
@@ -954,21 +964,24 @@ const build = (): CatalogExercise[] => [
   // ---------- Unilaterais (os demais já estão acima: rosca alternada, remada unilateral, afundo, extensora) ----------
   e({
     catalogId: 'elevacao-lateral-unilateral',
+    // v2 (catálogo 2): a versão na polia virou a entrada própria `elevacao-lateral-polia`; esta é a versão com halter.
+    version: 2,
     name: 'Elevação lateral unilateral',
-    aliases: ['elevação lateral com um braço', 'elevação lateral unilateral na polia'],
+    aliases: ['elevação lateral com um braço', 'elevação lateral unilateral com halter'],
     modality: 'resistance',
     primaryMuscles: ['ombros'],
-    equipment: ['halteres', 'polia'],
+    equipment: ['halteres'],
     movementPattern: 'isolado_superior',
     laterality: 'unilateral',
     loadMode: 'externa',
     mechanics: 'isolation',
     difficulty: 'iniciante',
-    instructions: ['Em pé, segure o halter (ou a polia baixa) com uma mão; a outra pode apoiar o corpo.', 'Eleve o braço pela lateral até perto da altura do ombro.', 'Desça devagar e repita do outro lado.'],
+    instructions: ['Em pé, segure o halter com uma mão; a outra pode apoiar o corpo.', 'Eleve o braço pela lateral até perto da altura do ombro.', 'Desça devagar e repita do outro lado.'],
     commonMistakes: ['Inclinar o tronco para ajudar.'],
     safetyNotes: [PAIN],
     tags: ['unilateral'],
   }),
+  ...buildExpansion(),
 ];
 
 let cache: readonly CatalogExercise[] | null = null;

@@ -76,7 +76,7 @@ const routineOf = (exercises: ExerciseTemplate[], over: Partial<Routine> = {}): 
 
 describe('catálogo padrão', () => {
   it('tem os exercícios pedidos, sem IDs repetidos e com IDs estáveis (slug, nunca cx_)', () => {
-    expect(catalog.length).toBeGreaterThanOrEqual(50);
+    expect(catalog.length).toBeGreaterThanOrEqual(100);
     const ids = catalog.map((c) => c.catalogId);
     expect(new Set(ids).size).toBe(ids.length);
     for (const id of ids) {
@@ -84,7 +84,7 @@ describe('catálogo padrão', () => {
       expect(id.startsWith('cx_')).toBe(false);
       expect(isLibraryKey(`catalog:${id}`)).toBe(true);
     }
-    expect(CATALOG_VERSION).toBe(1);
+    expect(CATALOG_VERSION).toBe(2);
     const names = catalog.map((c) => foldText(c.name));
     expect(new Set(names).size).toBe(names.length);
     const wanted = [
@@ -132,12 +132,15 @@ describe('catálogo padrão', () => {
 
   it('cobre todas as modalidades, unilaterais e duplicatas semânticas aparecem uma vez só', () => {
     for (const m of ['resistance', 'bodyweight', 'timed', 'cardio'] as const) expect(catalog.filter((c) => c.modality === m).length).toBeGreaterThanOrEqual(4);
-    expect(catalog.filter((c) => c.laterality === 'unilateral').map((c) => c.catalogId).sort()).toEqual(
+    // P17 (catálogo 1): exatamente estes unilaterais; P18 acrescentou outros, com identidade própria.
+    expect(catalog.filter((c) => c.laterality === 'unilateral' && c.since === 1).map((c) => c.catalogId).sort()).toEqual(
       ['afundo', 'cadeira-extensora-unilateral', 'elevacao-lateral-unilateral', 'remada-unilateral', 'rosca-alternada', 'rosca-concentrada'].sort(),
     );
-    expect(catalog.filter((c) => /^flex[aã]o/i.test(c.name))).toHaveLength(1);
+    // Flexão de braços aparece uma vez; a flexão diamante (P18) é outra execução, e a nórdica é de posteriores.
+    expect(catalog.filter((c) => /^flex[aã]o de bra/i.test(c.name))).toHaveLength(1);
     expect(catalog.filter((c) => /^barra fixa$/i.test(c.name))).toHaveLength(1);
-    expect(catalog.filter((c) => /^prancha/i.test(c.name))).toHaveLength(1);
+    expect(catalog.filter((c) => /^prancha$/i.test(c.name))).toHaveLength(1);
+    expect(catalog.filter((c) => c.aliases.some((a) => /^prancha isom/i.test(a)))).toHaveLength(1);
     expect(catalogById('prancha')!.aliases).toContain('prancha isométrica');
     for (const c of catalog.filter((x) => x.modality === 'cardio')) expect(c.loadMode).toBeNull();
   });
@@ -168,7 +171,7 @@ describe('busca', () => {
   });
 
   it('considera apelidos, grupos, equipamentos e tags', () => {
-    expect(names('pulldown')).toEqual(['Puxada frontal']);
+    expect(names('pulldown')).toEqual(['Puxada com pegada neutra', 'Puxada frontal']);
     expect(names('serrote')).toEqual(['Remada unilateral com halter']);
     expect(names('panturrilhas')).toEqual(expect.arrayContaining(['Panturrilha em pé', 'Panturrilha sentado']));
     expect(names('polia')).toEqual(expect.arrayContaining(['Crossover na polia', 'Tríceps na polia', 'Remada baixa']));
@@ -176,16 +179,16 @@ describe('busca', () => {
   });
 
   it('todos os termos precisam aparecer; ordem por relevância e nome; sem duplicatas; determinística', () => {
-    expect(names('supino halteres')).toEqual(['Supino inclinado com halteres']);
+    expect(names('supino halteres')).toEqual(['Supino inclinado com halteres', 'Supino reto com halteres']);
     const r = names('rosca');
-    expect(r.slice(0, 4)).toEqual(['Rosca alternada', 'Rosca concentrada', 'Rosca direta', 'Rosca martelo']);
+    expect(r.slice(0, 7)).toEqual(['Rosca alternada', 'Rosca concentrada', 'Rosca direta', 'Rosca inversa', 'Rosca martelo', 'Rosca na polia', 'Rosca Scott']);
     expect(new Set(r).size).toBe(r.length);
     expect(names('rosca')).toEqual(r);
     // Nome que começa com a busca vem antes de nome que só contém o termo.
     const lateral = names('elevação lateral');
     expect(lateral[0]).toBe('Elevação lateral');
     // Item repetido na entrada não duplica o resultado.
-    expect(searchLibrary(buildIndex([...items, ...items]), 'leg press', EMPTY_FILTERS)).toHaveLength(1);
+    expect(searchLibrary(buildIndex([...items, ...items]), 'leg press', EMPTY_FILTERS).map((i) => i.name)).toEqual(['Leg press', 'Panturrilha no leg press']);
   });
 
   it('sem texto, todos os itens ativos em ordem alfabética pt-BR', () => {
@@ -217,11 +220,14 @@ describe('filtros', () => {
     const both = searchLibrary(index, '', f({ muscles: ['peitoral', 'costas'] }));
     expect(both.every((i) => i.primaryMuscles.some((m) => m === 'peitoral' || m === 'costas'))).toBe(true);
     const polia = searchLibrary(index, '', f({ equipment: ['polia'], muscles: ['triceps'] })).map((i) => i.refId);
-    expect(polia).toEqual(['triceps-polia']);
-    expect(searchLibrary(index, '', f({ modalities: ['cardio'] }))).toHaveLength(7);
-    expect(searchLibrary(index, '', f({ modalities: ['timed'] })).map((i) => i.refId).sort()).toEqual(['alongamento-estatico', 'dead-hang', 'prancha', 'wall-sit']);
+    expect(polia).toEqual(['triceps-corda', 'triceps-polia', 'triceps-unilateral-polia']);
+    expect(searchLibrary(index, '', f({ modalities: ['cardio'] }))).toHaveLength(9);
+    expect(searchLibrary(index, '', f({ modalities: ['timed'] })).map((i) => i.refId).sort()).toEqual(
+      ['alongamento-estatico', 'dead-hang', 'farmers-walk', 'hollow-hold', 'mountain-climber', 'polichinelo', 'prancha', 'prancha-lateral', 'wall-sit'],
+    );
     expect(searchLibrary(index, '', f({ laterality: 'unilateral' })).every((i) => i.laterality === 'unilateral')).toBe(true);
     expect(searchLibrary(index, 'rosca', f({ laterality: 'unilateral' })).map((i) => i.refId).sort()).toEqual(['rosca-alternada', 'rosca-concentrada']);
+    expect(searchLibrary(index, '', f({ muscles: ['triceps'] })).length).toBeGreaterThanOrEqual(8);
     expect(searchLibrary(index, '', f({ muscles: ['corpo_inteiro'] })).map((i) => i.refId)).toEqual(expect.arrayContaining(['burpee', 'corrida']));
   });
 
