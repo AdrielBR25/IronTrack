@@ -1,6 +1,9 @@
 // Tipos do motor de análise de treinos (IronTrack 2.0 F01/P08). Ver docs/ANALYTICS_TREINAMENTO.md.
 // Só leitura: nada aqui é persistido. Pesos sempre em kg (carga externa); a conversão para lb é da interface.
 // Datas de calendário como yyyy-mm-dd no fuso local do aparelho; semanas começam na segunda-feira.
+import type { ExerciseClassification } from './classification';
+import type { NormalizedMuscle } from './muscles';
+import type { E1rmMethodId } from './oneRepMax';
 
 export type PeriodKey = '7d' | '30d' | '60d' | '90d' | 'all';
 
@@ -27,6 +30,8 @@ export interface ExerciseObs {
   /** Grupo muscular informado na ficha; null quando vazio. */
   muscleGroup: string | null;
   bodyweight: boolean;
+  /** Equipamento da ficha, como registrado (P09: usado só pela classificação analítica). */
+  equipment: string | null;
   sets: SetObs[];
 }
 
@@ -85,7 +90,7 @@ export type TrendDirection = 'positiva' | 'estavel' | 'queda' | 'insuficiente';
  * Métrica usada na tendência: 1RM estimado (séries com carga de 1 a 12 repetições), maior carga nas séries
  * de 13 ou mais repetições (quando o exercício só tem séries longas) ou repetições (peso corporal sem carga).
  */
-export type TrendMetric = 'e1rm' | 'carga_13' | 'reps';
+export type TrendMetric = 'e1rm' | 'carga_13' | 'reps' | 'duracao' | 'distancia';
 
 export interface Trend {
   direction: TrendDirection;
@@ -104,6 +109,11 @@ export interface Trend {
   /** Limiar aplicado (%): o maior entre o mínimo da métrica e dois erros-padrão da diferença. */
   thresholdPct: number | null;
   confidence: Confidence | null;
+  /**
+   * Houve uma pausa maior que TREND_LONG_GAP_DAYS entre duas sessões com o exercício. A tendência compara só as
+   * sessões realizadas: semanas sem o exercício não contam como queda, mas a interface avisa da pausa.
+   */
+  longGap: boolean;
   /** Motivo quando a tendência é insuficiente. */
   reason?: 'poucas_sessoes' | 'intervalo_curto' | 'sem_metrica';
 }
@@ -139,6 +149,12 @@ export interface ExerciseSummary {
   name: string;
   muscleGroup: string | null;
   bodyweight: boolean;
+  /** Grupo muscular normalizado (P09); o texto original continua em `muscleGroup`. */
+  muscle: NormalizedMuscle;
+  /** Classificação analítica (P09): o que os registros permitem medir. */
+  classification: ExerciseClassification;
+  /** Método do 1RM estimado (`e1rm`, recordes de 1RM e tendência por 1RM). */
+  e1rmMethod: E1rmMethodId;
   /** Valores dentro do período. */
   sessions: number;
   sets: number;
@@ -190,6 +206,31 @@ export interface MuscleGroupSets {
   sets: number;
 }
 
+export interface MuscleDistributionRow {
+  /** Chave de agrupamento (id canônico ou texto dobrado). */
+  key: string;
+  /** Nome exibido (canônico, ou o texto da ficha). */
+  group: string;
+  sets: number;
+  /** Textos originais da ficha que caíram nesta linha, sem alteração. */
+  originals: string[];
+}
+
+/**
+ * Séries por grupo muscular normalizado (P09). Cada série conta uma vez, no grupo principal informado na ficha:
+ * o modelo atual tem um grupo só por exercício, e o volume nunca é repetido em músculos secundários.
+ */
+export interface MuscleDistribution {
+  /** Grupos reconhecidos (classificação confiável). */
+  groups: MuscleDistributionRow[];
+  /** Textos fora da tabela de sinônimos: mantidos como digitados, fora do gráfico principal. */
+  unrecognized: MuscleDistributionRow[];
+  /** Regiões amplas ou vários grupos no mesmo texto ("Pernas", "Peito e tríceps"): não atribuídos. */
+  ambiguous: MuscleDistributionRow[];
+  /** Séries de exercícios sem grupo informado. */
+  emptySets: number;
+}
+
 export interface PeriodTotals {
   sessions: number;
   sets: number;
@@ -227,7 +268,10 @@ export interface TrainingReport {
   consistency: ConsistencyMetrics;
   totals: PeriodTotals & { loadedSets: number; unloadedSets: number; reps: number };
   buckets: Bucket[];
+  /** Séries por grupo, pelo texto exato da ficha (P08, mantido por compatibilidade). */
   muscleGroups: MuscleGroupSets[];
+  /** Séries por grupo normalizado (P09): é o que a tela mostra. */
+  muscleDistribution: MuscleDistribution;
   /** Séries de exercícios sem grupo muscular informado. */
   unclassifiedSets: number;
   exercises: ExerciseSummary[];

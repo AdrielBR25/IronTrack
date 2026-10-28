@@ -20,6 +20,8 @@ const METRIC_TEXT: Record<Trend['metric'], string> = {
   e1rm: 'O 1RM estimado',
   carga_13: 'A maior carga nas séries de 13 ou mais repetições',
   reps: 'O máximo de repetições sem carga',
+  duracao: 'A maior duração por sessão',
+  distancia: 'A distância por sessão',
 };
 
 export function buildInsights(report: TrainingReport): Insight[] {
@@ -223,7 +225,7 @@ export function buildInsights(report: TrainingReport): Insight[] {
       type: 'carga',
       tone: 'neutro',
       title: `Desempenho registrado menor em ${e.name}`,
-      description: `${METRIC_TEXT[e.trend.metric]} ficou ${pct(e.trend.changePct!)} abaixo da primeira metade do período (média). Isso, sozinho, não indica perda de força: técnica, faixa de repetições, cansaço do dia ou uma fase mais leve também mudam a carga registrada.`,
+      description: `${METRIC_TEXT[e.trend.metric]} ficou ${pct(e.trend.changePct!)} abaixo da primeira metade do período (média). Isso, sozinho, não indica perda de força: técnica, faixa de repetições, cansaço do dia ou uma fase mais leve também mudam a carga registrada.${e.trend.longGap ? ` Houve uma pausa de ${plural(e.trend.maxGapDays, 'dia', 'dias')} entre duas sessões deste exercício; os dias sem treino não entram no cálculo e não são tratados como queda.` : ''}`,
       metric: `exercises.${e.key}.trend`,
       evidence: trendEvidence(e.trend),
       confidence: e.trend.confidence,

@@ -1,7 +1,10 @@
 // Métricas de treino calculadas a partir das sessões concluídas (ver docs/ANALYTICS_TREINAMENTO.md).
 // Funções puras e determinísticas. Uma passada normaliza o histórico (O(séries)); cada período
 // reaproveita esse índice e só percorre as sessões da janela.
-import { estimate1RM, type WorkoutSession } from '@/modules/training';
+import type { WorkoutSession } from '@/modules/training';
+import { classifyExercise, type ExerciseClassification } from './classification';
+import { createMuscleNormalizer, normalizeMuscleGroup, type NormalizedMuscle } from './muscles';
+import { canonicalE1rmKg, E1RM_METHOD_ID, E1RM_RANGE_MAX_REPS } from './oneRepMax';
 import { computeTrend, type TrendObservation } from './trends';
 import { dayNumber, localDate, makeRange, monthStart, nextMonthStart, previousRange, shiftDays, weekStart } from './periods';
 import type {
@@ -15,6 +18,8 @@ import type {
   ExerciseSummary,
   FrequencyMetrics,
   MetricDelta,
+  MuscleDistribution,
+  MuscleDistributionRow,
   MuscleGroupSets,
   PeriodComparison,
   RecordMark,
@@ -22,11 +27,13 @@ import type {
   SessionObs,
   SetObs,
   Trend,
-  TrendMetric,
 } from './types';
 
-/** 1RM estimado só para séries de 1 a 12 repetições: acima disso a fórmula de Epley perde precisão. */
-export const E1RM_MAX_REPS = 12;
+/**
+ * 1RM estimado só para séries de 1 a 12 repetições: acima disso a fórmula de Epley perde precisão. Desde o P09
+ * o cálculo vem do contrato canônico (domain/oneRepMax.ts); os resultados são os mesmos do P08.
+ */
+export const E1RM_MAX_REPS = E1RM_RANGE_MAX_REPS;
 /** Sessões anteriores com carga necessárias para declarar um novo recorde de carga. */
 export const MIN_PRIOR_SESSIONS_FOR_RECORD = 2;
 /** Semanas completas necessárias para avaliar a regularidade. */
@@ -91,6 +98,7 @@ export function normalizeSessions(sessions: readonly WorkoutSession[]): Normaliz
           name: ex.name,
           muscleGroup: ex.muscleGroup?.trim() || null,
           bodyweight: ex.equipment === 'bodyweight',
+          equipment: typeof ex.equipment === 'string' ? ex.equipment : null,
           sets,
         });
     }
@@ -130,7 +138,8 @@ export function exercisePoint(session: Pick<SessionObs, 'ts' | 'date'>, ex: Exer
       topLoadReps = s.reps;
     }
     bestSetVolume = Math.max(bestSetVolume ?? 0, v);
-    if (s.reps <= E1RM_MAX_REPS) e1rm = Math.max(e1rm ?? 0, estimate1RM(s.load, s.reps));
+    const est = canonicalE1rmKg(s.load, s.reps);
+    if (est !== null) e1rm = Math.max(e1rm ?? 0, est);
     const band = repBand(s.reps);
     topLoadByBand[band] = Math.max(topLoadByBand[band] ?? 0, s.load);
   }
@@ -142,9 +151,12 @@ export interface ExerciseHistory {
   name: string;
   muscleGroup: string | null;
   bodyweight: boolean;
+  equipment: string | null;
   /** Em ordem cronológica. */
   points: ExercisePoint[];
   records: ExerciseRecords;
+  muscle: NormalizedMuscle;
+  classification: ExerciseClassification;
 }
 
 const mark = (p: ExercisePoint, value: number, extra: Partial<RecordMark> = {}): RecordMark => ({ value, ts: p.ts, date: p.date, ...extra });
@@ -173,22 +185,52 @@ export function computeExerciseRecords(points: readonly ExercisePoint[]): Exerci
   return r;
 }
 
+/**
+ * Classificação a partir do equipamento mais recente e das cargas registradas em todo o histórico. Hoje não
+ * existem duração, distância nem lado por série (Dexie v2), então essas medidas ficam sempre indisponíveis.
+ */
+export function classifyHistory(h: Pick<ExerciseHistory, 'equipment' | 'points'>): ExerciseClassification {
+  let loaded = false;
+  let unloaded = false;
+  for (const p of h.points) {
+    if (p.loadedSets > 0) loaded = true;
+    if (p.sets > p.loadedSets) unloaded = true;
+  }
+  return classifyExercise({ equipment: h.equipment, hasLoadedSets: loaded, hasUnloadedSets: unloaded });
+}
+
 export function buildExerciseHistories(sessions: readonly SessionObs[]): Map<string, ExerciseHistory> {
   const map = new Map<string, ExerciseHistory>();
+  const normalize = createMuscleNormalizer();
   for (const s of sessions)
     for (const ex of s.exercises) {
       let h = map.get(ex.key);
       if (!h) {
-        h = { key: ex.key, name: ex.name, muscleGroup: ex.muscleGroup, bodyweight: ex.bodyweight, points: [], records: computeExerciseRecords([]) };
+        h = {
+          key: ex.key,
+          name: ex.name,
+          muscleGroup: ex.muscleGroup,
+          bodyweight: ex.bodyweight,
+          equipment: ex.equipment,
+          points: [],
+          records: computeExerciseRecords([]),
+          muscle: normalizeMuscleGroup(null),
+          classification: classifyExercise({ hasLoadedSets: false, hasUnloadedSets: false }),
+        };
         map.set(ex.key, h);
       }
       // O nome e a classificação mais recentes valem (o exercício pode ter sido renomeado na ficha).
       h.name = ex.name;
       h.muscleGroup = ex.muscleGroup ?? h.muscleGroup;
       h.bodyweight = ex.bodyweight;
+      h.equipment = ex.equipment ?? h.equipment;
       h.points.push(exercisePoint(s, ex));
     }
-  for (const h of map.values()) h.records = computeExerciseRecords(h.points);
+  for (const h of map.values()) {
+    h.records = computeExerciseRecords(h.points);
+    h.muscle = normalize(h.muscleGroup);
+    h.classification = classifyHistory(h);
+  }
   return map;
 }
 
@@ -320,6 +362,32 @@ export function muscleGroupsOf(sessions: readonly SessionObs[]): { groups: Muscl
   return { groups, unclassified };
 }
 
+/**
+ * Séries por grupo normalizado. Cada série conta uma vez, no grupo principal da ficha (o modelo atual não tem
+ * grupos secundários e nada é repetido em outros músculos). Textos desconhecidos e ambíguos ficam à parte.
+ */
+export function muscleDistributionOf(sessions: readonly SessionObs[], normalize = createMuscleNormalizer()): MuscleDistribution {
+  const rows = new Map<string, MuscleDistributionRow & { match: NormalizedMuscle['match'] }>();
+  let emptySets = 0;
+  for (const s of sessions)
+    for (const ex of s.exercises) {
+      const m = normalize(ex.muscleGroup);
+      if (!m.key) {
+        emptySets += ex.sets.length;
+        continue;
+      }
+      let row = rows.get(m.key);
+      if (!row) rows.set(m.key, (row = { key: m.key, group: m.label, sets: 0, originals: [], match: m.match }));
+      row.sets += ex.sets.length;
+      const original = m.original.trim();
+      if (!row.originals.includes(original)) row.originals.push(original);
+    }
+  const sorted = [...rows.values()].sort((a, b) => b.sets - a.sets || a.group.localeCompare(b.group, 'pt-BR'));
+  const pick = (match: NormalizedMuscle['match']) =>
+    sorted.filter((r) => r.match === match).map(({ key, group, sets, originals }) => ({ key, group, sets, originals: [...originals].sort((a, b) => a.localeCompare(b, 'pt-BR')) }));
+  return { groups: pick('canonico'), unrecognized: pick('nao_reconhecido'), ambiguous: pick('ambiguo'), emptySets };
+}
+
 function delta(current: number, previous: number): MetricDelta {
   return { current, previous, diff: current - previous, pct: previous > 0 ? ((current - previous) / previous) * 100 : null };
 }
@@ -348,16 +416,22 @@ export function compareWithPrevious(all: readonly SessionObs[], range: DateRange
 // ---------------------------------------------------------------------------------------------
 // Exercícios no período
 
-/** Escolhe a métrica de tendência com mais observações (1RM estimado, carga em séries longas ou repetições). */
-export function trendFor(points: readonly ExercisePoint[]): Trend {
-  const series: Record<TrendMetric, TrendObservation[]> = { e1rm: [], carga_13: [], reps: [] };
+/**
+ * Escolhe a métrica de tendência com mais observações (1RM estimado, carga em séries longas ou repetições).
+ * Uma tendência usa uma métrica só: nunca mistura 1RM com repetições, nem carga com duração. Em peso corporal
+ * (`loadMetrics: false`, P09) a carga registrada é só a adicional, então só repetições sem carga são comparadas.
+ */
+export function trendFor(points: readonly ExercisePoint[], opts: { loadMetrics?: boolean } = {}): Trend {
+  const loadMetrics = opts.loadMetrics ?? true;
+  const series: Record<'e1rm' | 'carga_13' | 'reps', TrendObservation[]> = { e1rm: [], carga_13: [], reps: [] };
   for (const p of points) {
-    if (p.e1rm !== null) series.e1rm.push({ date: p.date, value: p.e1rm });
+    if (loadMetrics && p.e1rm !== null) series.e1rm.push({ date: p.date, value: p.e1rm });
     const long = p.topLoadByBand['13+'];
-    if (long !== undefined) series.carga_13.push({ date: p.date, value: long });
+    if (loadMetrics && long !== undefined) series.carga_13.push({ date: p.date, value: long });
     if (p.bestUnloadedReps !== null) series.reps.push({ date: p.date, value: p.bestUnloadedReps });
   }
-  const metric = (['e1rm', 'carga_13', 'reps'] as const).reduce((best, m) => (series[m].length > series[best].length ? m : best), 'e1rm' as TrendMetric);
+  const candidates = loadMetrics ? (['e1rm', 'carga_13', 'reps'] as const) : (['reps'] as const);
+  const metric = candidates.reduce<'e1rm' | 'carga_13' | 'reps'>((best, m) => (series[m].length > series[best].length ? m : best), candidates[0]);
   return computeTrend(series[metric], metric);
 }
 
@@ -391,6 +465,9 @@ export function exerciseSummary(h: ExerciseHistory, range: DateRange): ExerciseS
     name: h.name,
     muscleGroup: h.muscleGroup,
     bodyweight: h.bodyweight,
+    muscle: h.muscle,
+    classification: h.classification,
+    e1rmMethod: E1RM_METHOD_ID,
     sessions: pts.length,
     sets,
     reps,
@@ -405,7 +482,7 @@ export function exerciseSummary(h: ExerciseHistory, range: DateRange): ExerciseS
     },
     records: h.records,
     newLoadRecordInPeriod,
-    trend: trendFor(pts),
+    trend: trendFor(pts, { loadMetrics: !h.classification.modalities.includes('bodyweight') }),
   };
 }
 

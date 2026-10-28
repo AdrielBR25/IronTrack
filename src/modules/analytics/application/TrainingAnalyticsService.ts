@@ -11,12 +11,14 @@ import {
   downsampleMax,
   exerciseSummary,
   frequencyOf,
+  muscleDistributionOf,
   muscleGroupsOf,
   normalizeSessions,
   sliceRange,
   totalsOf,
   type ExerciseHistory,
 } from '../domain/metrics';
+import { createMuscleNormalizer, type NormalizedMuscle } from '../domain/muscles';
 import { resolvePeriod } from '../domain/periods';
 import type { DataQuality, DateRange, ExercisePoint, PeriodKey, SessionObs, TrainingReport } from '../domain/types';
 
@@ -45,6 +47,8 @@ export function createTrainingAnalytics(input: readonly WorkoutSession[]): Train
   const { sessions, quality } = normalizeSessions(input);
   const histories = buildExerciseHistories(sessions);
   const firstSessionDate = sessions[0]?.date ?? null;
+  // Um normalizador por índice: cada texto de grupo muscular distinto é dobrado uma vez só.
+  const normalize = createMuscleNormalizer();
   const catalog = [...histories.values()]
     .map((h) => ({ key: h.key, name: h.name, sessions: h.points.length }))
     .sort((a, b) => b.sessions - a.sessions || a.name.localeCompare(b.name, 'pt-BR'));
@@ -60,7 +64,7 @@ export function createTrainingAnalytics(input: readonly WorkoutSession[]): Train
       return downsampleMax(sliceRange(h.points, range).filter((p) => value(p) !== null), max, value);
     },
     report(period, today) {
-      return buildReport(sessions, histories, quality, firstSessionDate, period, today);
+      return buildReport(sessions, histories, quality, firstSessionDate, period, today, normalize);
     },
   };
 }
@@ -72,6 +76,7 @@ function buildReport(
   firstSessionDate: string | null,
   period: PeriodKey,
   today: string,
+  normalize: (raw: string | null | undefined) => NormalizedMuscle,
 ): TrainingReport {
   const range = resolvePeriod(period, today, firstSessionDate);
   const covered = coveredRange(range, firstSessionDate);
@@ -93,6 +98,7 @@ function buildReport(
     totals,
     buckets: bucketsOf(inPeriod, range, covered),
     muscleGroups: groups,
+    muscleDistribution: muscleDistributionOf(inPeriod, normalize),
     unclassifiedSets: unclassified,
     exercises,
     comparison: compareWithPrevious(all, range, period === 'all', firstSessionDate),

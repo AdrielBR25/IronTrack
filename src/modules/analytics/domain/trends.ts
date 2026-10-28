@@ -10,9 +10,11 @@ export const TREND_MIN_POINTS = 4;
 /** Mínimo de dias entre a primeira e a última observação. */
 export const TREND_MIN_SPAN_DAYS = 14;
 /** Limiar mínimo de variação (%) por métrica: abaixo dele a mudança é tratada como estabilidade. */
-export const TREND_BASE_THRESHOLD_PCT: Record<TrendMetric, number> = { e1rm: 2.5, carga_13: 2.5, reps: 5 };
+export const TREND_BASE_THRESHOLD_PCT: Record<TrendMetric, number> = { e1rm: 2.5, carga_13: 2.5, reps: 5, duracao: 5, distancia: 5 };
 /** Quantos erros-padrão a diferença entre as médias precisa superar. */
 export const TREND_NOISE_SE = 2;
+/** Pausa (dias entre duas sessões com o exercício) a partir da qual a tendência é marcada com aviso. */
+export const TREND_LONG_GAP_DAYS = 28;
 
 export interface TrendObservation {
   date: string;
@@ -41,7 +43,7 @@ export function computeTrend(observations: readonly TrendObservation[], metric: 
   const spanDays = n ? days[n - 1] - days[0] : 0;
   let maxGapDays = 0;
   for (let i = 1; i < n; i++) maxGapDays = Math.max(maxGapDays, days[i] - days[i - 1]);
-  const base = { metric, points: n, spanDays, maxGapDays, firstMean: null, lastMean: null, changePct: null, thresholdPct: null, confidence: null };
+  const base = { metric, points: n, spanDays, maxGapDays, longGap: maxGapDays > TREND_LONG_GAP_DAYS, firstMean: null, lastMean: null, changePct: null, thresholdPct: null, confidence: null };
   if (n === 0) return { ...base, direction: 'insuficiente', reason: 'sem_metrica' };
   if (n < TREND_MIN_POINTS) return { ...base, direction: 'insuficiente', reason: 'poucas_sessoes' };
   if (spanDays < TREND_MIN_SPAN_DAYS) return { ...base, direction: 'insuficiente', reason: 'intervalo_curto' };
