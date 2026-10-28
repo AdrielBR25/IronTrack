@@ -30,6 +30,7 @@ import {
   validSetCount,
   completionPct,
   shouldAdvance,
+  setCompletionErrors,
 } from '@/modules/training';
 import { audioAvailable, closeRestNotifications, notificationState, unlockAudio, vibrationAvailable } from '@/lib/alerts';
 import type { SessionSet, WorkoutSession } from '@/lib/types';
@@ -124,7 +125,9 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
   };
 
   const doComplete = () => {
-    if (!current || !currentSet) return;
+    if (!current || !currentSet || !currentEx) return;
+    // Nunca conclui uma série com valores inválidos (o botão já fica desabilitado; isto protege atalhos).
+    if (setCompletionErrors(currentEx, currentSet).length) return;
     unlockAudio();
     void closeRestNotifications();
     let next = carryForwardWeight(completeSet(session, current.exerciseId, current.setId), current.exerciseId, current.setId);
@@ -156,7 +159,7 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
 
   const patchCurrent = (p: Partial<SessionSet>) => {
     if (!current) return;
-    commit(updateSet(session, current.exerciseId, current.setId, 'weight' in p ? { ...p, edited: true } : p));
+    commit(updateSet(session, current.exerciseId, current.setId, 'weight' in p || 'assistanceKg' in p ? { ...p, edited: true } : p));
   };
 
   const prog = sessionProgress(session);
@@ -165,7 +168,7 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
   const editingEx = editing ? session.exercises.find((e) => e.id === editing.exId) : undefined;
   const editingSet = editingEx?.sets.find((s) => s.id === editing?.setId);
   const lastForCurrent = currentEx ? history(currentEx.exerciseKey)[0] : undefined;
-  const lastText = lastForCurrent ? summarizeSets(lastForCurrent.sets, fmtW).split(' · ').slice(0, 3).join(' · ') : undefined;
+  const lastText = lastForCurrent && currentEx ? summarizeSets(lastForCurrent.sets, fmtW, currentEx).split(' · ').slice(0, 3).join(' · ') : undefined;
 
   return (
     <div className="min-h-dvh bg-background">
@@ -286,6 +289,11 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
                 <DialogDescription>{editingSet.status === 'done' ? 'Série concluída — ajuste os valores se precisar.' : 'Série pulada.'}</DialogDescription>
               </DialogHeader>
               <SetFields compact ex={editingEx} set={editingSet} settings={settings} onPatch={(p) => commit(updateSet(session, editingEx.id, editingSet.id, p))} />
+              {editingSet.status === 'done' && setCompletionErrors(editingEx, editingSet).length > 0 && (
+                <p role="status" className="text-xs text-warn" data-testid="edit-set-errors">
+                  {setCompletionErrors(editingEx, editingSet).join(' ')} Valores inválidos ficam fora do histórico e das análises.
+                </p>
+              )}
               <DialogFooter className="gap-2">
                 <Button
                   variant="outline"

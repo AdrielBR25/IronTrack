@@ -11,6 +11,7 @@ import { useCompletedSessions, useToday } from '@/hooks/data';
 import { useUnits } from '@/hooks/useUnits';
 import { fmtDateShort } from '@/lib/dates';
 import { cn, fmtNum } from '@/lib/utils';
+import { fmtDurationSec } from '@/modules/training';
 import {
   buildInsights,
   createTrainingAnalytics,
@@ -26,6 +27,8 @@ import {
   TREND_MIN_SPAN_DAYS,
   type ExercisePoint,
   type ExerciseSummary,
+  type ModalityMetrics,
+  type SideStats,
   type Insight,
   type InsightEvidence,
   type PeriodKey,
@@ -38,7 +41,7 @@ import {
 // P09: grupos musculares normalizados, métricas conforme o tipo de exercício, método de 1RM identificado,
 // explicações dos indicadores e estados indisponíveis para análises que os registros ainda não sustentam.
 
-type ExMetric = 'e1rm' | 'topLoad' | 'bestReps' | 'volume';
+type ExMetric = 'e1rm' | 'topLoad' | 'bestReps' | 'volume' | 'duration' | 'distance';
 
 const PERIOD_OPTIONS: { value: PeriodKey; label: string }[] = [
   { value: '7d', label: '7 dias' },
@@ -76,7 +79,13 @@ const PICK: Record<ExMetric, (p: ExercisePoint) => number | null> = {
   topLoad: (p) => p.topLoad,
   bestReps: (p) => p.bestReps,
   volume: (p) => (p.loadedSets ? p.volume : null),
+  // P10: tempo (maior duração da sessão) e cardio (duração e distância somadas na sessão).
+  duration: (p) => p.bestDurationSec ?? p.cardio?.durationSec ?? null,
+  distance: (p) => p.cardio?.distanceM ?? null,
 };
+
+const fmtKm = (m: number) => `${fmtNum(m / 1000, 2)} km`;
+const fmtPace = (secPerKm: number) => `${fmtDurationSec(secPerKm)} /km`;
 
 const signedPct = (v: number) => `${v > 0 ? '+' : ''}${fmtNum(v, 1)}%`;
 const monthFmt = new Intl.DateTimeFormat('pt-BR', { month: 'short', year: '2-digit' });
@@ -249,7 +258,16 @@ function ExerciseSection({ report, analytics }: { report: TrainingReport; analyt
   const loadMetrics = !!ex && supportsLoadMetrics(ex.classification) && ex.loadedSets > 0;
   const bodyweight = !!ex && ex.classification.modalities.includes('bodyweight');
   const addedLoad = bodyweight && !!ex && ex.loadedSets > 0;
-  const options: { value: ExMetric; label: string }[] = loadMetrics
+  const timed = !!ex?.modality.timed;
+  const cardio = ex?.modality.cardio ?? null;
+  const options: { value: ExMetric; label: string }[] = timed
+    ? [{ value: 'duration', label: 'Duração' }]
+    : cardio
+      ? [
+          ...(cardio.sessionsWithDistance ? [{ value: 'distance' as const, label: 'Distância' }] : []),
+          ...(cardio.sessionsWithDuration ? [{ value: 'duration' as const, label: 'Duração' }] : []),
+        ]
+      : loadMetrics
     ? [
         { value: 'e1rm', label: '1RM est.' },
         { value: 'topLoad', label: 'Carga' },
@@ -262,17 +280,26 @@ function ExerciseSection({ report, analytics }: { report: TrainingReport; analyt
           { value: 'topLoad', label: 'Carga adicional' },
         ]
       : [{ value: 'bestReps', label: 'Repetições' }];
-  const effective: ExMetric = options.some((o) => o.value === metric) ? metric : 'bestReps';
+  const effective: ExMetric = options.some((o) => o.value === metric) ? metric : (options[0]?.value ?? 'bestReps');
   const data = useMemo(() => {
     if (!ex) return [];
     return analytics.series(ex.key, report.range, PICK[effective]).map((p) => {
       const v = PICK[effective](p) ?? 0;
-      return { ts: p.ts, v: effective === 'bestReps' ? v : Math.round((show(v) ?? 0) * 10) / 10 };
+      const raw = effective === 'bestReps' || effective === 'duration' || effective === 'distance';
+      return { ts: p.ts, v: raw ? v : Math.round((show(v) ?? 0) * 10) / 10 };
     });
   }, [analytics, ex, report.range, effective, show]);
 
   if (!ex) return null;
-  const fmt = (v: number) => (effective === 'bestReps' ? `${fmtNum(v, 0)} reps` : `${fmtNum(v, effective === 'volume' ? 0 : 1)} ${unit}`);
+  const fmt = (v: number) =>
+    effective === 'bestReps'
+      ? `${fmtNum(v, 0)} reps`
+      : effective === 'duration'
+        ? fmtDurationSec(v)
+        : effective === 'distance'
+          ? fmtKm(v)
+          : `${fmtNum(v, effective === 'volume' ? 0 : 1)} ${unit}`;
+  const modal = timed || !!cardio;
   const rec = ex.records;
   const history = rec.loadRecordHistory;
   const muscle = ex.muscle.label || 'sem grupo';
@@ -300,8 +327,15 @@ function ExerciseSection({ report, analytics }: { report: TrainingReport; analyt
       <div className="mt-3" data-testid="exercise-chart">
         <TrendChart data={data} x="ts" y="v" fmt={fmt} xFmt={(t) => fmtDateShort(Number(t))} />
       </div>
-      {!loadMetrics && !bodyweight && (
+      {!loadMetrics && !bodyweight && !modal && (
         <p className="mt-2 text-xs text-muted-foreground">Exercício sem carga registrada: a evolução é medida em repetições, sem converter em quilos.</p>
+      )}
+      {modal && (
+        <p className="mt-2 text-xs text-muted-foreground" data-testid="modality-note">
+          {timed
+            ? 'Exercício por tempo: a evolução é medida pela maior duração de cada sessão. Repetições e carga não entram.'
+            : 'Cardio: duração e distância registradas, sem calorias nem frequência cardíaca. Ritmo só com os dois campos.'}
+        </p>
       )}
       {bodyweight && (
         <p className="mt-2 text-xs text-muted-foreground" data-testid="bodyweight-note">
@@ -317,6 +351,8 @@ function ExerciseSection({ report, analytics }: { report: TrainingReport; analyt
       )}
       <TrendExplanation ex={ex} />
 
+      <ModalityPanel m={ex.modality} />
+      {!modal && (
       <dl className="mt-3 grid grid-cols-2 gap-2 text-sm" data-testid="exercise-records">
         {loadMetrics || !bodyweight ? (
           <>
@@ -358,6 +394,7 @@ function ExerciseSection({ report, analytics }: { report: TrainingReport; analyt
           </>
         )}
       </dl>
+      )}
 
       {(loadMetrics || addedLoad) && (
         <div className="mt-3" data-testid="record-history">
@@ -385,6 +422,103 @@ function ExerciseSection({ report, analytics }: { report: TrainingReport; analyt
       )}
       <ExerciseAnalyses ex={ex} />
     </ChartCard>
+  );
+}
+
+function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div className="min-w-0 rounded-xl border p-2.5">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="font-semibold tabular">{value}</dd>
+      {hint && <dd className="text-xs text-muted-foreground">{hint}</dd>}
+    </div>
+  );
+}
+
+const SIDE_ROWS: { key: 'direito' | 'esquerdo' | 'ambos' | 'desconhecido'; label: string }[] = [
+  { key: 'direito', label: 'Direito' },
+  { key: 'esquerdo', label: 'Esquerdo' },
+  { key: 'ambos', label: 'Ambos' },
+  { key: 'desconhecido', label: 'Não informado' },
+];
+
+/**
+ * Métricas por modalidade (P10), dos contratos do P09: tempo, cardio, lados e peso corporal. Só aparece o que se
+ * aplica ao exercício; sem dados suficientes, o motivo aparece no lugar do número.
+ */
+function ModalityPanel({ m }: { m: ModalityMetrics }) {
+  const { fmtW } = useUnits();
+  if (!m.timed && !m.cardio && !m.sides && !m.bodyweight) return null;
+  const sideCell = (st: SideStats) => (st.sets ? `${st.sets} × · ${st.reps} reps${st.topLoad !== null ? ` · ${fmtW(st.topLoad)}` : ''}` : '—');
+  return (
+    <div className="mt-3 space-y-3" data-testid="modality-metrics">
+      {m.timed && (
+        <dl className="grid grid-cols-2 gap-2 text-sm" data-testid="timed-metrics">
+          {m.timed.available ? (
+            <>
+              <Stat label="Maior duração" value={fmtDurationSec(m.timed.longestSec!)} />
+              <Stat label="Tempo total" value={fmtDurationSec(m.timed.totalSec!)} hint={`${m.timed.sets} séries em ${m.timed.sessions} sessões`} />
+            </>
+          ) : (
+            <p className="col-span-2 text-sm text-muted-foreground">{UNAVAILABLE_ANALYSIS_TEXT} Nenhuma série com duração registrada no período.</p>
+          )}
+        </dl>
+      )}
+      {m.cardio && (
+        <dl className="grid grid-cols-2 gap-2 text-sm" data-testid="cardio-metrics">
+          {m.cardio.available ? (
+            <>
+              <Stat label="Duração total" value={m.cardio.totalDurationSec !== null ? fmtDurationSec(m.cardio.totalDurationSec) : '—'} hint={`${m.cardio.sessionsWithDuration} sessões com duração`} />
+              <Stat label="Distância total" value={m.cardio.totalDistanceM !== null ? fmtKm(m.cardio.totalDistanceM) : '—'} hint={`${m.cardio.sessionsWithDistance} sessões com distância`} />
+              <Stat label="Ritmo médio" value={m.cardio.averagePaceSecPerKm !== null ? fmtPace(m.cardio.averagePaceSecPerKm) : '—'} hint="só sessões com duração e distância" />
+              <Stat label="Velocidade média" value={m.cardio.averageSpeedKmh !== null ? `${fmtNum(m.cardio.averageSpeedKmh, 1)} km/h` : '—'} />
+            </>
+          ) : (
+            <p className="col-span-2 text-sm text-muted-foreground">{UNAVAILABLE_ANALYSIS_TEXT} Nenhum registro de duração ou distância no período.</p>
+          )}
+        </dl>
+      )}
+      {m.sides && (
+        <div className="text-sm" data-testid="side-metrics">
+          <p className="mb-1 font-medium">Comparação entre lados</p>
+          <table className="w-full tabular">
+            <tbody>
+              {SIDE_ROWS.filter((r) => r.key === 'direito' || r.key === 'esquerdo' || m.sides![r.key].sets > 0).map((r) => (
+                <tr key={r.key} className="border-t">
+                  <td className="py-1 pr-2 text-muted-foreground">{r.label}</td>
+                  <td className="py-1 text-right">{sideCell(m.sides![r.key])}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {m.sides.available && m.sides.differences
+              ? `Diferença registrada (direito − esquerdo): ${m.sides.differences.reps.diff > 0 ? '+' : ''}${m.sides.differences.reps.diff} repetições${m.sides.differences.reps.pct !== null ? ` (${signedPct(m.sides.differences.reps.pct)})` : ''}. É só o que foi registrado, não um diagnóstico de desequilíbrio.`
+              : m.sides.reason === 'um_lado_so'
+                ? 'Só um dos lados tem séries no período: não há comparação.'
+                : 'Nenhuma série com lado registrado no período. Séries sem lado não são atribuídas a nenhum lado.'}
+          </p>
+        </div>
+      )}
+      {m.bodyweight && m.bodyweight.sets > 0 && (
+        <dl className="grid grid-cols-2 gap-2 text-sm" data-testid="bodyweight-metrics">
+          <Stat label="Só peso corporal" value={m.bodyweight.bestRepsBodyOnly !== null ? `${m.bodyweight.bestRepsBodyOnly} reps` : '—'} hint={`${m.bodyweight.bySetKind.somente_corporal} séries`} />
+          {m.bodyweight.bySetKind.com_carga_adicional > 0 && (
+            <Stat label="Melhor com carga adicional" value={m.bodyweight.bestAddedLoad ? `+${fmtW(m.bodyweight.bestAddedLoad.load)} × ${m.bodyweight.bestAddedLoad.reps}` : '—'} />
+          )}
+          {m.bodyweight.bySetKind.com_assistencia > 0 && (
+            <Stat
+              label="Menor assistência"
+              value={m.bodyweight.bestAssisted ? `${fmtW(m.bodyweight.bestAssisted.assistanceKg)} × ${m.bodyweight.bestAssisted.reps}` : '—'}
+              hint="menos assistência = mais difícil"
+            />
+          )}
+          {m.bodyweight.bySetKind.incompativel > 0 && (
+            <p className="col-span-2 text-xs text-muted-foreground">{m.bodyweight.bySetKind.incompativel} série(s) com carga adicional e assistência ao mesmo tempo ficaram fora.</p>
+          )}
+        </dl>
+      )}
+    </div>
   );
 }
 

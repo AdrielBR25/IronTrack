@@ -10,9 +10,31 @@ import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { ConfirmDialog } from '@/components/ui/confirm';
-import { exerciseVolume, isValidWorkingSet, sessionPRs, sessionVolume, validSetCount, fmtRepRange } from '@/modules/training';
+import { MODALITY_LABEL, SIDE_LABEL, exerciseMeasures, exerciseVolume, fmtDurationSec, isCompletedWorkSet, sessionPRs, sessionVolume, validSetCount } from '@/modules/training';
+import type { SessionExercise, SessionSet } from '@/lib/types';
+import { distanceUnitOf, fmtDistance, planSummary } from '@/features/workout/modelFormat';
 import { fmtDateTime, fmtTime } from '@/lib/dates';
 import { cn, fmtDuration } from '@/lib/utils';
+
+type Column = { key: string; label: string; value: (s: SessionSet) => string };
+
+/**
+ * Colunas da tabela de séries conforme o que o exercício registra (P10). Exercícios antigos mantêm as colunas de
+ * antes (Carga, Reps, RIR/RPE). Valor ausente aparece como "—", nunca como zero.
+ */
+function columnsFor(ex: SessionExercise, fmtW: (kg: number | null | undefined) => string): Column[] {
+  const ms = exerciseMeasures(ex);
+  const any = (f: (s: SessionSet) => unknown) => ex.sets.some((s) => s.status !== 'pending' && f(s) != null);
+  const cols: Column[] = [];
+  if (ms.side || any((s) => s.side)) cols.push({ key: 'side', label: 'Lado', value: (s) => (s.side ? SIDE_LABEL[s.side] ?? '—' : '—') });
+  if (ms.weight !== 'none' || any((s) => s.weight)) cols.push({ key: 'weight', label: ms.weight === 'adicional' ? 'Carga adic.' : 'Carga', value: (s) => fmtW(s.weight) });
+  if (ms.assistance || any((s) => s.assistanceKg)) cols.push({ key: 'assist', label: 'Assist.', value: (s) => (s.assistanceKg != null ? fmtW(s.assistanceKg) : '—') });
+  if (ms.reps || any((s) => s.reps)) cols.push({ key: 'reps', label: 'Reps', value: (s) => String(s.reps ?? '—') });
+  if (ms.duration || any((s) => s.durationSec)) cols.push({ key: 'dur', label: 'Duração', value: (s) => (s.durationSec ? fmtDurationSec(s.durationSec) : '—') });
+  if (ms.distance || any((s) => s.distance)) cols.push({ key: 'dist', label: 'Distância', value: (s) => (s.distance ? fmtDistance(s.distance, distanceUnitOf(ex)) : '—') });
+  if (ms.reps) cols.push({ key: 'effort', label: 'RIR/RPE', value: (s) => (s.rir != null ? `RIR ${s.rir}` : s.rpe != null ? `RPE ${s.rpe}` : '—') });
+  return cols;
+}
 
 export default function SessionDetailPage() {
   const { id } = useParams();
@@ -75,6 +97,8 @@ export default function SessionDetailPage() {
 
       {session.exercises.map((ex) => {
         const shown = ex.sets.filter((s) => s.status !== 'pending');
+        const cols = columnsFor(ex, fmtW);
+        const volume = exerciseVolume(ex);
         let n = 0;
         return (
           <Card key={ex.id} className="p-4">
@@ -82,40 +106,50 @@ export default function SessionDetailPage() {
               <div className="min-w-0">
                 <p className="font-semibold">{ex.name}</p>
                 <p className="text-xs text-muted-foreground">
-                  {ex.muscleGroup} · plano {ex.plannedSets} × {fmtRepRange(ex.repMin, ex.repMax)}
+                  {ex.muscleGroup} · plano {planSummary(ex)}
+                  {ex.modality ? ` · ${MODALITY_LABEL[ex.modality]}` : ''}
+                  {ex.laterality === 'unilateral' ? ' · unilateral' : ''}
                   {ex.substitutedFrom ? ` · substituiu ${ex.substitutedFrom}` : ''}
                 </p>
               </div>
-              <Badge variant="secondary" className="tabular">
-                {fmtVol(exerciseVolume(ex))}
-              </Badge>
+              {(exerciseMeasures(ex).weight !== 'none' || volume > 0) && (
+                <Badge variant="secondary" className="tabular">
+                  {fmtVol(volume)}
+                </Badge>
+              )}
             </div>
             {shown.length === 0 ? (
               <p className="mt-2 text-sm text-muted-foreground">Não realizado.</p>
             ) : (
-              <table className="mt-3 w-full text-sm tabular">
+              <div className="mt-3 overflow-x-auto">
+              <table className="w-full text-sm tabular">
                 <thead>
                   <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground">
                     <th className="pb-1 font-medium">Série</th>
-                    <th className="pb-1 font-medium">Carga</th>
-                    <th className="pb-1 font-medium">Reps</th>
-                    <th className="pb-1 font-medium">RIR/RPE</th>
+                    {cols.map((c) => (
+                      <th key={c.key} className="pb-1 font-medium">
+                        {c.label}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   {shown.map((s) => {
                     if (s.type === 'normal') n++;
                     return (
-                      <tr key={s.id} className={cn('border-t', !isValidWorkingSet(s) && 'text-muted-foreground')}>
+                      <tr key={s.id} className={cn('border-t', !isCompletedWorkSet(s) && 'text-muted-foreground')}>
                         <td className="py-1.5">{s.status === 'skipped' ? 'Pulada' : s.type === 'warmup' ? 'Aquec.' : s.type === 'drop' ? 'Drop' : n}</td>
-                        <td className="py-1.5">{fmtW(s.weight)}</td>
-                        <td className="py-1.5">{s.reps ?? '—'}</td>
-                        <td className="py-1.5">{s.rir != null ? `RIR ${s.rir}` : s.rpe != null ? `RPE ${s.rpe}` : '—'}</td>
+                        {cols.map((c) => (
+                          <td key={c.key} className="py-1.5">
+                            {c.value(s)}
+                          </td>
+                        ))}
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
+              </div>
             )}
             {shown.some((s) => s.note) && (
               <ul className="mt-2 space-y-0.5 text-xs text-muted-foreground">
