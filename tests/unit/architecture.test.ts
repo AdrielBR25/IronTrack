@@ -144,7 +144,12 @@ describe('arquitetura', () => {
     const upward = edges.filter((e) => inDir(e.from, 'lib') && (['react', 'react-dom', 'dexie-react-hooks'].includes(e.spec) || (e.target && inDir(e.target, 'hooks', ...UI))));
     expect(upward.map(fmt)).toEqual([]);
     // O compartilhado não conhece os domínios (exceto o agregador de tipos e as reexportações).
-    const toDomain = edges.filter((e) => inDir(e.from, 'lib') && e.target && inDir(e.target, 'modules') && e.from !== 'lib/types.ts' && !DEPRECATED_SHIMS.includes(e.from));
+    // Exceção documentada (P10): a verificação de integridade valida os campos de modalidade com as mesmas regras
+    // puras do domínio de treinamento, sempre pela API pública (docs/ARQUITETURA.md).
+    const integrityRules = (e: Edge) => e.from === 'lib/integrity.ts' && e.target === 'modules/training/index.ts';
+    const toDomain = edges.filter(
+      (e) => inDir(e.from, 'lib') && e.target && inDir(e.target, 'modules') && e.from !== 'lib/types.ts' && !DEPRECATED_SHIMS.includes(e.from) && !integrityRules(e),
+    );
     expect(toDomain.map(fmt)).toEqual([]);
     const PURE = ['validation', 'integrity', 'merge', 'profile', 'backupFormat', 'dates', 'units', 'defaults', 'types', 'utils'].map((f) => `lib/${f}.ts`);
     const impure = edges.filter((e) => PURE.includes(e.from) && (e.spec === 'dexie' || (e.target && inDir(e.target, 'db'))));

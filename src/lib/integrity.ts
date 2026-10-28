@@ -1,5 +1,6 @@
 import { OWNED_COLLECTIONS, type CollectionName, type DataSnapshot } from './types';
 import { isValidProfileId } from './profile';
+import { exerciseModelIssues, setModelIssues, type ModelIssue } from '@/modules/training';
 
 // Verificação de integridade dos dados em memória (sem acesso ao banco nem à interface).
 // Usada antes de qualquer restauração de backup e para diagnosticar o banco local.
@@ -40,7 +41,10 @@ export type IssueCode =
   | 'PROFILE_DEFAULT_DUPLICATE'
   | 'RECORD_UNOWNED'
   | 'RECORD_PROFILE_UNKNOWN'
-  | 'CROSS_PROFILE_REFERENCE';
+  | 'CROSS_PROFILE_REFERENCE'
+  // P10: campos de modalidade (docs/MIGRACAO_EXERCICIOS_V3.md §2).
+  | 'INVALID_MODALITY_FIELD'
+  | 'MODALITY_CONTRADICTION';
 
 /** Coleções citadas nos problemas: as do retrato e a tabela de perfis. */
 export type IssueCollection = CollectionName | 'profiles';
@@ -200,6 +204,7 @@ export function checkIntegrity(d: DataSnapshot, ownership?: OwnershipContext): I
           add('warning', 'INVALID_NUMBER', 'routines', r.id, `Exercício ${e.id} com descanso inválido.`, 'Revise o descanso no editor de treinos.');
         if (e.targetWeight != null && (!isFiniteNum(e.targetWeight) || e.targetWeight < 0))
           add('warning', 'INVALID_NUMBER', 'routines', r.id, `Exercício ${e.id} com carga planejada inválida.`, 'Revise a carga no editor de treinos.');
+        reportModel(add, 'routines', r.id, `Exercício ${e.id}`, exerciseModelIssues(e));
       }
     }
     routines.set(r.id, { workoutIds: wIds, count: r.workouts.length });
@@ -251,8 +256,14 @@ export function checkIntegrity(d: DataSnapshot, ownership?: OwnershipContext): I
     if (s.durationSec !== undefined && (!isFiniteNum(s.durationSec) || s.durationSec < 0))
       add('warning', 'INVALID_NUMBER', 'sessions', s.id, 'Treino com duração inválida.', 'O treino é preservado; a duração pode aparecer incorreta.');
     let badNumbers = 0;
+    const model: ModelIssue[] = [];
     for (const ex of s.exercises) {
+      const exIssues = ex ? exerciseModelIssues(ex) : [];
+      model.push(...exIssues);
+      // Com metadados inválidos, as séries não são comparadas com eles (evita avisos derivados de um erro).
+      const ctx = exIssues.some((i) => i.severity === 'error') ? {} : (ex ?? {});
       for (const set of Array.isArray(ex?.sets) ? ex.sets : []) {
+        if (set) model.push(...setModelIssues(set, ctx));
         const w = set?.weight;
         const reps = set?.reps;
         if ((w !== null && w !== undefined && (!isFiniteNum(w) || w < 0)) || (reps !== null && reps !== undefined && (!isFiniteNum(reps) || reps < 0))) badNumbers++;
@@ -260,6 +271,7 @@ export function checkIntegrity(d: DataSnapshot, ownership?: OwnershipContext): I
     }
     if (badNumbers)
       add('warning', 'INVALID_NUMBER', 'sessions', s.id, `${badNumbers} série(s) com carga ou repetições inválidas (negativas ou não numéricas).`, 'O treino é preservado; revise as séries no histórico.');
+    reportModel(add, 'sessions', s.id, 'Treino', model);
 
     const r = routines.get(s.routineId);
     const refOk = !!r && r.workoutIds.has(s.workoutId);
@@ -310,6 +322,23 @@ export function checkIntegrity(d: DataSnapshot, ownership?: OwnershipContext): I
 }
 
 type AddIssue = (severity: IssueSeverity, code: IssueCode, collection: IssueCollection, id: string | undefined, message: string, action: string) => void;
+
+/**
+ * Campos de modalidade (P10): valor fora do tipo ou dos limites é erro (a restauração é recusada inteira, nada é
+ * descartado em silêncio); combinação contraditória é aviso (o registro é preservado como está e as análises a
+ * tratam como incompatível). Um problema por registro e severidade, com até 3 exemplos.
+ */
+function reportModel(add: AddIssue, collection: 'routines' | 'sessions', id: string, what: string, issues: ModelIssue[]) {
+  for (const severity of ['error', 'warning'] as const) {
+    const list = issues.filter((i) => i.severity === severity);
+    if (!list.length) continue;
+    const examples = [...new Set(list.map((i) => i.message))].slice(0, 3).join('; ');
+    if (severity === 'error')
+      add('error', 'INVALID_MODALITY_FIELD', collection, id, `${what}: ${list.length} campo(s) de modalidade inválido(s): ${examples}.`, 'Corrija o arquivo: valores fora do formato não são importados nem descartados automaticamente.');
+    else
+      add('warning', 'MODALITY_CONTRADICTION', collection, id, `${what}: ${list.length} combinação(ões) contraditória(s): ${examples}.`, 'Os dados são preservados como estão; as análises ignoram a parte contraditória. Revise no editor ou no histórico.');
+  }
+}
 
 /** Regras de propriedade dos registros (perfil local). */
 function checkOwnership(d: DataSnapshot, ctx: OwnershipContext, add: AddIssue) {

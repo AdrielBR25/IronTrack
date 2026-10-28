@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AIError, AI_ERROR_MESSAGES, AI_REQUEST_LIMITS, BASE_SYSTEM_PROMPT, type AIProvider, type AIProviderResult } from '@/modules/ai';
 import { IronTrackDB, db, setDb } from '@/db/db';
-import { exportBackup } from '@/lib/backup';
+import { BACKUP_SCHEMA_VERSION, exportBackup } from '@/lib/backup';
 import { baseInput, richSources, setup, T0 } from './aiFixtures';
 
 afterEach(() => vi.useRealTimers());
@@ -179,7 +179,7 @@ describe('banco e backup intactos', () => {
     await service.execute(p, consent(p));
     const after = await exportBackup();
     expect(db.verno).toBe(2);
-    expect(after.schemaVersion).toBe(2);
+    expect(after.schemaVersion).toBe(BACKUP_SCHEMA_VERSION);
     expect(db.tables.map((t) => t.name).sort()).toEqual(['bodyEntries', 'overrides', 'photos', 'profiles', 'rotations', 'routines', 'sessions', 'settings']);
     expect({ ...after, exportedAt: 0 }).toEqual({ ...before, exportedAt: 0 });
     expect(JSON.stringify(after)).not.toMatch(/consent|binding|SIMULAÇÃO/);

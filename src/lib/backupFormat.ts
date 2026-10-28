@@ -11,8 +11,10 @@ import type { CollectionCounts, MergeItem } from './merge';
 
 export const BACKUP_APP = 'irontrack';
 // Versão do formato JSON do backup. Independente da versão do esquema IndexedDB (DB_SCHEMA_VERSION).
-// v0: tabelas na raiz · v1: { data } · v2: + perfil proprietário (`profile`) e `profileId` nos registros.
-export const BACKUP_SCHEMA_VERSION = 2;
+// v0: tabelas na raiz · v1: { data } · v2: + perfil proprietário (`profile`) e `profileId` nos registros ·
+// v3 (P10): + campos opcionais de modalidade em exercícios e séries (modality, laterality, loadMode,
+// secondaryMuscles, distanceUnit, durationSec, distance, side, assistanceKg). Estrutura igual à v2.
+export const BACKUP_SCHEMA_VERSION = 3;
 
 export type BackupData = DataSnapshot;
 
@@ -117,6 +119,10 @@ const MIGRATIONS: Record<number, Migration> = {
   // v1 não identificava o perfil: o arquivo vira "legado sem dono" (profile: null). A atribuição
   // ao perfil local acontece só na restauração, de forma explícita (ver docs/PERFIL_LOCAL.md).
   1: (raw) => ({ ...raw, schemaVersion: 2, profile: null }),
+  // v2 → v3: nenhum registro muda. Os campos novos são opcionais e ausentes em v2 (= não informados); nada é
+  // preenchido. A versão nova existe para que um app anterior recuse um arquivo com dados de modalidade em vez
+  // de importá-lo sem entendê-los. Os campos são validados pela verificação de integridade.
+  2: (raw) => ({ ...raw, schemaVersion: 3 }),
 };
 
 export function migrateBackup(raw: unknown): ParseResult<Record<string, unknown>> {
