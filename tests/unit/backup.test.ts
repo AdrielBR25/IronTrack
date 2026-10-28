@@ -59,10 +59,10 @@ beforeEach(freshDb);
 afterEach(() => vi.restoreAllMocks());
 
 describe('exportação', () => {
-  it('exporta todas as tabelas em formato v3 legível e reimportável, com o perfil proprietário', async () => {
+  it('exporta todas as tabelas em formato v4 legível e reimportável, com o perfil proprietário', async () => {
     await seedDb(snapshot());
     const b = await exportBackup();
-    expect(b).toMatchObject({ app: 'irontrack', kind: 'backup', schemaVersion: 3, profile: { id: db.currentProfileId, displayName: 'Meu perfil' } });
+    expect(b).toMatchObject({ app: 'irontrack', kind: 'backup', schemaVersion: 4, profile: { id: db.currentProfileId, displayName: 'Meu perfil' } });
     expect(sorted(b.data)).toEqual(sorted(own(snapshot())));
     expect(parseBackup(JSON.stringify(b, null, 2)).ok).toBe(true);
   });
@@ -90,13 +90,14 @@ describe('exportação', () => {
 });
 
 describe('leitura e validação do arquivo', () => {
-  it('importa backup v0 (tabelas na raiz) migrando até v3 como legado sem perfil', () => {
+  it('importa backup v0 (tabelas na raiz) migrando até v4 como legado sem perfil', () => {
     const d = snapshot();
     const r = parseBackup(JSON.stringify({ app: 'irontrack', exportedAt: '2025-01-01T00:00:00.000Z', ...d }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.value.schemaVersion).toBe(3);
+    expect(r.value.schemaVersion).toBe(4);
     expect(r.value.profile).toBeNull();
+    expect(r.value.data.goals).toEqual([]);
     expect(r.value.data.sessions).toHaveLength(2);
     expect(r.value.data.photos).toHaveLength(2);
   });
@@ -109,7 +110,7 @@ describe('leitura e validação do arquivo', () => {
   });
 
   it('rejeita versão futura', () => {
-    const r = parseBackup(JSON.stringify({ ...backupOf(snapshot()), schemaVersion: 4 }));
+    const r = parseBackup(JSON.stringify({ ...backupOf(snapshot()), schemaVersion: 5 }));
     expect(!r.ok && r.errors[0]).toMatch(/versão mais nova/);
   });
 

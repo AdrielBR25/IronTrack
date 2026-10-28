@@ -6,7 +6,7 @@ import Dexie from 'dexie';
 import { IronTrackDB, db, setDb } from '@/db/db';
 import { addRoutine, acceptRoutineModel, deleteRoutine, restoreRoutineModel, saveRoutine } from '@/db/repo';
 import { CAPABILITIES_KEY, MODEL_SNAPSHOT_KEY, baselineRoutineModels, checkModelCapability, readModelSnapshot } from '@/db/modelGuard';
-import { exportBackup, parseBackup, restoreBackupReplace } from '@/lib/backup';
+import { BACKUP_SCHEMA_VERSION, exportBackup, parseBackup, restoreBackupReplace } from '@/lib/backup';
 import { detectModelLoss, isNewerCapability, pickModelFields, restoreModelFields } from '@/modules/training';
 import type { Routine } from '@/lib/types';
 import { SET_TIMER_KEY } from '@/features/workout/setTimerStore';
@@ -207,7 +207,7 @@ describe('marca de capacidade (app desatualizado)', () => {
 });
 
 describe('backups continuam iguais', () => {
-  it('nenhum estado auxiliar (fotografia, capacidade, cronômetro) entra no backup v3; restaurar não gera alerta falso', async () => {
+  it('nenhum estado auxiliar (fotografia, capacidade, cronômetro) entra no backup (v3, hoje v4); restaurar não gera alerta falso', async () => {
     const r = modelRoutine();
     await addRoutine(r);
     await db.sessions.put(modelSession('m1'));
@@ -215,7 +215,7 @@ describe('backups continuam iguais', () => {
     localStorage.setItem(SET_TIMER_KEY, JSON.stringify({ v: 1, sessionId: 's', exerciseId: 'e', setId: 'x', status: 'paused', accumulatedMs: 5000, segmentStartedAt: null, checkpointAt: 1, rev: 1 }));
     const b = await exportBackup();
     const text = JSON.stringify(b);
-    expect(b.schemaVersion).toBe(3);
+    expect(b.schemaVersion).toBe(BACKUP_SCHEMA_VERSION);
     for (const k of [MODEL_SNAPSHOT_KEY, CAPABILITIES_KEY, SET_TIMER_KEY, 'accumulatedMs', 'appliedSec', 'checkpointAt']) expect(text).not.toContain(k);
     expect(b.data.routines[0]).toEqual({ ...r, profileId: db.currentProfileId });
 

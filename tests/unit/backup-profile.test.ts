@@ -64,11 +64,11 @@ const localProfile = async (): Promise<LocalProfile> => (await db.profiles.get(d
 beforeEach(freshDb);
 afterEach(() => vi.restoreAllMocks());
 
-describe('formato do backup com perfil (v2, lido como v3)', () => {
+describe('formato do backup com perfil (v2, lido como v4)', () => {
   it('exporta o perfil proprietário e reimporta: mesmo perfil, só duplicatas', async () => {
     await seedDb(snapshot());
     const b = parse(await exportBackup());
-    expect(b.schemaVersion).toBe(3);
+    expect(b.schemaVersion).toBe(4);
     expect(b.profile?.id).toBe(db.currentProfileId);
     expect([...b.data.routines, ...b.data.sessions, ...b.data.bodyEntries, ...b.data.photos].every((r) => r.profileId === db.currentProfileId)).toBe(true);
     const p = await previewRestore(b);
@@ -78,12 +78,12 @@ describe('formato do backup com perfil (v2, lido como v3)', () => {
     expect(p.replaceRequiresProfileTransfer).toBe(false);
   });
 
-  it('não confunde versão do backup com versão do banco: v0/v1 viram v3 sem perfil; v4 é rejeitada', () => {
+  it('não confunde versão do backup com versão do banco: v0/v1 viram v4 sem perfil; v5 é rejeitada', () => {
     const v1 = parse(backupOf(snapshot()));
-    expect(v1).toMatchObject({ schemaVersion: 3, profile: null });
+    expect(v1).toMatchObject({ schemaVersion: 4, profile: null });
     const v0 = parse({ app: 'irontrack', exportedAt: '2025-01-01T00:00:00.000Z', ...snapshot() });
-    expect(v0).toMatchObject({ schemaVersion: 3, profile: null });
-    const future = parseBackup(JSON.stringify({ ...v2Of(snapshot(), OTHER), schemaVersion: 4 }));
+    expect(v0).toMatchObject({ schemaVersion: 4, profile: null });
+    const future = parseBackup(JSON.stringify({ ...v2Of(snapshot(), OTHER), schemaVersion: 5 }));
     expect(!future.ok && future.errors[0]).toMatch(/versão mais nova/);
     const noProfile = parseBackup(JSON.stringify({ ...v2Of(snapshot(), OTHER), profile: undefined }));
     expect(noProfile.ok).toBe(false);

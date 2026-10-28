@@ -13,8 +13,9 @@ export const BACKUP_APP = 'irontrack';
 // Versão do formato JSON do backup. Independente da versão do esquema IndexedDB (DB_SCHEMA_VERSION).
 // v0: tabelas na raiz · v1: { data } · v2: + perfil proprietário (`profile`) e `profileId` nos registros ·
 // v3 (P10): + campos opcionais de modalidade em exercícios e séries (modality, laterality, loadMode,
-// secondaryMuscles, distanceUnit, durationSec, distance, side, assistanceKg). Estrutura igual à v2.
-export const BACKUP_SCHEMA_VERSION = 3;
+// secondaryMuscles, distanceUnit, durationSec, distance, side, assistanceKg). Estrutura igual à v2 ·
+// v4 (P12): + coleção `goals` (metas de treinamento, com `profileId`). Backups v0–v3 viram v4 com `goals: []`.
+export const BACKUP_SCHEMA_VERSION = 4;
 
 export type BackupData = DataSnapshot;
 
@@ -91,6 +92,9 @@ const backupSchema = z.object({
     overrides: z.array(z.object({ routineId: z.string(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), kind: z.enum(['rest', 'workout']) }).passthrough()),
     bodyEntries: z.array(z.object({ id: z.string(), date: z.string() }).passthrough()),
     photos: z.array(z.object({ id: z.string(), entryId: z.string(), dataUrl: z.string() }).passthrough()),
+    // P12: estrutura mínima aqui; a validação completa (tipo, unidade, valores, datas, exercício) é da verificação
+    // de integridade, que recusa o arquivo inteiro se uma meta for inválida (nada é descartado em silêncio).
+    goals: z.array(z.object({ id: z.string(), type: z.string() }).passthrough()),
   }),
 });
 
@@ -123,6 +127,12 @@ const MIGRATIONS: Record<number, Migration> = {
   // preenchido. A versão nova existe para que um app anterior recuse um arquivo com dados de modalidade em vez
   // de importá-lo sem entendê-los. Os campos são validados pela verificação de integridade.
   2: (raw) => ({ ...raw, schemaVersion: 3 }),
+  // v3 → v4: metas não existiam; a coleção entra vazia. Nenhum outro registro muda. A versão nova faz um app anterior
+  // recusar o arquivo (com orientação para atualizar) em vez de restaurá-lo e perder as metas sem avisar.
+  3: (raw) => {
+    const data = (raw.data ?? {}) as Record<string, unknown>;
+    return { ...raw, schemaVersion: 4, data: { ...data, goals: data.goals ?? [] } };
+  },
 };
 
 export function migrateBackup(raw: unknown): ParseResult<Record<string, unknown>> {
@@ -151,7 +161,7 @@ export function migrateBackup(raw: unknown): ParseResult<Record<string, unknown>
 
 export const BACKUP_LIMITS = {
   maxBytes: 100 * 1024 * 1024,
-  maxRecords: { routines: 1_000, sessions: 50_000, rotations: 1_000, overrides: 20_000, bodyEntries: 10_000, photos: 2_000 } as Record<Exclude<CollectionName, 'settings'>, number>,
+  maxRecords: { routines: 1_000, sessions: 50_000, rotations: 1_000, overrides: 20_000, bodyEntries: 10_000, photos: 2_000, goals: 2_000 } as Record<Exclude<CollectionName, 'settings'>, number>,
   maxPhotoChars: 15 * 1024 * 1024,
   maxWorkoutsPerRoutine: 100,
   maxExercisesPerItem: 300,
@@ -244,6 +254,8 @@ export interface ImportSummary {
   sessions: number;
   bodyEntries: number;
   photos: number;
+  /** P12: metas restauradas. */
+  goals: number;
   /** Registros do backup não aplicados (duplicatas + conflitos + ignorados). */
   skipped: number;
   duplicates: number;

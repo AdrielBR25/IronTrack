@@ -18,6 +18,7 @@ export const COLLECTION_LABEL: Record<CollectionName, string> = {
   overrides: 'Agenda',
   bodyEntries: 'Avaliações',
   photos: 'Fotos',
+  goals: 'Metas',
 };
 
 const ISSUE_COLLECTION_LABEL: Record<IssueCollection, string> = { ...COLLECTION_LABEL, profiles: 'Perfil' };
@@ -164,7 +165,7 @@ export function RestorePreviewDialog({ backup, preview, onClose }: { backup: Bac
             <DialogTitle>Restaurar backup</DialogTitle>
             <DialogDescription>
               Backup de {p ? new Date(p.exportedAt).toLocaleString('pt-BR') : ''}: {p?.incoming.routines} rotinas, {p?.incoming.sessions} treinos, {p?.incoming.bodyEntries} avaliações,{' '}
-              {p?.incoming.photos} fotos. Nada foi gravado ainda.
+              {p?.incoming.photos} fotos, {p?.incoming.goals} metas. Nada foi gravado ainda.
             </DialogDescription>
           </DialogHeader>
 
@@ -257,7 +258,7 @@ export function RestorePreviewDialog({ backup, preview, onClose }: { backup: Bac
                     setBusy(true);
                     try {
                       const r = await restoreBackupMerge(backup, { expectedLocalFingerprint: p.localFingerprint, acceptPartial });
-                      const added = `+${r.sessions} treinos, +${r.routines} rotinas, +${r.bodyEntries} avaliações, +${r.photos} fotos · ${r.duplicates} duplicatas`;
+                      const added = `+${r.sessions} treinos, +${r.routines} rotinas, +${r.bodyEntries} avaliações, +${r.photos} fotos, +${r.goals} metas · ${r.duplicates} duplicatas`;
                       if (r.notRestored > 0)
                         toast.warning('Backup mesclado parcialmente', {
                           description: `${added}. ${r.notRestored} registro(s) do backup não foram restaurados (${r.conflicts} em conflito, mantida a versão deste aparelho).`,

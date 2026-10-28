@@ -5,7 +5,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import AIAssistantPage from '@/pages/AIAssistantPage';
-import { IronTrackDB, db, setDb } from '@/db/db';
+import { DB_SCHEMA_VERSION, IronTrackDB, db, setDb } from '@/db/db';
 import { createAssistantService, type AssistantComposition } from '@/integrations/ai/assistantService';
 import { loadContextSources } from '@/integrations/ai/contextSources';
 import type { AssistantDeps } from '@/features/assistant/useAssistant';
@@ -403,8 +403,8 @@ describe('assistente: privacidade e integridade', () => {
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);
     expect(await dump()).toBe(before); // treinos, avaliações, fotos, perfil e configurações intactos
-    expect(db.tables.map((t) => t.name).sort()).toEqual(['bodyEntries', 'overrides', 'photos', 'profiles', 'rotations', 'routines', 'sessions', 'settings']);
-    expect(db.verno).toBe(2);
+    expect(db.tables.map((t) => t.name).sort()).toEqual(['bodyEntries', 'goals', 'overrides', 'photos', 'profiles', 'rotations', 'routines', 'sessions', 'settings']);
+    expect(db.verno).toBe(DB_SCHEMA_VERSION);
 
     // Recarregar (montar de novo) perde a conversa: nada foi guardado.
     await act(async () => root!.unmount());

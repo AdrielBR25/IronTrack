@@ -1,6 +1,7 @@
 import { OWNED_COLLECTIONS, type CollectionName, type DataSnapshot } from './types';
 import { isValidProfileId } from './profile';
 import { exerciseModelIssues, setModelIssues, type ModelIssue } from '@/modules/training';
+import { goalIssues } from '@/modules/goals';
 
 // Verificação de integridade dos dados em memória (sem acesso ao banco nem à interface).
 // Usada antes de qualquer restauração de backup e para diagnosticar o banco local.
@@ -44,7 +45,10 @@ export type IssueCode =
   | 'CROSS_PROFILE_REFERENCE'
   // P10: campos de modalidade (docs/MIGRACAO_EXERCICIOS_V3.md §2).
   | 'INVALID_MODALITY_FIELD'
-  | 'MODALITY_CONTRADICTION';
+  | 'MODALITY_CONTRADICTION'
+  // P12: metas de treinamento (docs/METAS_TREINAMENTO.md §5).
+  | 'INVALID_GOAL'
+  | 'GOAL_EXERCISE_UNAVAILABLE';
 
 /** Coleções citadas nos problemas: as do retrato e a tabela de perfis. */
 export type IssueCollection = CollectionName | 'profiles';
@@ -148,7 +152,7 @@ export function checkIntegrity(d: DataSnapshot, ownership?: OwnershipContext): I
     issues.push({ severity, code, collection, id, message, action });
 
   // ---- IDs: vazios e duplicados em cada coleção ----
-  const collections: Exclude<CollectionName, 'settings'>[] = ['routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos'];
+  const collections: Exclude<CollectionName, 'settings'>[] = ['routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos', 'goals'];
   for (const c of collections) {
     const seen = new Map<string, string>();
     const list = (d[c] ?? []) as unknown[];
@@ -172,6 +176,7 @@ export function checkIntegrity(d: DataSnapshot, ownership?: OwnershipContext): I
 
   // ---- Rotinas ----
   const routines = new Map<string, { workoutIds: Set<string>; count: number }>();
+  const templateIds = new Set<string>();
   for (const r of d.routines ?? []) {
     if (!isNonEmptyId(r?.id)) continue;
     if (!Array.isArray(r.workouts)) {
@@ -196,6 +201,7 @@ export function checkIntegrity(d: DataSnapshot, ownership?: OwnershipContext): I
         if (exIds.has(e.id))
           add('warning', 'ROUTINE_DUPLICATE_EXERCISE_ID', 'routines', r.id, `Dois exercícios da rotina usam o mesmo ID (${e.id}).`, 'Edite a rotina; a edição de um exercício pode afetar o outro.');
         exIds.add(e.id);
+        templateIds.add(e.id);
         if (!isFiniteNum(e.sets) || e.sets < 0 || !isFiniteNum(e.repMin) || !isFiniteNum(e.repMax) || e.repMin < 0)
           add('warning', 'INVALID_NUMBER', 'routines', r.id, `Exercício ${e.id} com número de séries ou repetições inválido.`, 'Revise o exercício no editor de treinos.');
         else if (e.repMin > e.repMax)
@@ -309,6 +315,19 @@ export function checkIntegrity(d: DataSnapshot, ownership?: OwnershipContext): I
       add('warning', 'PHOTO_ORPHAN', 'photos', p.id, 'Foto associada a uma avaliação que não existe.', 'A foto é preservada (nunca apagada automaticamente), mas não aparece na tela; exporte um backup para guardá-la.');
   }
 
+  // ---- Metas (P12): valores, unidades e datas válidos; exercício referenciado por ID da ficha ----
+  for (const g of d.goals ?? []) {
+    if (!isNonEmptyId(g?.id)) continue;
+    const problems = goalIssues(g);
+    if (problems.length) {
+      const examples = [...new Set(problems.map((i) => i.message.replace(/\.$/, '')))].slice(0, 3).join('; ');
+      add('error', 'INVALID_GOAL', 'goals', g.id, `Meta com ${problems.length} campo(s) inválido(s): ${examples}.`, 'Corrija o arquivo: metas inválidas não são importadas nem descartadas automaticamente.');
+      continue;
+    }
+    if (g.exercise && !g.exercise.templateIds.some((id) => templateIds.has(id)))
+      add('info', 'GOAL_EXERCISE_UNAVAILABLE', 'goals', g.id, 'Meta de um exercício que não está mais em nenhuma ficha.', 'Nenhuma: a meta é preservada e continua usando o histórico registrado.');
+  }
+
   // ---- Configurações (referência opcional) ----
   const active_ = d.settings?.activeRoutineId;
   if (active_ && !routines.has(active_))
@@ -391,6 +410,11 @@ function checkOwnership(d: DataSnapshot, ctx: OwnershipContext, add: AddIssue) {
     const b = entries.get(p?.entryId);
     if (a && b && a !== b) add('error', 'CROSS_PROFILE_REFERENCE', 'photos', p.id, 'Foto ligada a uma avaliação de outro perfil.', 'Nenhum dado é reatribuído automaticamente; restaure um backup consistente.');
   }
+  for (const g of d.goals ?? []) {
+    const a = owners.get('goals')!.get(g?.id);
+    const b = g?.exercise ? routines.get(g.exercise.routineId) : undefined;
+    if (a && b && a !== b) add('error', 'CROSS_PROFILE_REFERENCE', 'goals', g.id, 'Meta ligada a uma rotina de outro perfil.', 'Nenhum dado é reatribuído automaticamente; restaure um backup consistente.');
+  }
   const activeOwner = d.settings?.activeRoutineId ? routines.get(d.settings.activeRoutineId) : undefined;
   const def = ctx.scope === 'local' ? ctx.profiles.find((p) => p.isDefault === true)?.id : ctx.profiles[0]?.id;
   if (activeOwner && def && activeOwner !== def)
@@ -421,7 +445,7 @@ export function snapshotFingerprint(d: DataSnapshot, profiles?: unknown[]): stri
   const parts: string[] = [`settings=${d.settings ? hash64(stableStringify(d.settings)) : '-'}`];
   // Identidade local: qualquer mudança nos perfis (criação, nome, principal) também invalida a prévia.
   if (profiles) parts.push(`profiles=${profiles.length}:${hash64(profiles.map((p) => stableStringify(p)).sort().join('\n'))}`);
-  for (const c of ['routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos'] as const) {
+  for (const c of ['routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos', 'goals'] as const) {
     const list = (d[c] ?? []) as unknown[];
     const entries = list
       .map((r) => {

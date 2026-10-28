@@ -41,7 +41,7 @@ export async function readLocalState(): Promise<{ data: BackupData; profiles: Lo
 }
 
 async function readTables(): Promise<BackupData> {
-  const [settings, routines, sessions, rotations, overrides, bodyEntries, photos] = await Promise.all([
+  const [settings, routines, sessions, rotations, overrides, bodyEntries, photos, goals] = await Promise.all([
     db.settings.get('settings'),
     db.routines.toArray(),
     db.sessions.toArray(),
@@ -49,8 +49,9 @@ async function readTables(): Promise<BackupData> {
     db.overrides.toArray(),
     db.bodyEntries.toArray(),
     db.photos.toArray(),
+    db.goals.toArray(),
   ]);
-  return { settings: settings ?? null, routines, sessions, rotations, overrides, bodyEntries, photos };
+  return { settings: settings ?? null, routines, sessions, rotations, overrides, bodyEntries, photos, goals };
 }
 
 function requireDefaultProfile(profiles: LocalProfile[]): LocalProfile {
@@ -100,6 +101,7 @@ const countOf = (d: BackupData): Record<CollectionName, number> => ({
   overrides: d.overrides.length,
   bodyEntries: d.bodyEntries.length,
   photos: d.photos.length,
+  goals: d.goals.length,
 });
 
 /** Analisa o backup contra os dados atuais sem gravar nada. */
@@ -165,8 +167,9 @@ export async function restoreBackupReplace(b: BackupFile, opts: RestoreConfirmat
     await db.overrides.bulkPut(d.overrides);
     await db.bodyEntries.bulkPut(d.bodyEntries);
     await db.photos.bulkPut(d.photos);
+    await db.goals.bulkPut(d.goals);
   });
-  return { routines: d0.routines.length, sessions: d0.sessions.length, bodyEntries: d0.bodyEntries.length, photos: d0.photos.length, skipped: 0, duplicates: 0, conflicts: 0, notRestored: 0 };
+  return { routines: d0.routines.length, sessions: d0.sessions.length, bodyEntries: d0.bodyEntries.length, photos: d0.photos.length, goals: d0.goals.length, skipped: 0, duplicates: 0, conflicts: 0, notRestored: 0 };
 }
 
 /**
@@ -205,12 +208,14 @@ export async function restoreBackupMerge(b: BackupFile, opts: RestoreConfirmatio
     await db.overrides.bulkAdd(a.overrides);
     await db.bodyEntries.bulkAdd(a.bodyEntries);
     await db.photos.bulkAdd(a.photos);
+    await db.goals.bulkAdd(a.goals);
     const t = plan.totals;
     return {
       routines: a.routines.length,
       sessions: a.sessions.length,
       bodyEntries: a.bodyEntries.length,
       photos: a.photos.length,
+      goals: a.goals.length,
       skipped: t.duplicate + t.conflict + t.skipped,
       duplicates: t.duplicate,
       conflicts: t.conflict,

@@ -86,6 +86,7 @@ export function snapshot(over: Partial<DataSnapshot> = {}): DataSnapshot {
     overrides: [{ routineId: 'r1', date: '2026-01-12', kind: 'workout', workoutId: 'r1-C' }, { routineId: 'r1', date: '2026-01-13', kind: 'rest' }],
     bodyEntries: [entry('b1'), entry('b2', { date: '2026-02-10', weightKg: 79 })],
     photos: [photo('p1', 'b1'), photo('p2', 'b2')],
+    goals: [],
     ...over,
   };
 }

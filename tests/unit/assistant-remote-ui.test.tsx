@@ -7,7 +7,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import AIAssistantPage from '@/pages/AIAssistantPage';
-import { IronTrackDB, db, setDb } from '@/db/db';
+import { DB_SCHEMA_VERSION, IronTrackDB, db, setDb } from '@/db/db';
 import { createAssistantService, type AssistantComposition } from '@/integrations/ai/assistantService';
 import { addDays, fromISODate, todayISO } from '@/lib/dates';
 import { entry, session, settings } from './fixtures';
@@ -367,7 +367,7 @@ describe('assistente remoto: indisponibilidade e privacidade', () => {
     await waitFor(() => $('chat-assistant'));
     expect(lsSet).not.toHaveBeenCalled();
     expect(JSON.stringify(await Promise.all([db.settings, db.sessions, db.bodyEntries, db.photos, db.profiles].map((t) => t.toArray())))).toBe(before);
-    expect(db.verno).toBe(2);
+    expect(db.verno).toBe(DB_SCHEMA_VERSION);
     await act(async () => root!.unmount());
     root = null;
     expect(comp.service.listProviders().map((p) => p.id)).toEqual(['mock']);

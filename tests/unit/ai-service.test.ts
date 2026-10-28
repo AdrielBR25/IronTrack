@@ -1,7 +1,7 @@
 // Serviço central de IA: execução, falhas, cancelamento, tempo limite, normalização e limites.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AIError, AI_ERROR_MESSAGES, AI_REQUEST_LIMITS, BASE_SYSTEM_PROMPT, type AIProvider, type AIProviderResult } from '@/modules/ai';
-import { IronTrackDB, db, setDb } from '@/db/db';
+import { DB_SCHEMA_VERSION, IronTrackDB, db, setDb } from '@/db/db';
 import { BACKUP_SCHEMA_VERSION, exportBackup } from '@/lib/backup';
 import { baseInput, richSources, setup, T0 } from './aiFixtures';
 
@@ -178,9 +178,9 @@ describe('banco e backup intactos', () => {
     const p = await service.prepare(baseInput({ categories: ['training_summary'], sources: richSources() }));
     await service.execute(p, consent(p));
     const after = await exportBackup();
-    expect(db.verno).toBe(2);
+    expect(db.verno).toBe(DB_SCHEMA_VERSION);
     expect(after.schemaVersion).toBe(BACKUP_SCHEMA_VERSION);
-    expect(db.tables.map((t) => t.name).sort()).toEqual(['bodyEntries', 'overrides', 'photos', 'profiles', 'rotations', 'routines', 'sessions', 'settings']);
+    expect(db.tables.map((t) => t.name).sort()).toEqual(['bodyEntries', 'goals', 'overrides', 'photos', 'profiles', 'rotations', 'routines', 'sessions', 'settings']);
     expect({ ...after, exportedAt: 0 }).toEqual({ ...before, exportedAt: 0 });
     expect(JSON.stringify(after)).not.toMatch(/consent|binding|SIMULAÇÃO/);
   });

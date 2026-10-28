@@ -1,5 +1,5 @@
 import { recordKey, stableStringify } from './integrity';
-import type { BodyEntry, CollectionName, DataSnapshot, DayOverride, ProgressPhoto, Routine, RotationState, WorkoutSession } from './types';
+import type { BodyEntry, CollectionName, DataSnapshot, DayOverride, ProgressPhoto, Routine, RotationState, TrainingGoal, WorkoutSession } from './types';
 
 // Planejamento determinístico da restauração por mesclagem (função pura).
 // Política documentada em docs/BACKUP_RESTAURACAO.md:
@@ -9,6 +9,7 @@ import type { BodyEntry, CollectionName, DataSnapshot, DayOverride, ProgressPhot
 //  IDs diferentes + conteúdo igual → duplicata confirmada; referências dependentes passam para o ID local
 //  IDs diferentes + semelhantes    → registros distintos: grava e avisa ("possível duplicata")
 //  registros distintos             → grava
+//  metas (P12): mesmas regras por ID; o vínculo com a rotina acompanha a rotina deduplicada
 //
 // Nada é sobrescrito: a aplicação usa somente inserções.
 
@@ -38,7 +39,7 @@ export interface MergePlan {
   notRestored: number;
 }
 
-const COLLECTIONS: CollectionName[] = ['settings', 'routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos'];
+const COLLECTIONS: CollectionName[] = ['settings', 'routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos', 'goals'];
 
 function omit<T extends object>(o: T, keys: string[]): Partial<T> {
   const out = { ...o } as Record<string, unknown>;
@@ -52,12 +53,14 @@ const contentOf = {
   sessions: (s: WorkoutSession) => stableStringify(omit(s, ['id'])),
   bodyEntries: (e: BodyEntry) => stableStringify(omit(e, ['id', 'createdAt'])),
   photos: (p: ProgressPhoto) => stableStringify({ entryId: p.entryId, dataUrl: p.dataUrl }),
+  // Metas: o que a meta mede e quando (sem ID, carimbos de tempo e versão do registro).
+  goals: (g: TrainingGoal) => stableStringify(omit(g, ['id', 'createdAt', 'updatedAt', 'revision'])),
 };
 
 export function planMerge(local: DataSnapshot, incoming: DataSnapshot): MergePlan {
   const counts = Object.fromEntries(COLLECTIONS.map((c) => [c, { add: 0, duplicate: 0, conflict: 0, skipped: 0 }])) as Record<CollectionName, CollectionCounts>;
   const items: MergeItem[] = [];
-  const toAdd: DataSnapshot = { settings: null, routines: [], sessions: [], rotations: [], overrides: [], bodyEntries: [], photos: [] };
+  const toAdd: DataSnapshot = { settings: null, routines: [], sessions: [], rotations: [], overrides: [], bodyEntries: [], photos: [], goals: [] };
   const note = (kind: MergeItemKind, code: string, collection: CollectionName, id: string, message: string) => items.push({ kind, code, collection, id, message });
 
   /**
@@ -237,6 +240,30 @@ export function planMerge(local: DataSnapshot, incoming: DataSnapshot): MergePla
   keyed('rotations', incoming.rotations, local.rotations, toAdd.rotations);
   keyed('overrides', incoming.overrides, local.overrides, toAdd.overrides);
 
+  // ---- Metas (P12) ----
+  {
+    const remapped = incoming.goals.map((g) =>
+      g.exercise && routineRemap.has(g.exercise.routineId) ? { ...g, exercise: { ...g.exercise, routineId: mapRoutine(g.exercise.routineId) } } : g,
+    );
+    const localByKey = index('goals', local.goals);
+    const localByContent = new Set(local.goals.map(contentOf.goals));
+    const localTitles = new Set(local.goals.map((g) => `${g.type}|${g.title}`));
+    const seen = new Set<string>();
+    for (const g of remapped) {
+      if (byKey('goals', g, localByKey, seen) !== 'new') continue;
+      const content = contentOf.goals(g);
+      if (localByContent.has(content)) {
+        counts.goals.duplicate++;
+        note('duplicate-content', 'DUPLICATE_CONTENT', 'goals', g.id, 'Meta idêntica já existe com outro ID.');
+        continue;
+      }
+      if (localTitles.has(`${g.type}|${g.title}`)) note('similar', 'SIMILAR_GOAL', 'goals', g.id, 'Já existe uma meta do mesmo tipo com o mesmo título e valores diferentes; as duas serão mantidas.');
+      localByContent.add(content);
+      toAdd.goals.push(g);
+      counts.goals.add++;
+    }
+  }
+
   // ---- Configurações: nunca mescladas campo a campo ----
   if (incoming.settings) {
     if (!local.settings) {
@@ -265,5 +292,6 @@ export function applyPlan(local: DataSnapshot, plan: MergePlan): DataSnapshot {
     overrides: [...local.overrides, ...a.overrides],
     bodyEntries: [...local.bodyEntries, ...a.bodyEntries],
     photos: [...local.photos, ...a.photos],
+    goals: [...local.goals, ...a.goals],
   };
 }

@@ -32,6 +32,10 @@ const V2_STORES = {
   photos: 'id, entryId, profileId',
 };
 
+// v3 (F01/P12): só a tabela de metas (as demais herdam a declaração da v2).
+const V3_DECLARATION = { goals: 'id, profileId, status, updatedAt' };
+const V3_STORES = { ...V2_STORES, ...V3_DECLARATION };
+
 let n = 0;
 const uniqueName = () => `migration-test-${++n}`;
 
@@ -86,13 +90,13 @@ function ownersOf(d: DataSnapshot) {
   return new Set([...d.routines, ...d.sessions, ...d.bodyEntries, ...d.photos].map((r) => r.profileId));
 }
 
-/** Versão hipotética 3, só para testar a infraestrutura de upgrade sobre a v2. */
-class IronTrackDBv3 extends IronTrackDB {
+/** Versão hipotética 4, só para testar a infraestrutura de upgrade sobre a atual (v3, P12). */
+class IronTrackDBv4 extends IronTrackDB {
   constructor(name: string, upgrade: Parameters<typeof migration>[2]) {
     super(name);
-    this.version(3)
+    this.version(4)
       .stores({ sessions: 'id, status, startedAt, workoutId, routineId, profileId, finishedAt' })
-      .upgrade(migration(3, 'teste: índice finishedAt e campo derivado', upgrade));
+      .upgrade(migration(4, 'teste: índice finishedAt e campo derivado', upgrade));
   }
 }
 
@@ -120,21 +124,22 @@ async function openRaw(name: string) {
 }
 
 describe('esquema IndexedDB', () => {
-  it('versão 1 permanece idêntica à publicada (não alterar retroativamente) e v2 é a atual', async () => {
-    expect(DB_SCHEMA_VERSION).toBe(2);
+  it('versões 1 e 2 permanecem idênticas às publicadas (não alterar retroativamente) e v3 é a atual', async () => {
+    expect(DB_SCHEMA_VERSION).toBe(3);
     const cur = new IronTrackDB(uniqueName());
     const versions = (cur as unknown as { _versions: { _cfg: { version: number; storesSource: Record<string, string> } }[] })._versions;
     expect(versions.find((v) => v._cfg.version === 1)?._cfg.storesSource).toEqual(LEGACY_V1_STORES);
     expect(versions.find((v) => v._cfg.version === 2)?._cfg.storesSource).toEqual(V2_STORES);
+    expect(versions.find((v) => v._cfg.version === 3)?._cfg.storesSource).toEqual(V3_DECLARATION);
     await cur.open();
     expect(cur.verno).toBe(DB_SCHEMA_VERSION);
     const schema = Object.fromEntries(cur.tables.map((t) => [t.name, [t.schema.primKey.src, ...t.schema.indexes.map((i) => i.src)].join(', ')]));
-    expect(schema).toEqual(V2_STORES);
+    expect(schema).toEqual(V3_STORES);
     cur.close();
   });
 });
 
-describe('migração real v1 → v2', () => {
+describe('migração real v1 → v2 (e v3, que só acrescenta a tabela de metas)', () => {
   it('cria exatamente um perfil principal e preserva todos os registros, IDs e relações', async () => {
     const name = uniqueName();
     const d = legacyData();
@@ -142,7 +147,8 @@ describe('migração real v1 → v2', () => {
 
     setDb(new IronTrackDB(name));
     await db.open();
-    expect(db.verno).toBe(2);
+    expect(db.verno).toBe(DB_SCHEMA_VERSION);
+    expect(await db.goals.count()).toBe(0);
     const profiles = await db.profiles.toArray();
     expect(profiles).toHaveLength(1);
     expect(profiles[0]).toMatchObject({ displayName: 'Meu perfil', isDefault: true });
@@ -219,7 +225,7 @@ describe('migração real v1 → v2', () => {
 
   it('banco v1 vazio também ganha exatamente um perfil', async () => {
     const name = uniqueName();
-    await createLegacyV1(name, { settings: null, routines: [], sessions: [], rotations: [], overrides: [], bodyEntries: [], photos: [] });
+    await createLegacyV1(name, { settings: null, routines: [], sessions: [], rotations: [], overrides: [], bodyEntries: [], photos: [], goals: [] });
     setDb(new IronTrackDB(name));
     await db.open();
     expect(await db.profiles.count()).toBe(1);
@@ -250,7 +256,7 @@ describe('migração real v1 → v2', () => {
     // nova tentativa com o app normal conclui a migração
     setDb(new IronTrackDB(name));
     await db.open();
-    expect(db.verno).toBe(2);
+    expect(db.verno).toBe(DB_SCHEMA_VERSION);
     expectSameData(await readSnapshot(), d);
   });
 
@@ -289,8 +295,8 @@ describe('migração real v1 → v2', () => {
   });
 });
 
-describe('infraestrutura de migrações (versão 3 hipotética)', () => {
-  it('upgrade real v2 → v3 preserva os dados, o perfil e aplica a transformação', async () => {
+describe('infraestrutura de migrações (versão 4 hipotética)', () => {
+  it('upgrade real v3 → v4 preserva os dados, o perfil e aplica a transformação', async () => {
     const name = uniqueName();
     const d = legacyData();
     await createLegacyV1(name, d);
@@ -299,7 +305,7 @@ describe('infraestrutura de migrações (versão 3 hipotética)', () => {
     const id = db.currentProfileId;
     db.close();
 
-    const v3 = new IronTrackDBv3(name, async (tx) => {
+    const v4 = new IronTrackDBv4(name, async (tx) => {
       await tx
         .table('sessions')
         .toCollection()
@@ -307,20 +313,20 @@ describe('infraestrutura de migrações (versão 3 hipotética)', () => {
           s.migratedFlag = true;
         });
     });
-    await v3.open();
-    expect(v3.verno).toBe(3);
-    expect(v3.currentProfileId).toBe(id);
-    const sessions = await v3.table('sessions').toArray();
+    await v4.open();
+    expect(v4.verno).toBe(4);
+    expect(v4.currentProfileId).toBe(id);
+    const sessions = await v4.table('sessions').toArray();
     expect(sessions).toHaveLength(d.sessions.length);
     expect(sessions.every((s) => s.migratedFlag === true && s.profileId === id)).toBe(true);
     // o novo índice funciona
-    expect(await v3.table('sessions').where('finishedAt').above(0).count()).toBe(3);
-    expect(await v3.table('photos').count()).toBe(d.photos.length);
-    expect(await v3.table('settings').get('settings')).toEqual(d.settings);
-    v3.close();
+    expect(await v4.table('sessions').where('finishedAt').above(0).count()).toBe(3);
+    expect(await v4.table('photos').count()).toBe(d.photos.length);
+    expect(await v4.table('settings').get('settings')).toEqual(d.settings);
+    v4.close();
 
     // reabertura do banco atualizado
-    const again = new IronTrackDBv3(name, () => {
+    const again = new IronTrackDBv4(name, () => {
       throw new Error('não deveria rodar de novo');
     });
     await again.open();
@@ -328,7 +334,7 @@ describe('infraestrutura de migrações (versão 3 hipotética)', () => {
     again.close();
   });
 
-  it('falha na migração não perde dados: banco continua na v2 e intacto', async () => {
+  it('falha na migração não perde dados: banco continua na v3 e intacto', async () => {
     const name = uniqueName();
     const d = legacyData();
     await createLegacyV1(name, d);
@@ -337,7 +343,7 @@ describe('infraestrutura de migrações (versão 3 hipotética)', () => {
     const before = await readSnapshot();
     db.close();
 
-    const broken = new IronTrackDBv3(name, async (tx) => {
+    const broken = new IronTrackDBv4(name, async (tx) => {
       await tx
         .table('sessions')
         .toCollection()
@@ -352,13 +358,13 @@ describe('infraestrutura de migrações (versão 3 hipotética)', () => {
     );
     expect(err).toBeTruthy();
     const msg = describeOpenError(err);
-    expect(msg).toMatch(/versão 3/);
+    expect(msg).toMatch(/versão 4/);
     expect(msg).toMatch(/não foram apagados/);
     broken.close();
 
     setDb(new IronTrackDB(name));
     await db.open();
-    expect(db.verno).toBe(2);
+    expect(db.verno).toBe(3);
     expect(await readSnapshot()).toEqual(before);
   });
 
@@ -370,13 +376,13 @@ describe('infraestrutura de migrações (versão 3 hipotética)', () => {
     await expect(fn({} as never)).rejects.toThrow(/versão 3 \(exemplo\): boom/);
   });
 
-  it('app anterior (v2) abre banco já atualizado para v3 sem apagar dados', async () => {
+  it('app anterior (v3) abre banco já atualizado para v4 sem apagar dados', async () => {
     const name = uniqueName();
     await createLegacyV1(name, snapshot({ routines: [routine()], rotations: [rotation()] }));
-    const v3 = new IronTrackDBv3(name, () => undefined);
-    await v3.open();
-    const id = v3.currentProfileId;
-    v3.close();
+    const v4 = new IronTrackDBv4(name, () => undefined);
+    await v4.open();
+    const id = v4.currentProfileId;
+    v4.close();
     // Dexie 4 abre bancos de versão superior em modo compatível (ex.: service worker antigo em cache).
     const old = new IronTrackDB(name);
     await old.open();
