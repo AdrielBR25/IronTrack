@@ -87,6 +87,7 @@ export function snapshot(over: Partial<DataSnapshot> = {}): DataSnapshot {
     bodyEntries: [entry('b1'), entry('b2', { date: '2026-02-10', weightKg: 79 })],
     photos: [photo('p1', 'b1'), photo('p2', 'b2')],
     goals: [],
+    planEntries: [],
     ...over,
   };
 }

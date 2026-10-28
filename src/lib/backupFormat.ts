@@ -14,8 +14,9 @@ export const BACKUP_APP = 'irontrack';
 // v0: tabelas na raiz · v1: { data } · v2: + perfil proprietário (`profile`) e `profileId` nos registros ·
 // v3 (P10): + campos opcionais de modalidade em exercícios e séries (modality, laterality, loadMode,
 // secondaryMuscles, distanceUnit, durationSec, distance, side, assistanceKg). Estrutura igual à v2 ·
-// v4 (P12): + coleção `goals` (metas de treinamento, com `profileId`). Backups v0–v3 viram v4 com `goals: []`.
-export const BACKUP_SCHEMA_VERSION = 4;
+// v4 (P12): + coleção `goals` (metas de treinamento, com `profileId`). Backups v0–v3 viram v4 com `goals: []` ·
+// v5 (P13): + coleção `planEntries` (planejamento semanal, com `profileId`). Backups v0–v4 viram v5 com `planEntries: []`.
+export const BACKUP_SCHEMA_VERSION = 5;
 
 export type BackupData = DataSnapshot;
 
@@ -95,6 +96,8 @@ const backupSchema = z.object({
     // P12: estrutura mínima aqui; a validação completa (tipo, unidade, valores, datas, exercício) é da verificação
     // de integridade, que recusa o arquivo inteiro se uma meta for inválida (nada é descartado em silêncio).
     goals: z.array(z.object({ id: z.string(), type: z.string() }).passthrough()),
+    // P13: idem para o planejamento (validação completa em checkIntegrity › INVALID_PLAN_ENTRY).
+    planEntries: z.array(z.object({ id: z.string(), scope: z.string(), kind: z.string() }).passthrough()),
   }),
 });
 
@@ -133,6 +136,12 @@ const MIGRATIONS: Record<number, Migration> = {
     const data = (raw.data ?? {}) as Record<string, unknown>;
     return { ...raw, schemaVersion: 4, data: { ...data, goals: data.goals ?? [] } };
   },
+  // v4 → v5: o planejamento semanal não existia; a coleção entra vazia e nada mais muda. Um app anterior recusa v5
+  // (com orientação para atualizar) em vez de restaurar e perder o planejamento sem avisar.
+  4: (raw) => {
+    const data = (raw.data ?? {}) as Record<string, unknown>;
+    return { ...raw, schemaVersion: 5, data: { ...data, planEntries: data.planEntries ?? [] } };
+  },
 };
 
 export function migrateBackup(raw: unknown): ParseResult<Record<string, unknown>> {
@@ -161,7 +170,7 @@ export function migrateBackup(raw: unknown): ParseResult<Record<string, unknown>
 
 export const BACKUP_LIMITS = {
   maxBytes: 100 * 1024 * 1024,
-  maxRecords: { routines: 1_000, sessions: 50_000, rotations: 1_000, overrides: 20_000, bodyEntries: 10_000, photos: 2_000, goals: 2_000 } as Record<Exclude<CollectionName, 'settings'>, number>,
+  maxRecords: { routines: 1_000, sessions: 50_000, rotations: 1_000, overrides: 20_000, bodyEntries: 10_000, photos: 2_000, goals: 2_000, planEntries: 5_000 } as Record<Exclude<CollectionName, 'settings'>, number>,
   maxPhotoChars: 15 * 1024 * 1024,
   maxWorkoutsPerRoutine: 100,
   maxExercisesPerItem: 300,
@@ -256,6 +265,8 @@ export interface ImportSummary {
   photos: number;
   /** P12: metas restauradas. */
   goals: number;
+  /** P13: entradas de planejamento restauradas. */
+  planEntries: number;
   /** Registros do backup não aplicados (duplicatas + conflitos + ignorados). */
   skipped: number;
   duplicates: number;

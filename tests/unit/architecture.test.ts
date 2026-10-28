@@ -108,6 +108,9 @@ describe('arquitetura', () => {
       if (ownModule === 'modules/analytics' && e.target === 'modules/training/index.ts') return false;
       // P12: metas leem treinos pela API pública do treinamento e medem com os contratos públicos do analytics.
       if (ownModule === 'modules/goals' && (e.target === 'modules/training/index.ts' || e.target === 'modules/analytics/index.ts')) return false;
+      // P13: o planejamento lê treinos pela API pública do treinamento, usa o calendário do analytics e conta sessões
+      // e semanas com o motor das metas (sem fórmula paralela).
+      if (ownModule === 'modules/planner' && ['modules/training/index.ts', 'modules/analytics/index.ts', 'modules/goals/index.ts'].includes(e.target)) return false;
       return !inDir(e.target, ownModule) && !allowedShared.has(e.target);
     });
     expect(bad.map(fmt)).toEqual([]);
@@ -149,7 +152,9 @@ describe('arquitetura', () => {
     // Exceção documentada (P10): a verificação de integridade valida os campos de modalidade com as mesmas regras
     // puras do domínio de treinamento, sempre pela API pública (docs/ARQUITETURA.md).
     // P12: a mesma exceção para as metas (validação de metas nos backups pela API pública de '@/modules/goals').
-    const integrityRules = (e: Edge) => e.from === 'lib/integrity.ts' && (e.target === 'modules/training/index.ts' || e.target === 'modules/goals/index.ts');
+    // P13: idem para o planejamento ('@/modules/planner').
+    const integrityRules = (e: Edge) =>
+      e.from === 'lib/integrity.ts' && (e.target === 'modules/training/index.ts' || e.target === 'modules/goals/index.ts' || e.target === 'modules/planner/index.ts');
     const toDomain = edges.filter(
       (e) => inDir(e.from, 'lib') && e.target && inDir(e.target, 'modules') && e.from !== 'lib/types.ts' && !DEPRECATED_SHIMS.includes(e.from) && !integrityRules(e),
     );

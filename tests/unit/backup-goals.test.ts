@@ -55,12 +55,12 @@ async function roundTrip() {
 }
 
 describe('exportação', () => {
-  it('backup v4 contém as metas do perfil, com IDs, versão e estado', async () => {
+  it('backup atual (v5; metas desde a v4) contém as metas do perfil, com IDs, versão e estado', async () => {
     const { a } = await seed();
     await setGoalStatus('g-freq', 'pause', '2026-03-10');
     const b = await exportBackup();
-    expect(BACKUP_SCHEMA_VERSION).toBe(4);
-    expect(b.schemaVersion).toBe(4);
+    expect(BACKUP_SCHEMA_VERSION).toBe(5);
+    expect(b.schemaVersion).toBe(5);
     expect(b.data.goals).toHaveLength(2);
     expect(b.data.goals.find((g) => g.id === 'g-load')).toEqual(a);
     expect(b.data.goals.find((g) => g.id === 'g-freq')).toMatchObject({ status: 'paused', revision: 2 });
@@ -80,7 +80,7 @@ describe('importação de versões anteriores', () => {
     }
     if (v === 0) delete raw.schemaVersion;
     const b = parse(raw);
-    expect(b.schemaVersion).toBe(4);
+    expect(b.schemaVersion).toBe(BACKUP_SCHEMA_VERSION);
     expect(b.data.goals).toEqual([]);
     const p = await previewRestore(b);
     expect(p.blocked).toBe(false);

@@ -2,6 +2,7 @@ import { OWNED_COLLECTIONS, type CollectionName, type DataSnapshot } from './typ
 import { isValidProfileId } from './profile';
 import { exerciseModelIssues, setModelIssues, type ModelIssue } from '@/modules/training';
 import { goalIssues } from '@/modules/goals';
+import { planEntryIssues } from '@/modules/planner';
 
 // Verificação de integridade dos dados em memória (sem acesso ao banco nem à interface).
 // Usada antes de qualquer restauração de backup e para diagnosticar o banco local.
@@ -48,7 +49,12 @@ export type IssueCode =
   | 'MODALITY_CONTRADICTION'
   // P12: metas de treinamento (docs/METAS_TREINAMENTO.md §5).
   | 'INVALID_GOAL'
-  | 'GOAL_EXERCISE_UNAVAILABLE';
+  | 'GOAL_EXERCISE_UNAVAILABLE'
+  // P13: planejamento semanal (docs/PLANEJAMENTO_SEMANAL.md §8).
+  | 'INVALID_PLAN_ENTRY'
+  | 'PLAN_ROUTINE_MISSING'
+  | 'PLAN_WORKOUT_MISSING'
+  | 'PLAN_DAY_CONFLICT';
 
 /** Coleções citadas nos problemas: as do retrato e a tabela de perfis. */
 export type IssueCollection = CollectionName | 'profiles';
@@ -152,7 +158,7 @@ export function checkIntegrity(d: DataSnapshot, ownership?: OwnershipContext): I
     issues.push({ severity, code, collection, id, message, action });
 
   // ---- IDs: vazios e duplicados em cada coleção ----
-  const collections: Exclude<CollectionName, 'settings'>[] = ['routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos', 'goals'];
+  const collections: Exclude<CollectionName, 'settings'>[] = ['routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos', 'goals', 'planEntries'];
   for (const c of collections) {
     const seen = new Map<string, string>();
     const list = (d[c] ?? []) as unknown[];
@@ -328,6 +334,35 @@ export function checkIntegrity(d: DataSnapshot, ownership?: OwnershipContext): I
       add('info', 'GOAL_EXERCISE_UNAVAILABLE', 'goals', g.id, 'Meta de um exercício que não está mais em nenhuma ficha.', 'Nenhuma: a meta é preservada e continua usando o histórico registrado.');
   }
 
+  // ---- Planejamento semanal (P13): campos válidos; rotina/treino ausentes são preservados com aviso ----
+  const validPlan: NonNullable<DataSnapshot['planEntries']> = [];
+  for (const e of d.planEntries ?? []) {
+    if (!isNonEmptyId(e?.id)) continue;
+    const problems = planEntryIssues(e);
+    if (problems.length) {
+      const examples = [...new Set(problems.map((i) => i.message.replace(/\.$/, '')))].slice(0, 3).join('; ');
+      add('error', 'INVALID_PLAN_ENTRY', 'planEntries', e.id, `Entrada de planejamento com ${problems.length} campo(s) inválido(s): ${examples}.`, 'Corrija o arquivo: entradas inválidas não são importadas nem descartadas automaticamente.');
+      continue;
+    }
+    validPlan.push(e);
+    if (e.kind !== 'workout' || !e.routineId) continue;
+    const r = routines.get(e.routineId);
+    if (!r) add('warning', 'PLAN_ROUTINE_MISSING', 'planEntries', e.id, 'Planejamento de uma rotina que não existe.', 'A entrada é preservada e aparece no painel como "rotina excluída"; remova ou troque a rotina no Planejamento.');
+    else if (e.workoutId && !r.workoutIds.has(e.workoutId))
+      add('warning', 'PLAN_WORKOUT_MISSING', 'planEntries', e.id, 'Planejamento aponta para um treino que não existe na rotina.', 'A entrada é preservada e aparece no painel como "treino removido"; escolha outro treino no Planejamento.');
+  }
+  // Descanso/dia livre junto com atividades no mesmo dia (ex.: após mesclar backups): as atividades valem.
+  const conflictDays = new Set<string>();
+  for (const e of validPlan) {
+    const key = e.scope === 'date' ? `data ${e.date}` : `dia ${e.weekday}`;
+    if (conflictDays.has(key)) continue;
+    const same = validPlan.filter((x) => (e.scope === 'date' ? x.scope === 'date' && x.date === e.date : x.scope === 'weekly' && x.weekday === e.weekday && x.enabled && x.validUntil === null));
+    if (same.some((x) => x.kind === 'workout') && same.some((x) => x.kind !== 'workout')) {
+      conflictDays.add(key);
+      add('warning', 'PLAN_DAY_CONFLICT', 'planEntries', e.id, `Descanso ou dia livre planejado junto com treinos (${key}).`, 'Nada é apagado: o painel mostra os treinos e avisa; ajuste o dia no Planejamento.');
+    }
+  }
+
   // ---- Configurações (referência opcional) ----
   const active_ = d.settings?.activeRoutineId;
   if (active_ && !routines.has(active_))
@@ -415,6 +450,11 @@ function checkOwnership(d: DataSnapshot, ctx: OwnershipContext, add: AddIssue) {
     const b = g?.exercise ? routines.get(g.exercise.routineId) : undefined;
     if (a && b && a !== b) add('error', 'CROSS_PROFILE_REFERENCE', 'goals', g.id, 'Meta ligada a uma rotina de outro perfil.', 'Nenhum dado é reatribuído automaticamente; restaure um backup consistente.');
   }
+  for (const e of d.planEntries ?? []) {
+    const a = owners.get('planEntries')!.get(e?.id);
+    const b = e?.routineId ? routines.get(e.routineId) : undefined;
+    if (a && b && a !== b) add('error', 'CROSS_PROFILE_REFERENCE', 'planEntries', e.id, 'Planejamento ligado a uma rotina de outro perfil.', 'Nenhum dado é reatribuído automaticamente; restaure um backup consistente.');
+  }
   const activeOwner = d.settings?.activeRoutineId ? routines.get(d.settings.activeRoutineId) : undefined;
   const def = ctx.scope === 'local' ? ctx.profiles.find((p) => p.isDefault === true)?.id : ctx.profiles[0]?.id;
   if (activeOwner && def && activeOwner !== def)
@@ -445,7 +485,7 @@ export function snapshotFingerprint(d: DataSnapshot, profiles?: unknown[]): stri
   const parts: string[] = [`settings=${d.settings ? hash64(stableStringify(d.settings)) : '-'}`];
   // Identidade local: qualquer mudança nos perfis (criação, nome, principal) também invalida a prévia.
   if (profiles) parts.push(`profiles=${profiles.length}:${hash64(profiles.map((p) => stableStringify(p)).sort().join('\n'))}`);
-  for (const c of ['routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos', 'goals'] as const) {
+  for (const c of ['routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos', 'goals', 'planEntries'] as const) {
     const list = (d[c] ?? []) as unknown[];
     const entries = list
       .map((r) => {

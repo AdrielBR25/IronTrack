@@ -1,5 +1,5 @@
 import { recordKey, stableStringify } from './integrity';
-import type { BodyEntry, CollectionName, DataSnapshot, DayOverride, ProgressPhoto, Routine, RotationState, TrainingGoal, WorkoutSession } from './types';
+import type { BodyEntry, CollectionName, DataSnapshot, DayOverride, PlanEntry, ProgressPhoto, Routine, RotationState, TrainingGoal, WorkoutSession } from './types';
 
 // Planejamento determinístico da restauração por mesclagem (função pura).
 // Política documentada em docs/BACKUP_RESTAURACAO.md:
@@ -10,6 +10,8 @@ import type { BodyEntry, CollectionName, DataSnapshot, DayOverride, ProgressPhot
 //  IDs diferentes + semelhantes    → registros distintos: grava e avisa ("possível duplicata")
 //  registros distintos             → grava
 //  metas (P12): mesmas regras por ID; o vínculo com a rotina acompanha a rotina deduplicada
+//  planejamento (P13): idem; mesma atividade vigente no mesmo dia = duplicata; treino de rotina em conflito que não
+//  existe na versão local da rotina não é aplicado (não liga o planejamento ao treino errado)
 //
 // Nada é sobrescrito: a aplicação usa somente inserções.
 
@@ -39,7 +41,7 @@ export interface MergePlan {
   notRestored: number;
 }
 
-const COLLECTIONS: CollectionName[] = ['settings', 'routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos', 'goals'];
+const COLLECTIONS: CollectionName[] = ['settings', 'routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos', 'goals', 'planEntries'];
 
 function omit<T extends object>(o: T, keys: string[]): Partial<T> {
   const out = { ...o } as Record<string, unknown>;
@@ -55,12 +57,18 @@ const contentOf = {
   photos: (p: ProgressPhoto) => stableStringify({ entryId: p.entryId, dataUrl: p.dataUrl }),
   // Metas: o que a meta mede e quando (sem ID, carimbos de tempo e versão do registro).
   goals: (g: TrainingGoal) => stableStringify(omit(g, ['id', 'createdAt', 'updatedAt', 'revision'])),
+  // Planejamento: lugar, atividade e vigência (sem ID, carimbos, versão e origem da cópia).
+  planEntries: (e: PlanEntry) => stableStringify(omit(e, ['id', 'createdAt', 'updatedAt', 'revision', 'sourceEntryId'])),
 };
+
+/** Mesma atividade (ou marcador) vigente no mesmo lugar da agenda: duas cópias mostrariam o dia repetido. */
+const planSlotKey = (e: PlanEntry) =>
+  e.scope === 'date' ? `d|${e.date}|${e.kind}|${e.routineId}|${e.workoutId}` : e.validUntil === null && e.enabled ? `w|${e.weekday}|${e.kind}|${e.routineId}|${e.workoutId}` : null;
 
 export function planMerge(local: DataSnapshot, incoming: DataSnapshot): MergePlan {
   const counts = Object.fromEntries(COLLECTIONS.map((c) => [c, { add: 0, duplicate: 0, conflict: 0, skipped: 0 }])) as Record<CollectionName, CollectionCounts>;
   const items: MergeItem[] = [];
-  const toAdd: DataSnapshot = { settings: null, routines: [], sessions: [], rotations: [], overrides: [], bodyEntries: [], photos: [], goals: [] };
+  const toAdd: DataSnapshot = { settings: null, routines: [], sessions: [], rotations: [], overrides: [], bodyEntries: [], photos: [], goals: [], planEntries: [] };
   const note = (kind: MergeItemKind, code: string, collection: CollectionName, id: string, message: string) => items.push({ kind, code, collection, id, message });
 
   /**
@@ -264,6 +272,39 @@ export function planMerge(local: DataSnapshot, incoming: DataSnapshot): MergePla
     }
   }
 
+  // ---- Planejamento semanal (P13) ----
+  {
+    const localWorkouts = new Map(local.routines.map((r) => [r.id, new Set((r.workouts ?? []).map((w) => w.id))]));
+    const localByKey = index('planEntries', local.planEntries);
+    const localByContent = new Set(local.planEntries.map(contentOf.planEntries));
+    const slots = new Set(local.planEntries.map(planSlotKey).filter((k): k is string => k !== null));
+    const seen = new Set<string>();
+    for (const e0 of incoming.planEntries) {
+      const e = e0.routineId && routineRemap.has(e0.routineId) ? { ...e0, routineId: mapRoutine(e0.routineId) } : e0;
+      if (e.routineId && conflictedRoutines.has(e.routineId) && e.workoutId && !localWorkouts.get(e.routineId)?.has(e.workoutId) && !localByKey.has(e.id)) {
+        if (seen.has(e.id)) counts.planEntries.duplicate++;
+        else {
+          seen.add(e.id);
+          counts.planEntries.skipped++;
+          note('skipped', 'ROUTINE_CONFLICT_DEPENDENT', 'planEntries', e.id, 'Planejamento de um treino que só existe na versão do backup de uma rotina em conflito: não aplicado, para não ligar o dia ao treino errado.');
+        }
+        continue;
+      }
+      if (byKey('planEntries', e, localByKey, seen) !== 'new') continue;
+      const content = contentOf.planEntries(e);
+      const slot = planSlotKey(e);
+      if (localByContent.has(content) || (slot !== null && slots.has(slot))) {
+        counts.planEntries.duplicate++;
+        note('duplicate-content', 'DUPLICATE_CONTENT', 'planEntries', e.id, 'A mesma atividade já está planejada neste dia; a cópia do backup não foi acrescentada.');
+        continue;
+      }
+      localByContent.add(content);
+      if (slot !== null) slots.add(slot);
+      toAdd.planEntries.push(e);
+      counts.planEntries.add++;
+    }
+  }
+
   // ---- Configurações: nunca mescladas campo a campo ----
   if (incoming.settings) {
     if (!local.settings) {
@@ -293,5 +334,6 @@ export function applyPlan(local: DataSnapshot, plan: MergePlan): DataSnapshot {
     bodyEntries: [...local.bodyEntries, ...a.bodyEntries],
     photos: [...local.photos, ...a.photos],
     goals: [...local.goals, ...a.goals],
+    planEntries: [...local.planEntries, ...a.planEntries],
   };
 }

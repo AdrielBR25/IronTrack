@@ -1,5 +1,5 @@
 import Dexie, { type Table, type Transaction } from 'dexie';
-import { OWNED_COLLECTIONS, type BodyEntry, type DayOverride, type LocalProfile, type ProgressPhoto, type Routine, type RotationState, type Settings, type TrainingGoal, type WorkoutSession } from '@/lib/types';
+import { OWNED_COLLECTIONS, type BodyEntry, type DayOverride, type LocalProfile, type PlanEntry, type ProgressPhoto, type Routine, type RotationState, type Settings, type TrainingGoal, type WorkoutSession } from '@/lib/types';
 import { DEFAULT_SETTINGS } from '@/lib/defaults';
 import { ProfileError, generateProfileId, isValidProfileId, newDefaultProfile, pickDefaultProfile } from '@/lib/profile';
 import { installModelSnapshotHooks } from './modelGuard';
@@ -8,7 +8,7 @@ import { installModelSnapshotHooks } from './modelGuard';
  * Versão atual do esquema IndexedDB (Dexie). É independente da versão do formato
  * JSON de backup (BACKUP_SCHEMA_VERSION). Histórico e regras em docs/MIGRACOES.md.
  */
-export const DB_SCHEMA_VERSION = 3;
+export const DB_SCHEMA_VERSION = 4;
 
 /** Tabelas com dono na época da migração v1 → v2 (congelada: a v2 não tem a tabela de metas). */
 export const V2_OWNED_TABLES = ['routines', 'sessions', 'bodyEntries', 'photos'] as const;
@@ -23,6 +23,7 @@ export class IronTrackDB extends Dexie {
   photos!: Table<ProgressPhoto, string>;
   profiles!: Table<LocalProfile, string>;
   goals!: Table<TrainingGoal, string>;
+  planEntries!: Table<PlanEntry, string>;
 
   /** ID do perfil principal, carregado ao abrir o banco (antes de qualquer outra operação). */
   currentProfileId: string | null = null;
@@ -72,9 +73,12 @@ export class IronTrackDB extends Dexie {
     // v3 (IronTrack 2.0 F01/P12): tabela de metas de treinamento. Só acrescenta uma tabela vazia: nenhuma outra
     // tabela, índice ou registro muda, então não há função de transformação. Detalhes em docs/METAS_TREINAMENTO.md §3.
     this.version(3).stores({ goals: 'id, profileId, status, updatedAt' });
+    // v4 (IronTrack 2.0 F01/P13): tabela do planejamento semanal (modelo recorrente e exceções de data). Também só
+    // acrescenta uma tabela vazia, sem transformação. Detalhes em docs/PLANEJAMENTO_SEMANAL.md §7.
+    this.version(4).stores({ planEntries: 'id, profileId, scope, date, routineId, updatedAt' });
 
     // Proprietário dos registros novos e proteção contra troca silenciosa de dono.
-    for (const t of [this.routines, this.sessions, this.bodyEntries, this.photos, this.goals] as Table<{ profileId?: string }, string>[]) {
+    for (const t of [this.routines, this.sessions, this.bodyEntries, this.photos, this.goals, this.planEntries] as Table<{ profileId?: string }, string>[]) {
       t.hook('creating', (_pk, obj) => {
         if (obj.profileId === undefined || obj.profileId === null) {
           if (!this.currentProfileId) throw new ProfileError('Perfil local não inicializado: o registro não foi gravado.');
@@ -211,7 +215,7 @@ export function setDb(next: IronTrackDB) {
 
 /** Tabelas de dados do app (tudo menos `profiles`): o conteúdo do backup e o que "apagar tudo" limpa. */
 export function dataTables() {
-  return [db.settings, db.routines, db.sessions, db.rotations, db.overrides, db.bodyEntries, db.photos, db.goals];
+  return [db.settings, db.routines, db.sessions, db.rotations, db.overrides, db.bodyEntries, db.photos, db.goals, db.planEntries];
 }
 
 /** Apaga todos os dados do app numa única transação. O perfil local (nome e ID) é mantido. */
