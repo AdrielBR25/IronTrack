@@ -8,11 +8,13 @@ import { libraryKeyOf } from './instance';
 import { FROM_TEMPLATE_EQUIPMENT, muscleFromText } from './vocab';
 import type { LibraryEquipment, LibraryItem, LibraryKey, LibraryMuscle } from './types';
 
-export type SuggestionReason = 'favorito' | 'recente' | 'mesmo_grupo' | 'mesmo_equipamento' | 'mesma_modalidade';
+export type SuggestionReason = 'favorito' | 'recente' | 'na_ficha' | 'mesmo_grupo' | 'mesmo_equipamento' | 'mesma_modalidade';
 
 export const SUGGESTION_REASON_LABEL: Record<SuggestionReason, string> = {
   favorito: 'Está nos favoritos.',
   recente: 'Usado recentemente.',
+  // P18: presença confirmada numa ficha (criado da biblioteca ou associado). Não significa que foi executado.
+  na_ficha: 'Já está em uma das suas fichas.',
   mesmo_grupo: 'Mesmo grupo muscular.',
   mesmo_equipamento: 'Equipamento semelhante.',
   mesma_modalidade: 'Mesma modalidade.',
@@ -41,9 +43,12 @@ export function anchorFromTemplate(t: ExerciseTemplate): Anchor {
 }
 
 /** Chaves usadas nas sessões concluídas, da mais recente para a mais antiga (sem repetição). */
-export function recentKeys(sessions: readonly WorkoutSession[], limit = 12): LibraryKey[] {
+export function recentKeys(sessions: readonly WorkoutSession[], limit = 12, maxSessions = Number.MAX_SAFE_INTEGER): LibraryKey[] {
   const out: LibraryKey[] = [];
-  const sorted = sessions.filter((s) => s.status === 'completed').sort((a, b) => b.startedAt - a.startedAt || (a.id < b.id ? -1 : 1));
+  const sorted = sessions
+    .filter((s) => s.status === 'completed')
+    .sort((a, b) => b.startedAt - a.startedAt || (a.id < b.id ? -1 : 1))
+    .slice(0, maxSessions);
   for (const s of sorted)
     for (const e of s.exercises) {
       const k = libraryKeyOf(e);
@@ -57,6 +62,8 @@ export interface SuggestionInput {
   items: readonly LibraryItem[];
   favorites: ReadonlySet<LibraryKey>;
   recent: readonly LibraryKey[];
+  /** P18: itens presentes nas fichas pela origem confirmada da instância (nunca por nome). */
+  inSheets?: ReadonlySet<LibraryKey>;
   /** Exercício de referência (ex.: o que vai ser substituído). Sem referência: só favoritos e recentes. */
   anchor?: Anchor | null;
   /** Itens que não devem aparecer (ex.: o próprio exercício de referência). */
@@ -66,10 +73,10 @@ export interface SuggestionInput {
 
 /**
  * Ordem: com referência, primeiro semelhança (grupo > equipamento > modalidade), e dentro de cada motivo favoritos e
- * recentes antes; sem referência, favoritos e depois recentes. Desempate pelo nome. Arquivados nunca são sugeridos.
+ * recentes antes; sem referência, favoritos, depois recentes (sessões) e depois os que já estão nas fichas (P18). Desempate pelo nome. Arquivados nunca são sugeridos.
  */
 export function suggest(input: SuggestionInput): Suggestion[] {
-  const { items, favorites, recent, anchor, exclude, limit = 8 } = input;
+  const { items, favorites, recent, inSheets, anchor, exclude, limit = 8 } = input;
   const recentRank = new Map(recent.map((k, i) => [k, i]));
   const out: (Suggestion & { rank: number; sub: number })[] = [];
   for (const item of items) {
@@ -85,6 +92,7 @@ export function suggest(input: SuggestionInput): Suggestion[] {
       else if (anchor.modality && item.modality === anchor.modality) [reason, rank] = ['mesma_modalidade', 2];
     } else if (fav) [reason, rank] = ['favorito', 0];
     else if (rec !== undefined) [reason, rank] = ['recente', 1];
+    else if (inSheets?.has(item.key)) [reason, rank] = ['na_ficha', 2];
     if (!reason) continue;
     // Sem referência, o subcritério do recente é a posição na lista de recentes; com referência, favoritos/recentes primeiro.
     const sub = anchor ? (fav ? 0 : rec !== undefined ? 1 : 2) : rec ?? 0;

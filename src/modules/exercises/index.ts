@@ -12,3 +12,6 @@ export * from './instance';
 export * from './workoutOps';
 export * from './suggestions';
 export * from './references';
+export * from './recognition';
+export * from './usage';
+export * from './bulk';
