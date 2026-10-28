@@ -1,4 +1,5 @@
-import { Archive, ArchiveRestore, Copy, Pencil, Plus, Star, Trash2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Archive, ArchiveRestore, Copy, LineChart, ListOrdered, Pencil, Plus, Star, Trash2, Trophy } from 'lucide-react';
 import { LATERALITY_LABEL, LOAD_MODE_LABEL, MODALITY_LABEL } from '@/modules/training';
 import { DIFFICULTY_LABEL, EQUIPMENT_NAME, MECHANICS_LABEL, MOVEMENT_LABEL, MUSCLE_NAME, type LibraryItem } from '@/modules/exercises';
 import { Button } from '@/components/ui/button';
@@ -38,6 +39,7 @@ export function ExerciseDetailDialog({
   usage,
   usageLines = [],
   hideFavorite = false,
+  performance = null,
 }: {
   item: LibraryItem | null;
   onOpenChange: (o: boolean) => void;
@@ -55,6 +57,11 @@ export function ExerciseDetailDialog({
   usageLines?: string[];
   /** Só leitura (ex.: aberto do editor de fichas, P18): sem favoritar. */
   hideFavorite?: boolean;
+  /**
+   * P19: desempenho da visão agregada deste item (sessões que registraram esta origem). `available` = há treino
+   * concluído com a origem; sem ele, mostra o estado vazio (nada é associado automaticamente).
+   */
+  performance?: { href: string; available: boolean } | null;
 }) {
   const it = item;
   const inUse = !!usage && (usage.templates > 0 || usage.sessions > 0);
@@ -117,6 +124,33 @@ export function ExerciseDetailDialog({
                   <li key={l}>{l}</li>
                 ))}
               </ul>
+            )}
+            {performance && (
+              <section className="space-y-1.5" data-testid="detail-performance">
+                <h3 className="text-sm font-semibold">Desempenho</h3>
+                {performance.available ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      { ver: 'evolucao', label: 'Ver evolução', icon: LineChart },
+                      { ver: 'recordes', label: 'Ver recordes', icon: Trophy },
+                      { ver: 'sessoes', label: 'Ver sessões', icon: ListOrdered },
+                    ].map(({ ver, label, icon: Icon }) => (
+                      <Link
+                        key={ver}
+                        to={`${performance.href}?periodo=all&ver=${ver}`}
+                        className="inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        data-testid={`detail-performance-${ver}`}
+                      >
+                        <Icon className="h-4 w-4" aria-hidden /> {label}
+                      </Link>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground" data-testid="detail-performance-empty">
+                    Ainda não há treino concluído com este exercício registrado como origem. Treinos antigos não são associados automaticamente.
+                  </p>
+                )}
+              </section>
             )}
             <Section title="Como executar" items={it.instructions} />
             <Section title="Erros comuns" items={it.commonMistakes} />

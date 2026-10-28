@@ -31,6 +31,7 @@ import {
   type LibraryKey,
 } from '@/modules/exercises';
 import { ExerciseDetailDialog } from '@/features/library/ExerciseDetailDialog';
+import { identityKey, identityPath } from '@/modules/performance';
 import { CustomExerciseDialog } from '@/features/library/CustomExerciseDialog';
 import { AddToWorkoutFlow, type WorkoutTarget } from '@/features/library/AddToWorkoutFlow';
 import { SubstituteDialog } from '@/features/library/SubstituteDialog';
@@ -459,6 +460,7 @@ export default function ExerciseLibraryPage() {
         }
         onDelete={detailCustom ? () => setConfirmDelete(detailCustom) : undefined}
         usage={detail?.kind === 'custom' ? usage : null}
+        performance={detail ? { href: identityPath(identityKey(detail.kind === 'custom' ? 'personalizado' : 'catalogo', detail.refId)), available: !!data?.usedInSessions.has(detail.key) } : null}
         usageLines={
           detail && data
             ? [...(data.inSheets.has(detail.key) ? [USAGE_LABEL.inSheet] : []), ...(data.usedInSessions.has(detail.key) ? [USAGE_LABEL.inSession] : [])]

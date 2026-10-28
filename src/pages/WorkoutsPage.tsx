@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { AlertTriangle, CalendarClock, CalendarDays, Check, Coffee, Copy, Download, Eye, FileUp, Library, Minus, MoreVertical, Moon, Pencil, Play, Plus, SkipForward, Sparkles, Trash2, Undo2 } from 'lucide-react';
+import { AlertTriangle, CalendarClock, ChevronRight, Medal, CalendarDays, Check, Coffee, Copy, Download, Eye, FileUp, Library, Minus, MoreVertical, Moon, Pencil, Play, Plus, SkipForward, Sparkles, Trash2, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PageHeader } from '@/components/AppLayout';
 import { WorkoutPreviewDialog } from '@/features/library/WorkoutPreviewDialog';
@@ -482,6 +482,17 @@ export default function WorkoutsPage() {
           } else setImportErrors(r.errors);
         }}
       />
+
+      {/* P19: acesso ao desempenho por exercício sem novo botão no cabeçalho (cabe em 360 px). */}
+      <Link
+        to="/desempenho"
+        data-testid="workouts-open-performance"
+        className="flex min-h-11 items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <Medal className="h-4 w-4 text-primary" aria-hidden />
+        <span className="flex-1">Desempenho e recordes por exercício</span>
+        <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden />
+      </Link>
 
       {routines && routines.length === 0 && (
         <Card className="p-5 text-center">

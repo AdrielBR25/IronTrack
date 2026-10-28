@@ -644,6 +644,10 @@ export default function TrainingAnalyticsPage() {
         <ArrowLeft className="h-4 w-4" /> Evolução
       </Link>
       <PageHeader title="Desempenho" subtitle="Análise local dos seus treinos, sem internet e sem IA" />
+      {/* P19: recordes, gráficos por exercício e comparação de sessões ficam em #/desempenho (cálculos daqui não mudam). */}
+      <Link to="/desempenho" data-testid="analytics-open-performance" className="-mt-2 mb-1 inline-flex min-h-9 items-center gap-1 text-sm font-medium text-primary underline-offset-2 hover:underline">
+        Recordes e comparação por exercício
+      </Link>
     </>
   );
 

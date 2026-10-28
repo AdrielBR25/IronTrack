@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronRight, Dumbbell, LineChart, Ruler, Target, Trophy } from 'lucide-react';
+import { ChevronRight, Dumbbell, LineChart, Ruler, Target, Trophy, Medal } from 'lucide-react';
 import { PageHeader } from '@/components/AppLayout';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { NativeSelect } from '@/components/ui/input';
@@ -170,6 +170,20 @@ export default function ProgressPage() {
             <span className="min-w-0 flex-1">
               <span className="block font-semibold">Análise de desempenho</span>
               <span className="block text-sm text-muted-foreground">Frequência, volume, tendências, recordes e insights por período</span>
+            </span>
+            <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
+          </Link>
+          <Link
+            to="/desempenho"
+            data-testid="open-performance"
+            className="mb-4 flex items-center gap-3 rounded-2xl border p-4 transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
+              <Medal className="h-5 w-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block font-semibold">Desempenho por exercício</span>
+              <span className="block text-sm text-muted-foreground">Recordes, gráficos por exercício e comparação de sessões</span>
             </span>
             <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
           </Link>

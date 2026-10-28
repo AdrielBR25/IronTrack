@@ -1,6 +1,6 @@
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Trash2, Trophy } from 'lucide-react';
+import { ArrowLeft, LineChart, Trash2, Trophy } from 'lucide-react';
 import { toast } from 'sonner';
 import { deleteSession, updateSessionNotes } from '@/db/repo';
 import { useCompletedSessions, useSession } from '@/hooks/data';
@@ -13,6 +13,7 @@ import { ConfirmDialog } from '@/components/ui/confirm';
 import { MODALITY_LABEL, SIDE_LABEL, exerciseMeasures, exerciseVolume, fmtDurationSec, isCompletedWorkSet, sessionPRs, sessionVolume, validSetCount } from '@/modules/training';
 import type { SessionExercise, SessionSet } from '@/lib/types';
 import { distanceUnitOf, fmtDistance, planSummary } from '@/features/workout/modelFormat';
+import { identityPath, primaryKeyOf } from '@/modules/performance';
 import { fmtDateTime, fmtTime } from '@/lib/dates';
 import { cn, fmtDuration } from '@/lib/utils';
 
@@ -118,6 +119,16 @@ export default function SessionDetailPage() {
                 </Badge>
               )}
             </div>
+            {shown.length > 0 && (
+              // P19: desempenho da identidade desta cópia (instância da ficha ou histórico sem vínculo); a sessão não muda.
+              <Link
+                to={`${identityPath(primaryKeyOf(session, ex))}?periodo=all&sessao=${encodeURIComponent(session.id)}`}
+                className="mt-1 inline-flex min-h-9 items-center gap-1 text-xs font-medium text-primary underline-offset-2 hover:underline"
+                data-testid="session-open-performance"
+              >
+                <LineChart className="h-3.5 w-3.5" aria-hidden /> Ver desempenho deste exercício
+              </Link>
+            )}
             {shown.length === 0 ? (
               <p className="mt-2 text-sm text-muted-foreground">Não realizado.</p>
             ) : (

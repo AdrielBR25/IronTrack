@@ -14,8 +14,8 @@ export const NAV: { to: string; label: string; icon: typeof Home; end?: boolean;
   // P17: a biblioteca de exercícios (#/exercicios) também (a barra do celular já tem 6 itens em 360 px).
   { to: '/treinos', label: 'Treinos', icon: Dumbbell, also: ['/planejamento', '/exercicios'] },
   { to: '/historico', label: 'Histórico', icon: History },
-  // P12: as metas (#/metas) ficam dentro de Evolução, sem novo item na barra.
-  { to: '/evolucao', label: 'Evolução', icon: BarChart3, also: ['/metas'] },
+  // P12: as metas (#/metas) ficam dentro de Evolução, sem novo item na barra. P19: o desempenho (#/desempenho) também.
+  { to: '/evolucao', label: 'Evolução', icon: BarChart3, also: ['/metas', '/desempenho'] },
   // Rótulo curto na barra do celular (6 itens em 360 px); nome completo no computador e para leitores de tela.
   { to: '/assistente', label: 'IA', icon: Sparkles, title: 'Assistente IA', ariaLabel: 'Assistente IA' },
   { to: '/config', label: 'Ajustes', icon: Settings, title: 'Configurações' },

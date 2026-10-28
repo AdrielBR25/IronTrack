@@ -217,7 +217,8 @@ test('reconhecimento: sugerir, associar, lote, desfazer, mais utilizados, adicio
 
   // 15. Reordenar sem arrastar.
   await page.getByRole('button', { name: 'Mover Face pull para cima' }).click();
-  expect((await editorNames(page)).slice(-2)).toEqual(['Face pull', 'Voador (peck deck)']);
+  // A gravação é assíncrona (transação no IndexedDB): espera a lista refletir a nova ordem.
+  await expect.poll(async () => (await editorNames(page)).slice(-2)).toEqual(['Face pull', 'Voador (peck deck)']);
 
   // 16. Substituição múltipla: seleção → escolha → prévia (metas, novas identidades, ordem final) → confirmar.
   await page.getByTestId('bulk-replace').click();

@@ -25,6 +25,9 @@ const AIAssistantPage = lazy(() => import('@/pages/AIAssistantPage'));
 const ExerciseLibraryPage = lazy(() => import('@/pages/ExerciseLibraryPage'));
 const ExerciseRecognitionPage = lazy(() => import('@/pages/ExerciseRecognitionPage'));
 const BulkReplacePage = lazy(() => import('@/pages/BulkReplacePage'));
+// P19: desempenho por exercício (recordes, gráficos e comparações), carregado sob demanda.
+const PerformancePage = lazy(() => import('@/pages/PerformancePage'));
+const ExercisePerformancePage = lazy(() => import('@/pages/ExercisePerformancePage'));
 import { useSettings } from '@/hooks/data';
 
 export default function App() {
@@ -48,6 +51,8 @@ export default function App() {
           <Route path="/historico/:id" element={<SessionDetailPage />} />
           <Route path="/evolucao" element={<ProgressPage />} />
           <Route path="/evolucao/desempenho" element={<TrainingAnalyticsPage />} />
+          <Route path="/desempenho" element={<PerformancePage />} />
+          <Route path="/desempenho/exercicio/:identidade" element={<ExercisePerformancePage />} />
           <Route path="/metas" element={<TrainingGoalsPage />} />
           <Route path="/planejamento" element={<WeeklyPlannerPage />} />
           <Route path="/planejamento/importar" element={<LegacyImportPage />} />
