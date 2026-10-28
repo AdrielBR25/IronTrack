@@ -2,6 +2,7 @@ import Dexie, { type Table, type Transaction } from 'dexie';
 import { OWNED_COLLECTIONS, type BodyEntry, type DayOverride, type LocalProfile, type ProgressPhoto, type Routine, type RotationState, type Settings, type WorkoutSession } from '@/lib/types';
 import { DEFAULT_SETTINGS } from '@/lib/defaults';
 import { ProfileError, generateProfileId, isValidProfileId, newDefaultProfile, pickDefaultProfile } from '@/lib/profile';
+import { installModelSnapshotHooks } from './modelGuard';
 
 /**
  * Versão atual do esquema IndexedDB (Dexie). É independente da versão do formato
@@ -83,6 +84,10 @@ export class IronTrackDB extends Dexie {
         throw new ProfileError('Um registro não pode mudar de perfil proprietário. Nada foi gravado.');
       });
     }
+
+    // P11: fotografia dos campos de modalidade gravados por este app (detecção de regravação por app antigo).
+    // Fica fora do banco e dos backups; ver docs/CRONOMETROS_E_CONCORRENCIA.md §7.
+    installModelSnapshotHooks(this.routines);
 
     // Toda abertura garante o perfil principal antes de liberar o banco para o app.
     this.on(
