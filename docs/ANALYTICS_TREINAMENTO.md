@@ -1,12 +1,13 @@
 # Análise de treinos (motor de analytics)
 
-IronTrack 2.0 · Fase 01 · Prompt 08. Descreve o motor local que transforma as sessões concluídas em
+IronTrack 2.0 · Fase 01 · Prompt 08, ampliado no Prompt 09 (normalização muscular, classificação de
+exercícios, 1RM canônico, contratos por modalidade e explicações dos indicadores, seções 15 a 22). Descreve o motor local que transforma as sessões concluídas em
 indicadores de desempenho, tendências e insights. Tudo roda no aparelho, sem rede e sem IA: os números são
 calculados por funções puras e determinísticas. A IA poderá, no futuro, **explicar** esses indicadores, mas
 nunca calculá-los.
 
 Código: `src/modules/analytics/` (domínio e aplicação), `src/pages/TrainingAnalyticsPage.tsx` (tela, rota
-`#/evolucao/desempenho`). Testes: `tests/unit/analytics.test.ts`, `tests/unit/analytics-ui.test.tsx`,
+`#/evolucao/desempenho`). Testes: `tests/unit/analytics.test.ts`, `tests/unit/analytics-advanced.test.ts` (P09), `tests/unit/analytics-ui.test.tsx`,
 bloco "arquitetura do motor de analytics" em `tests/unit/architecture.test.ts` e `e2e/analytics.spec.ts`.
 
 ## 1. Arquitetura
@@ -18,7 +19,12 @@ src/modules/analytics/
   domain/periods.ts                períodos, janelas, semanas (aritmética de calendário)
   domain/metrics.ts                normalização, pontos por exercício, recordes, agregações
   domain/trends.ts                 classificação de tendência
+  domain/muscles.ts                normalização de grupos musculares (P09)
+  domain/classification.ts         classificação analítica do exercício (P09)
+  domain/oneRepMax.ts              contrato canônico de 1RM + adaptador do gráfico antigo (P09)
+  domain/modalities.ts             tempo, cardio, lados e peso corporal: cálculos puros (P09)
   application/TrainingAnalyticsService.ts  índice + relatórios por período
+  application/indicators.ts                explicações dos indicadores e análises disponíveis (P09)
   application/InsightsEngine.ts            regras de insights
   application/summary.ts                   resumo agregado para uso futuro pelo assistente
 ```
@@ -83,7 +89,9 @@ escolheu 30 dias), as médias usam só a parte coberta (`report.covered`). O per
 primeira sessão concluída até hoje.
 
 **Grupo muscular.** É o texto da ficha (`muscleGroup`). Séries de exercícios com grupo vazio não são
-atribuídas a nenhum grupo: são contadas em `unclassifiedSets` e a tela avisa.
+atribuídas a nenhum grupo: são contadas em `unclassifiedSets` e a tela avisa. `report.muscleGroups` continua
+com o texto exato (P08, compatibilidade); desde o P09 a tela usa `report.muscleDistribution`, com nomes
+normalizados (seção 15).
 
 ## 4. Fórmulas
 
@@ -95,21 +103,44 @@ atribuídas a nenhum grupo: são contadas em `unclassifiedSets` e a tela avisa.
   nas semanas completas (seção 6).
 - Tendência: seção 8.
 
-### Divergência de 1RM existente (não alterada)
+### Auditoria das fórmulas de 1RM (P09)
 
-Há duas fórmulas no domínio de treinamento, registradas no P03 (`docs/ARQUITETURA.md`, seção 11):
+Há três comportamentos no código. **Nenhum cálculo antigo foi alterado** (testes de caracterização mantidos).
 
-| Onde | 1 repetição | Usado por |
-| --- | --- | --- |
-| `stats.ts › exerciseSeries` (Epley inline) | carga × 1,033 | gráfico "Evolução por exercício" da aba Treino |
-| `volume.ts › estimate1RM` | a própria carga | recordes pessoais (`computeRecords`, `sessionPRs`) |
+| | Gráfico antigo (`stats.ts › exerciseSeries`) | Recordes (`volume.ts › estimate1RM`) | Analytics (P08/P09, `oneRepMax.ts › canonicalE1rm`) |
+| --- | --- | --- | --- |
+| Fórmula | Epley inline: `carga × (1 + reps ÷ 30)` | Epley; 1 rep = carga | Epley; 1 rep = carga (método `epley-1a12-v1`) |
+| Intervalo de repetições | qualquer número | qualquer número > 0 | inteiro de 1 a 12; acima disso **não estima** |
+| 1 repetição | carga × 1,0333… | carga | carga (`kind: 'direta'`) |
+| Carga inválida (0, negativa, vazia) | 0 | 0 | recusada com motivo (`carga_invalida`), nunca 0 |
+| Repetições inválidas | entram na conta | 0 | recusadas (`repeticoes_invalidas`); fracionárias também |
+| Unidade | kg (lb só na tela) | kg | kg; entrada em lb convertida com `KG_PER_LB` exato |
+| Arredondamento | tela: 0,1 após converter | tela: 0,1 | nenhum no cálculo; só na exibição (0,1) |
+| Usado por | gráfico "Evolução por exercício" da aba Treino | tabela de recordes da aba Treino, `computeRecords`, `sessionPRs` (fim do treino e detalhe da sessão) | página Desempenho: pontos, recordes de 1RM e tendência |
 
-Nesta etapa **nenhuma delas mudou** (teste de caracterização mantido, e um teste novo confirma a divergência).
-O motor novo usa **`estimate1RM`**: uma série de 1 repetição é a medida direta do 1RM, e é a fórmula dos
-recordes, então recordes e análise concordam. Além disso o motor limita a estimativa a 12 repetições.
-Consequência: o 1RM da página nova pode diferir do gráfico antigo em séries de 1 repetição (≈ 3,3%) e em
-séries acima de 12 repetições (o gráfico antigo estima; o novo não). Unificar o gráfico antigo fica para uma
-etapa que aceite mudar números exibidos.
+Exemplos (100 kg): 1 rep → 103,3 / 100 / 100; 10 reps → 133,3 nos três; 15 reps (50 kg) → 75 / 75 / sem
+estimativa. Diferença do gráfico antigo frente ao canônico: +3,33% em séries de 1 repetição; acima de 12
+repetições o gráfico antigo (e o recorde de 1RM antigo) estimam e o canônico não. `HomePage` usa
+`exerciseSeries` só para carga e repetições (não usa o 1RM).
+
+**Contrato canônico** (`canonicalE1rm(carga, reps, unidade)`): devolve `{ ok, valueKg, method, kind, loadKg,
+reps }` ou `{ ok: false, method, reason }`. Precisão completa (sem arredondar); o método fica identificado em
+cada resultado, em `ExerciseSummary.e1rmMethod` e na tela ("Método: Epley (1 a 12 repetições)").
+`sameMethodOnly` filtra uma série de estimativas para um único método: uma tendência nunca mistura métodos.
+O motor do P08 passou a usar esse contrato; para repetições inteiras o resultado é idêntico ao do P08.
+
+**Adaptador de compatibilidade.** `legacyChartE1rm` reproduz exatamente o gráfico antigo (testado contra
+`exerciseSeries`) e `compareWithLegacyChart` calcula a diferença série a série. Servem para documentação e
+testes; o gráfico antigo continua chamando o próprio código.
+
+**Proposta de migração da apresentação (não executada, aguarda autorização).** Unificar o gráfico antigo
+mudaria números já vistos pelo usuário (séries de 1 repetição caem ≈ 3,2%; séries acima de 12 repetições
+deixam de ter 1RM). Proposta: (1) trocar o cálculo do gráfico antigo e o `best1RM` de `computeRecords` por
+`canonicalE1rm`, mantendo `estimate1RM` exportado; (2) mostrar o nome do método nos dois lugares; (3) exibir
+uma nota única "o 1RM estimado passou a usar o método Epley 1–12" na primeira abertura; (4) atualizar os testes
+de caracterização em um commit separado que documente a mudança. `sessionPRs` usa o 1RM para declarar
+recorde: com o limite de 12 repetições, séries longas deixariam de gerar recorde de 1RM (recorde de carga
+continua igual).
 
 ## 5. Tratamento de unidades
 
@@ -178,6 +209,16 @@ Para cada exercício com sessões no período, `computeTrend` classifica em **po
 6. **Confiança** (suficiência dos dados, não certeza estatística): alta com ≥ 8 observações, ≥ 28 dias e
    nenhum intervalo maior que 21 dias; média com ≥ 6 observações e intervalos ≤ 28 dias; baixa no resto.
 
+**P09.** Em exercícios de peso corporal a tendência usa só repetições sem carga (condição comparável): a carga
+registrada nesses exercícios é só a adicional, então nem 1RM nem carga em séries longas entram. Quando a maior
+pausa entre duas sessões com o exercício passa de **28 dias** (`TREND_LONG_GAP_DAYS`), `trend.longGap` fica
+verdadeiro e a tela e o insight de queda avisam que os dias sem treino não entram no cálculo. Os limiares (4
+sessões, 14 dias, 2,5%/5%, 2 erros-padrão) **não mudaram**: ainda não foram calibrados com dados reais, e os
+testes de caracterização (seção 21) fixam o comportamento atual para séries estáveis, ruidosas, crescentes,
+decrescentes e com intervalos irregulares. Justificativa dos valores: 4 sessões é o mínimo para duas metades
+com variância; 14 dias evitam ler variação de uma semana como tendência; 2,5% é próximo de um incremento de
+carga típico em barra (2,5 kg em 100 kg); 5% em repetições equivale a 1 repetição numa série de 20 (meia numa de 10), menos que isso é ruído de contagem.
+
 Limites: é uma comparação descritiva, não um teste de hipótese formal; não modela periodização, troca de
 técnica ou de equipamento; 1RM estimado é estimativa. **Queda não é interpretada como perda de força**: o
 texto diz explicitamente que técnica, faixa de repetições, cansaço do dia ou uma fase mais leve também mudam
@@ -210,8 +251,11 @@ termos proibidos). Semanas sem treino entram como zero "sem penalidade".
 
 - Data da sessão = data de início; um treino que atravessa a meia-noite conta no dia em que começou.
 - Fuso: se o aparelho mudar de fuso, a data local de sessões antigas pode mudar (igual ao resto do app).
-- Grupo muscular depende do texto da ficha; grupos escritos de formas diferentes contam separados.
-- Exercícios unilaterais, isométricos (tempo) e cardio não têm métrica própria; tempo não é registrado.
+- Grupo muscular depende do texto da ficha. Desde o P09 variações de escrita e sinônimos conhecidos se juntam
+  (seção 15); textos fora da tabela continuam separados e ambíguos ficam fora do gráfico.
+- A ficha tem **um** grupo por exercício: músculos auxiliares não recebem séries (nada é duplicado).
+- Tempo, distância e lado não são registrados: os cálculos existem (seções 17–20), mas a tela mostra a análise
+  como indisponível.
 - Drop-sets entram como séries normais.
 - Sem cache persistente: o índice é refeito quando o histórico muda (seção 12).
 - O gráfico antigo da aba Treino continua com sua fórmula de 1RM (seção 4).
@@ -260,3 +304,121 @@ analytics (regra testada), e o fluxo de consentimento não mudou. Para ligar no 
 explícita de consentimento (ex.: "indicadores de desempenho"), mostrar o resumo na prévia como as demais
 categorias e só então registrá-lo em `src/integrations/ai/contextSources.ts`. A IA continuaria apenas
 explicando números calculados aqui.
+
+## 15. Normalização de grupos musculares (P09)
+
+`normalizeMuscleGroup(texto)` (`domain/muscles.ts`) é determinística: remove acentos, ignora maiúsculas,
+junta espaços (inclusive o não separável) e procura o resultado numa tabela fixa de sinônimos. Nada é gravado:
+o texto original continua na ficha, na sessão, no backup e em `NormalizedMuscle.original`.
+
+| Grupo canônico | Textos aceitos (sem acento/caixa) |
+| --- | --- |
+| Peitoral | peito, peitoral, peitorais, peitoral maior, chest, pecs |
+| Costas | costas, dorsal, dorsais, grande dorsal, latissimo (do dorso), back, lats |
+| Ombros | ombro, ombros, deltoide(s), deltoide anterior/lateral/posterior, shoulder(s), delts |
+| Bíceps / Tríceps | biceps (braquial) / triceps (braquial) |
+| Antebraço | antebraco(s), forearm(s) |
+| Trapézio | trapezio(s), traps |
+| Lombar | lombar(es), eretores (da espinha), lower back |
+| Quadríceps | quadriceps, quadricipes, quads |
+| Posteriores de coxa | posterior(es), posterior de/da coxa, posteriores de coxa, isquiotibiais, hamstring(s) |
+| Glúteos | gluteo(s), gluteo maximo, glute(s) |
+| Adutores / Abdutores | adutor(es), adductors / abdutor(es), abductors |
+| Panturrilhas | panturrilha(s), gastrocnemio, soleo, calf, calves |
+| Abdômen | abdomen, abdominal, abdominais, abs, reto abdominal |
+
+A lista foi revisada contra os grupos padrão do app (`lib/defaults.ts`), a ficha de exemplo e os termos do
+Prompt 09. Resultado:
+
+- `canonico`: entra no gráfico "Séries por grupo muscular" com o nome canônico; a tela cita os textos da ficha
+  que foram juntados (ex.: "Peitoral (Peito, peitoral)").
+- `nao_reconhecido`: texto fora da tabela (ex.: "Serrátil"). Variações só de caixa/acento/espaço se juntam,
+  mas **não** são forçadas para um grupo; ficam fora do gráfico, listadas abaixo dele.
+- `ambiguo`: região ampla ("Pernas", "Braços", "Core", "Corpo inteiro") ou mais de um grupo no mesmo texto
+  ("Peito e tríceps", "Costas/Bíceps"). Não é dividido nem atribuído; aparece à parte.
+- `vazio`: conta em `unclassifiedSets`, como no P08.
+
+**Limitação.** O modelo atual tem um grupo principal por exercício. Cada série conta uma vez, nesse grupo; o
+volume nunca é repetido em músculos auxiliares. Grupos secundários dependem do modelo futuro
+([MODELO_EXERCICIOS_V2.md](MODELO_EXERCICIOS_V2.md)).
+
+## 16. Classificação de exercícios (P09)
+
+`classifyExercise` (`domain/classification.ts`) devolve atributos **combináveis** (`modalities`:
+`resistance_weighted`, `bodyweight`, `timed`, `cardio`, `unilateral`, ou só `unknown`), o tipo de carga
+(`externa`, `corporal`, `corporal_com_adicional`, `corporal_assistida`, `desconhecida`), a lateralidade, o que
+os registros permitem medir (`measures`) e a origem da decisão (`explicito`, `dados_existentes`,
+`desconhecido`) com códigos de evidência.
+
+Regras com os dados atuais (só campos estruturados; **o nome do exercício nunca é usado**):
+
+| Dados | Classificação |
+| --- | --- |
+| equipamento `bodyweight`, sem séries com carga | `bodyweight`, carga `corporal` |
+| equipamento `bodyweight`, com séries com carga | `bodyweight`, carga `corporal_com_adicional` |
+| barra, halteres, máquina, polia ou outro, com séries com carga | `resistance_weighted`, carga `externa` |
+| qualquer outro caso (ex.: máquina sem carga registrada) | `unknown`, carga `desconhecida` |
+| lateralidade | sempre `desconhecida` (halteres não indicam execução unilateral) |
+| tempo, cardio, assistência | nunca deduzidos |
+
+Os atributos explícitos (`ExplicitExerciseAttributes`: `modality`, `laterality`, `loadMode`) são o contrato
+para um editor futuro; hoje nenhum registro os possui e a classificação só os usa nos testes. A tela mostra o
+tipo ("Carga externa", "Peso corporal", "Peso corporal com carga adicional", "Tipo não identificado") e escolhe
+as métricas a partir dele (`exerciseAnalyses`).
+
+## 17. Peso corporal (P09)
+
+- Volume: inalterado desde o P08. Só a carga **adicional** registrada entra no volume; o peso do corpo nunca é
+  somado, e séries sem carga não viram quilos.
+- Na página, exercícios de peso corporal mostram **repetições** e, quando houver, **carga adicional** (gráfico
+  e recorde separados). 1RM estimado e "maior volume numa série" não aparecem: estimar 1RM só da carga adicional
+  seria enganoso, e somar o peso do corpo exigiria uma fórmula por exercício que o app não tem.
+- Tendência: só repetições sem carga (condições comparáveis).
+- `bodyweightMetrics` (contrato) separa séries só com o corpo, com carga adicional, com assistência e
+  incompatíveis (carga adicional e assistência ao mesmo tempo, descartadas). A melhor série é por condição;
+  `volumeKg` é sempre `null`. Assistência não existe no banco atual.
+
+## 18. Exercícios por tempo (P09, só contrato)
+
+`timedMetrics(sessões)` recebe a duração de cada série em segundos e devolve maior duração, duração total,
+séries e sessões com duração, séries inválidas e a tendência da maior duração por sessão (métrica `duracao`,
+limiar mínimo 5%). Durações vazias, zero, negativas ou não numéricas não entram. **Repetições nunca são lidas
+como segundos.** Como o banco não tem duração por série, a página mostra "Duração: indisponível".
+
+## 19. Unilaterais (P09, só contrato)
+
+`compareSides(séries)` agrupa séries por lado (`direito`, `esquerdo`, `ambos`, `desconhecido`) e compara
+repetições, volume e maior carga entre direito e esquerdo (`diff` = direito − esquerdo; `pct` relativo ao maior
+dos dois). Uma série registrada é uma série: nunca vira duas, e "ambos" ou lado desconhecido não são divididos.
+Disponível só com séries dos dois lados. É uma diferença registrada, **não** um diagnóstico de desequilíbrio.
+
+## 20. Cardio (P09, só contrato)
+
+`cardioMetrics(entradas, diasDaJanela)` aceita duração (s) e distância (`m`, `km`, `mi`, convertidas para
+metros; milha = 1609,344 m). Ritmo (s/km) e velocidade (km/h) só quando a mesma sessão tem os dois campos; as
+médias são ponderadas (duração total ÷ distância total das sessões completas). Somas informam quantas sessões
+tinham o campo. Frequência semanal só com janela de 7 dias ou mais. Tendências separadas de duração e de
+distância. **Sem calorias, sem frequência cardíaca e sem avaliação de condicionamento.**
+
+## 21. Testes do P09
+
+`tests/unit/analytics-advanced.test.ts`: normalização (acentos, caixa, espaços, sinônimos, desconhecidos,
+ambíguos, preservação do original, sem duplicar séries), classificação (carga, peso corporal, carga adicional,
+assistência, tempo, unilateral, cardio, dados incompatíveis, sem modalidade, determinismo, análises
+disponíveis), peso corporal sem volume fictício, tempo, lados, cardio e unidades, 1RM (1 repetição, 2–12,
+acima do limite, carga zero/negativa, repetições inválidas, kg/lb, precisão, compatibilidade com o gráfico
+antigo, métodos não misturados), tendências (amostras pequenas, estáveis, ruidosas, crescentes, decrescentes,
+intervalos irregulares, pausa no insight, modalidades separadas), explicações e desempenho.
+`tests/unit/analytics-ui.test.tsx` (bloco P09) e `e2e/analytics.spec.ts` (segundo teste, Android 360 px e
+desktop): nomes normalizados, tipo do exercício, método do 1RM, estados indisponíveis, explicações abertas pelo
+teclado, sem rolagem horizontal e sem `NaN`.
+
+## 22. Situação dos recursos (P09)
+
+| Situação | Recursos |
+| --- | --- |
+| Implementado e disponível na tela | grupos normalizados com originais citados; ambíguos/desconhecidos à parte; tipo do exercício; métricas por tipo (carga externa × peso corporal); carga adicional separada; método do 1RM identificado; aviso de pausa longa; explicações dos indicadores; análises indisponíveis explicadas |
+| Implementado só como contrato/cálculo puro (testado com dados fictícios) | `timedMetrics`, `cardioMetrics`, `compareSides`, `bodyweightMetrics` com assistência, atributos explícitos de `classifyExercise`, `compareWithLegacyChart` |
+| Dependente de novos campos (MODELO_EXERCICIOS_V2.md) | duração por série, distância, lado, assistência, modalidade explícita, grupos secundários, unidades por exercício |
+| Adiado (precisa de autorização) | migração do 1RM do gráfico antigo e dos recordes antigos (seção 4); calibração dos limiares com dados reais; resumo para IA com os campos novos |
+

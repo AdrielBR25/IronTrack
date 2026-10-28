@@ -1,6 +1,6 @@
 # Arquitetura
 
-IronTrack 2.0 · Fase 01 · Prompt 03 (atualizado nos Prompts 04–07 com o módulo de IA e o gateway e no Prompt 08 com o motor de análise de treinos). Descreve a organização do
+IronTrack 2.0 · Fase 01 · Prompt 03 (atualizado nos Prompts 04–07 com o módulo de IA e o gateway, no Prompt 08 com o motor de análise de treinos e no Prompt 09 com a análise avançada de exercícios). Descreve a organização do
 código depois da modularização incremental, as dependências permitidas e as que os testes bloqueiam. O
 módulo de IA tem documento próprio: [IA_ARQUITETURA.md](IA_ARQUITETURA.md); o de análise de treinos, [ANALYTICS_TREINAMENTO.md](ANALYTICS_TREINAMENTO.md). As regras automáticas estão em
 `tests/unit/architecture.test.ts`; a compatibilidade dos imports antigos, em `tests/unit/api-compat.test.ts`.
@@ -99,8 +99,12 @@ src/
       adapters/            MockAIProvider.ts (simulado, offline; único adaptador)
     analytics/             motor de análise de treinos (P08; puro, só leitura; ver ANALYTICS_TREINAMENTO.md)
       index.ts             API pública: importe sempre '@/modules/analytics'
-      domain/              types.ts, periods.ts (calendário), metrics.ts (métricas, recordes), trends.ts
-      application/         TrainingAnalyticsService.ts, InsightsEngine.ts, summary.ts (resumo p/ IA, não usado)
+      domain/              types.ts, periods.ts (calendário), metrics.ts (métricas, recordes), trends.ts,
+                           muscles.ts (normalização de grupos, P09), classification.ts (tipo do exercício, P09),
+                           oneRepMax.ts (1RM canônico + adaptador do gráfico antigo, P09),
+                           modalities.ts (tempo, cardio, lados, peso corporal: cálculos puros, P09)
+      application/         TrainingAnalyticsService.ts, InsightsEngine.ts, summary.ts (resumo p/ IA, não usado),
+                           indicators.ts (explicações dos indicadores e análises disponíveis, P09)
   lib/                     compartilhado e infraestrutura crítica de dados
     validation.ts          ParseResult, parseJsonText, formatZodError (genéricos)
     dates.ts, units.ts     datas locais yyyy-mm-dd; conversão kg ↔ lb
@@ -296,7 +300,7 @@ Nada disto existe ainda; estes são os lugares previstos, sem interfaces antecip
 
 | Item | Evidência | Por que foi adiado |
 | --- | --- | --- |
-| Dois cálculos de 1RM | `stats.ts` (`exerciseSeries`) usa Epley inline e, com 1 repetição, dá carga × 1,033; `volume.ts` (`estimate1RM`, usado nos recordes) devolve a própria carga | Unificar muda valores do gráfico de progresso. Divergência fixada em teste de caracterização. P08: o motor de analytics adotou `estimate1RM` (até 12 repetições) sem alterar o gráfico antigo; ver ANALYTICS_TREINAMENTO.md, seção 4. |
+| Dois cálculos de 1RM | `stats.ts` (`exerciseSeries`) usa Epley inline e, com 1 repetição, dá carga × 1,033; `volume.ts` (`estimate1RM`, usado nos recordes) devolve a própria carga | Unificar muda valores do gráfico de progresso. Divergência fixada em teste de caracterização. P08: o motor de analytics adotou `estimate1RM` (até 12 repetições) sem alterar o gráfico antigo. P09: contrato canônico `epley-1a12-v1` em `modules/analytics/domain/oneRepMax.ts` e adaptador `legacyChartE1rm` que reproduz o gráfico antigo; proposta de migração da apresentação em ANALYTICS_TREINAMENTO.md, seção 4, aguardando autorização. |
 | `Settings` mistura app e treino | `lib/types.ts`: tema, unidade e nome junto de descanso, progressão, rotação e grupos musculares | Separar mudaria o registro persistido `settings` e o backup. |
 | Componentes grandes | `WorkoutsPage.tsx` (525 linhas), `BodySection.tsx` (504), `ActiveWorkoutPage.tsx` (493), `SettingsPage.tsx` (479) | A lógica de negócio que tinham já saiu; o restante é apresentação. Dividir em subcomponentes é risco visual sem ganho funcional agora. |
 | Cálculos de exibição no `BodySection` | séries dos gráficos e tabela montadas no componente | São apresentação (unidades, filtros); mover para o domínio só quando outro consumidor precisar. |
@@ -305,3 +309,16 @@ Nada disto existe ainda; estes são os lugares previstos, sem interfaces antecip
 | Instância global `db` + `setDb` | `db/db.ts` | Injeção de dependência nos repositórios só compensa com um segundo armazenamento (ex.: sincronização). |
 | Fotos como data URL no IndexedDB | `ProgressPhoto.dataUrl` | Mudar o armazenamento exige migração e nova versão do backup. |
 | Remover os caminhos `@deprecated` | 11 arquivos em `src/lib` | Remover depois que os testes antigos migrarem para `@/modules/*`; o teste de arquitetura já impede usos novos. |
+
+## 12. Modelo de exercícios (P09)
+
+O banco continua na **v2** e o editor de treinos não grava campos novos. A análise avançada (P09) trabalha só
+com o que já existe por exercício (`muscleGroup`, `equipment`, `category`) e por série (`weight`, `reps`,
+`type`, `status`, `rpe`, `rir`). Duração, distância, lado corporal, assistência e modalidade explícita **não
+existem**: os cálculos correspondentes estão em `modules/analytics/domain/modalities.ts` como funções puras
+testadas com dados fictícios, e a tela mostra "Este exercício ainda não possui dados suficientes para esse tipo
+de análise.". A proposta de evolução do modelo está em [MODELO_EXERCICIOS_V2.md](MODELO_EXERCICIOS_V2.md).
+
+A conversão kg ↔ lb do contrato de 1RM usa a constante exata `KG_PER_LB` declarada no próprio módulo (igual a
+`lib/units`, verificado em teste) para manter as regras de dependência do domínio sem exceção nova.
+
