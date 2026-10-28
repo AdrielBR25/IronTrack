@@ -111,6 +111,8 @@ describe('arquitetura', () => {
       // P13: o planejamento lê treinos pela API pública do treinamento, usa o calendário do analytics e conta sessões
       // e semanas com o motor das metas (sem fórmula paralela).
       if (ownModule === 'modules/planner' && ['modules/training/index.ts', 'modules/analytics/index.ts', 'modules/goals/index.ts'].includes(e.target)) return false;
+      // P14: o calendário unificado combina, só para exibir, treinamento, metas e planejamento (APIs públicas).
+      if (ownModule === 'modules/calendar' && ['modules/training/index.ts', 'modules/goals/index.ts', 'modules/planner/index.ts'].includes(e.target)) return false;
       return !inDir(e.target, ownModule) && !allowedShared.has(e.target);
     });
     expect(bad.map(fmt)).toEqual([]);
@@ -464,3 +466,39 @@ describe('arquitetura do planejamento semanal (P13)', () => {
     expect((layout.match(/^\s*\{ to: '\//gm) ?? []).length).toBe(6);
   });
 });
+
+describe('arquitetura do calendário unificado (P14)', () => {
+  const CAL = 'modules/calendar';
+  const rels = files.map(rel);
+  const calendarFiles = rels.filter((f) => inDir(f, CAL));
+  const source = (f: string) => readFileSync(join(ROOT, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+  it('o domínio existe e depende só de treinamento, metas e planejamento (APIs públicas)', () => {
+    expect(calendarFiles).toEqual(expect.arrayContaining([`${CAL}/index.ts`, `${CAL}/resolve.ts`, `${CAL}/legacy.ts`, `${CAL}/forecast.ts`, `${CAL}/conflicts.ts`]));
+    const allowed = ['modules/training/index.ts', 'modules/goals/index.ts', 'modules/planner/index.ts'];
+    const bad = edges.filter((e) => inDir(e.from, CAL) && e.target && !inDir(e.target, CAL) && !allowed.includes(e.target));
+    expect(bad.map(fmt)).toEqual([]);
+    expect(edges.filter((e) => inDir(e.from, CAL) && !e.target && !e.spec.startsWith('.')).map(fmt)).toEqual([]);
+  });
+
+  it('o domínio não grava nem acessa rede, relógio ou aleatoriedade', () => {
+    const FORBIDDEN = /\b(indexedDB|localStorage|sessionStorage|fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|document\.cookie|caches\.|Math\.random|Date\.now\s*\(\s*\)|new Date\(\s*\))/;
+    expect(calendarFiles.filter((f) => FORBIDDEN.test(source(f)))).toEqual([]);
+  });
+
+  it('nenhuma camada de domínio, banco ou IA importa o calendário (é só um modelo de leitura das telas)', () => {
+    const bad = edges.filter(
+      (e) => e.target && (inDir(e.target, CAL) || e.target === 'hooks/useCalendar.ts') && (inDir(e.from, 'db', 'lib', 'modules/ai', 'integrations', 'features/assistant', 'pages/AIAssistantPage.tsx') || (inDir(e.from, 'modules') && !inDir(e.from, CAL))),
+    );
+    expect(bad.map(fmt)).toEqual([]);
+    const mentions = rels.filter((f) => inDir(f, 'modules/ai', 'integrations', 'features/assistant') && /calend[aá]rio|modules\/calendar|useCalendar/i.test(source(f)));
+    expect(mentions).toEqual([]);
+  });
+
+  it('o hook do calendário só lê (nenhuma escrita no Dexie)', () => {
+    const hook = source('hooks/useCalendar.ts');
+    expect(/\.(put|add|bulkPut|bulkAdd|update|delete|clear|modify|bulkDelete)\s*\(/.test(hook)).toBe(false);
+    expect(/transaction\s*\(\s*['"]rw/.test(hook)).toBe(false);
+  });
+});
+
