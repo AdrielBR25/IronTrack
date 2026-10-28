@@ -502,3 +502,51 @@ describe('arquitetura do calendário unificado (P14)', () => {
   });
 });
 
+
+describe('arquitetura da consolidação de agendas (P15)', () => {
+  const rels = files.map(rel);
+  const source = (f: string) => readFileSync(join(ROOT, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const NEW = ['modules/planner/legacyImport.ts', 'modules/calendar/conflictCenter.ts', 'db/legacyImport.ts', 'features/calendar/calendarPrefs.ts', 'features/calendar/ConflictCenter.tsx', 'features/calendar/CalendarPrefsDialog.tsx', 'pages/LegacyImportPage.tsx'];
+
+  it('os arquivos existem; o motor de importação e a central são domínio puro', () => {
+    expect(rels).toEqual(expect.arrayContaining(NEW));
+    const FORBIDDEN = /\b(indexedDB|localStorage|sessionStorage|fetch\s*\(|XMLHttpRequest|WebSocket|Math\.random|Date\.now\s*\(\s*\)|new Date\(\s*\))/;
+    expect(['modules/planner/legacyImport.ts', 'modules/calendar/conflictCenter.ts'].filter((f) => FORBIDDEN.test(source(f)))).toEqual([]);
+  });
+
+  it('a importação só grava no planejamento e no próprio registro: nunca na agenda anterior, sessões, rotação, fichas ou metas', () => {
+    const src = source('db/legacyImport.ts');
+    expect(/db\.(overrides|sessions|rotations|routines|goals|settings)\.(put|add|bulkPut|bulkAdd|update|delete|clear|modify|bulkDelete)\s*\(/.test(src)).toBe(false);
+    expect(/saveSettings|setNextWorkout|skipNextWorkout|completeSession|startSession/.test(src)).toBe(false);
+    // O registro do desfazer usa uma chave própria na tabela de configurações (nunca a chave 'settings').
+    expect(src).toMatch(/planImport\.last\./);
+    expect(/\.put\(\s*\{\s*id:\s*'settings'/.test(src)).toBe(false);
+  });
+
+  it('nada novo vai para a IA, a rede ou o gateway', () => {
+    const NET = /\b(fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon)/;
+    expect(NEW.filter((f) => NET.test(source(f)))).toEqual([]);
+    const bad = edges.filter(
+      (e) => e.target && (NEW.includes(e.target) || e.target === 'db/legacyImport.ts') && inDir(e.from, 'modules/ai', 'integrations', 'features/assistant', 'pages/AIAssistantPage.tsx'),
+    );
+    expect(bad.map(fmt)).toEqual([]);
+    const mentions = rels.filter((f) => inDir(f, 'modules/ai', 'integrations', 'features/assistant') && /legacyImport|calendarPrefs|planImport/i.test(source(f)));
+    expect(mentions).toEqual([]);
+  });
+
+  it('preferências de exibição são só de interface: uma chave de localStorage, fora do banco e do backup', () => {
+    const src = source('features/calendar/calendarPrefs.ts');
+    expect(src).toMatch(/irontrack\.calendarPrefs\.v1/);
+    expect(/\bdb\b|dexie/i.test(src)).toBe(false);
+    const importers = edges.filter((e) => e.target === 'features/calendar/calendarPrefs.ts' && inDir(e.from, 'db', 'lib', 'modules'));
+    expect(importers.map(fmt)).toEqual([]);
+  });
+
+  it('a tela de importação é carregada sob demanda dentro de /planejamento, sem novo item na navegação', () => {
+    const app = readFileSync(join(ROOT, 'App.tsx'), 'utf8');
+    expect(app).toMatch(/lazy\(\(\) => import\('@\/pages\/LegacyImportPage'\)\)/);
+    expect(app).toMatch(/path="\/planejamento\/importar"/);
+    const layout = readFileSync(join(ROOT, 'components/AppLayout.tsx'), 'utf8');
+    expect((layout.match(/^\s*\{ to: '\//gm) ?? []).length).toBe(6);
+  });
+});
