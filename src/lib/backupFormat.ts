@@ -15,8 +15,10 @@ export const BACKUP_APP = 'irontrack';
 // v3 (P10): + campos opcionais de modalidade em exercícios e séries (modality, laterality, loadMode,
 // secondaryMuscles, distanceUnit, durationSec, distance, side, assistanceKg). Estrutura igual à v2 ·
 // v4 (P12): + coleção `goals` (metas de treinamento, com `profileId`). Backups v0–v3 viram v4 com `goals: []` ·
-// v5 (P13): + coleção `planEntries` (planejamento semanal, com `profileId`). Backups v0–v4 viram v5 com `planEntries: []`.
-export const BACKUP_SCHEMA_VERSION = 5;
+// v5 (P13): + coleção `planEntries` (planejamento semanal, com `profileId`). Backups v0–v4 viram v5 com `planEntries: []` ·
+// v6 (P16): + coleção `calendarDecisions` (decisões lembradas do calendário, com `profileId`). Backups v0–v5 viram v6
+// com `calendarDecisions: []`.
+export const BACKUP_SCHEMA_VERSION = 6;
 
 export type BackupData = DataSnapshot;
 
@@ -98,6 +100,8 @@ const backupSchema = z.object({
     goals: z.array(z.object({ id: z.string(), type: z.string() }).passthrough()),
     // P13: idem para o planejamento (validação completa em checkIntegrity › INVALID_PLAN_ENTRY).
     planEntries: z.array(z.object({ id: z.string(), scope: z.string(), kind: z.string() }).passthrough()),
+    // P16: idem para as decisões lembradas (validação completa em checkIntegrity › INVALID_CALENDAR_DECISION).
+    calendarDecisions: z.array(z.object({ id: z.string(), conflictId: z.string() }).passthrough()),
   }),
 });
 
@@ -142,6 +146,12 @@ const MIGRATIONS: Record<number, Migration> = {
     const data = (raw.data ?? {}) as Record<string, unknown>;
     return { ...raw, schemaVersion: 5, data: { ...data, planEntries: data.planEntries ?? [] } };
   },
+  // v5 → v6: decisões lembradas do calendário não existiam; a coleção entra vazia e nada mais muda. Um app anterior
+  // recusa v6 (com orientação para atualizar) em vez de restaurar e perder as decisões sem avisar.
+  5: (raw) => {
+    const data = (raw.data ?? {}) as Record<string, unknown>;
+    return { ...raw, schemaVersion: 6, data: { ...data, calendarDecisions: data.calendarDecisions ?? [] } };
+  },
 };
 
 export function migrateBackup(raw: unknown): ParseResult<Record<string, unknown>> {
@@ -170,7 +180,7 @@ export function migrateBackup(raw: unknown): ParseResult<Record<string, unknown>
 
 export const BACKUP_LIMITS = {
   maxBytes: 100 * 1024 * 1024,
-  maxRecords: { routines: 1_000, sessions: 50_000, rotations: 1_000, overrides: 20_000, bodyEntries: 10_000, photos: 2_000, goals: 2_000, planEntries: 5_000 } as Record<Exclude<CollectionName, 'settings'>, number>,
+  maxRecords: { routines: 1_000, sessions: 50_000, rotations: 1_000, overrides: 20_000, bodyEntries: 10_000, photos: 2_000, goals: 2_000, planEntries: 5_000, calendarDecisions: 1_000 } as Record<Exclude<CollectionName, 'settings'>, number>,
   maxPhotoChars: 15 * 1024 * 1024,
   maxWorkoutsPerRoutine: 100,
   maxExercisesPerItem: 300,
@@ -251,10 +261,15 @@ export const PROFILE_MERGE_BLOCKED_MESSAGE =
 export const PROFILE_TRANSFER_REQUIRED_MESSAGE =
   'Este backup pertence a outro perfil. Confirme explicitamente que os dados dele passarão a pertencer ao perfil local. Nada foi gravado.';
 
-/** Atribui explicitamente ao perfil local os registros com dono do backup (legado ou transferência confirmada). */
+/**
+ * Atribui explicitamente ao perfil local os registros com dono do backup (legado ou transferência confirmada).
+ * P16: o ID de uma decisão lembrada inclui o perfil (`<perfil>~<conflito>`, ver `decisionRecordId` em
+ * '@/modules/planner'); ao trocar o dono, o ID acompanha — senão a decisão ficaria presa à identidade do outro perfil.
+ */
 export function assignOwner(d: BackupData, profileId: string): BackupData {
   const out = { ...d };
-  for (const c of OWNED_COLLECTIONS) (out[c] as { profileId?: string }[]) = d[c].map((r) => (r.profileId === profileId ? r : { ...r, profileId }));
+  for (const c of OWNED_COLLECTIONS) (out[c] as { profileId?: string }[]) = (d[c] ?? []).map((r) => (r.profileId === profileId ? r : { ...r, profileId }));
+  out.calendarDecisions = (d.calendarDecisions ?? []).map((r) => (r.profileId === profileId && r.id === `${profileId}~${r.conflictId}` ? r : { ...r, profileId, id: `${profileId}~${r.conflictId}` }));
   return out;
 }
 
@@ -267,6 +282,8 @@ export interface ImportSummary {
   goals: number;
   /** P13: entradas de planejamento restauradas. */
   planEntries: number;
+  /** P16: decisões lembradas do calendário restauradas. */
+  calendarDecisions: number;
   /** Registros do backup não aplicados (duplicatas + conflitos + ignorados). */
   skipped: number;
   duplicates: number;

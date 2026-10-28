@@ -3,7 +3,7 @@
 // independentes — sessões reais, planejamento semanal (`planEntries`), agenda anterior (`Settings.trainingDays` +
 // `overrides` da rotina ativa) e o ponteiro da rotação. Nada aqui grava, avança a rotação ou cria sessões.
 import type { DayOverride, Routine, RotationState, WorkoutSession } from '@/modules/training';
-import type { DayView, PlanEntry, WeekConsistency } from '@/modules/planner';
+import type { CalendarDecision, DayView, DecisionValue, PlanEntry, WeekConsistency } from '@/modules/planner';
 
 /** Agenda anterior (P01–P12): dias de treino das Configurações + reagendamentos da rotina ativa. */
 export interface LegacySchedule {
@@ -25,6 +25,11 @@ export interface CalendarInput {
   rotations: readonly RotationState[];
   /** null: sem rotina ativa com treinos (não há agenda anterior a mostrar). */
   legacy: LegacySchedule | null;
+  /**
+   * P16: decisões lembradas do perfil (docs/DECISOES_CALENDARIO.md). Só mudam a APRESENTAÇÃO de um conflito idêntico
+   * (mesma identidade e mesma impressão digital); nunca a precedência, o planejamento ou a rotação.
+   */
+  decisions?: readonly CalendarDecision[];
 }
 
 /**
@@ -88,7 +93,35 @@ export type ConflictKind =
 /** `warning`: divergência relevante (aviso visível) · `info`: explicação disponível nos detalhes do dia. */
 export type ConflictSeverity = 'warning' | 'info';
 
+/** P16: decisão lembrada que está valendo para este conflito (mesma identidade e mesma impressão digital). */
+export interface RememberedDecision {
+  decisionId: string;
+  decision: Exclude<DecisionValue, 'show'>;
+  decidedAt: number;
+  revision: number;
+}
+
 export interface CalendarConflict {
+  /**
+   * P16: identidade estável do conflito no perfil: `<tipo>|<data>|<assunto>` (ver `conflictIdentity`). Determinística,
+   * sem nomes, textos ou relógio.
+   */
+  id: string;
+  /** Assunto quando o tipo pode repetir no dia (atividade do planejamento ou sessão); null nos demais. */
+  subject: string | null;
+  /**
+   * P16: impressão digital dos dados RELEVANTES deste conflito (entradas do planejamento com revisão, o que a agenda
+   * anterior indica, a previsão quando o conflito depende dela, a gravidade). Não usa texto, `updatedAt` nem a data
+   * de hoje.
+   */
+  fingerprint: string;
+  /** P16: decisão lembrada aplicada (o aviso não é reapresentado como novo). null = nenhuma decisão vale. */
+  remembered: RememberedDecision | null;
+  /**
+   * P16: decisão guardada para esta identidade, valendo ou não (ex.: invalidada por uma mudança, ou "mostrar de
+   * novo"). A tela usa a revisão para gravar sem sobrescrever outra aba.
+   */
+  stored: { id: string; revision: number; decision: DecisionValue } | null;
   kind: ConflictKind;
   severity: ConflictSeverity;
   /** Texto compreensível, pronto para exibir. */
@@ -142,8 +175,10 @@ export interface ResolvedDay {
   status: UnifiedDayStatus;
   entries: ResolvedEntry[];
   conflicts: CalendarConflict[];
-  /** Há conflito com severidade `warning`. */
+  /** Há conflito com severidade `warning` SEM decisão lembrada válida (P16: o reconhecido não conta como novo). */
   hasWarning: boolean;
+  /** P16: conflitos deste dia com decisão lembrada valendo (continuam consultáveis nos detalhes). */
+  rememberedCount: number;
   /**
    * P15: a agenda anterior indica o mesmo que o planejamento (ex.: depois de importar a agenda anterior). As telas
    * mostram a atividade uma vez só e dizem "a agenda anterior indica o mesmo".
@@ -165,7 +200,7 @@ export interface CalendarSummary {
   restDaysPlanned: number;
   /** Dias (de hoje em diante) sem planejamento em que a agenda anterior sugere treino: informados à parte. */
   legacySuggestions: number;
-  /** Dias com divergência relevante entre as fontes. */
+  /** Dias com divergência relevante entre as fontes (sem decisão lembrada). */
   conflictDays: number;
 }
 

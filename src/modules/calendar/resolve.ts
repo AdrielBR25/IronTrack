@@ -9,6 +9,7 @@
 import { ACTIVITY_STATUS_LABEL, buildWeek, planAddDays, weekDates, weekOf, type DayView } from '@/modules/planner';
 import { normIndex } from '@/modules/training';
 import { activityText, detectConflicts } from './conflicts';
+import { applyDecisions, decisionIndex } from './decisionMatch';
 import { forecastRotation, rotationPointer } from './forecast';
 import { FORECAST_HORIZON_DAYS, interpretLegacy } from './legacy';
 import type {
@@ -110,6 +111,8 @@ interface Prepared {
   views: Map<string, DayView>;
   legacy: Map<string, LegacyDay>;
   forecasts: Map<string, Record<string, RotationForecast>>;
+  /** P16: decisões lembradas do perfil, por identidade do conflito (montado uma vez por cálculo). */
+  decisions: ReturnType<typeof decisionIndex>;
 }
 
 function prepare(input: CalendarInput, from: string, to: string): Prepared {
@@ -132,7 +135,7 @@ function prepare(input: CalendarInput, from: string, to: string): Prepared {
     todayView: views.get(input.today)!,
     to,
   });
-  return { input, views, legacy, forecasts };
+  return { input, views, legacy, forecasts, decisions: decisionIndex(input.decisions, input.profileId) };
 }
 
 function compose(p: Prepared, date: string): ResolvedDay {
@@ -252,6 +255,8 @@ function compose(p: Prepared, date: string): ResolvedDay {
     pointerWorkout,
     hasActiveSession: input.sessions.some((s) => s?.status === 'active' && (!input.profileId || !s.profileId || s.profileId === input.profileId)),
   });
+  // P16: decisões lembradas só mudam a apresentação de um conflito idêntico (precedência e entradas não mudam).
+  applyDecisions(conflicts, p.decisions);
   for (const c of conflicts) {
     for (const e of entries) {
       const isPlan = e.origin === 'plan_exception' || e.origin === 'plan_recurring';
@@ -276,7 +281,8 @@ function compose(p: Prepared, date: string): ResolvedDay {
     status: dayStatus(plan, legacy),
     entries,
     conflicts,
-    hasWarning: conflicts.some((c) => c.severity === 'warning'),
+    hasWarning: conflicts.some((c) => c.severity === 'warning' && !c.remembered),
+    rememberedCount: conflicts.filter((c) => c.remembered).length,
     legacyAgrees: legacyAgreesWithPlan(plan, legacy),
   };
 }

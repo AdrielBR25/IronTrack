@@ -24,3 +24,25 @@ export {
   summarize,
 } from './resolve';
 export { conflictCounts, groupConflicts, type ConflictAction, type ConflictGroup, type ConflictGroupDay } from './conflictCenter';
+export { decisionMatches } from './decisionMatch';
+export {
+  CONFLICT_KIND_LABEL,
+  DECISION_LABEL,
+  DECISION_STATUS_LABEL,
+  decisionRange,
+  evaluateDecisions,
+  evaluateDecisionsFor,
+  isObsolete,
+  pendingConflicts,
+  pendingWarnings,
+  planCleanup,
+  planRemember,
+  planRemove,
+  planShowAgain,
+  rememberOption,
+  rememberedConflicts,
+  type DecisionStatus,
+  type DecisionView,
+  type RememberRequest,
+} from './decisions';
+export { fingerprintOf } from './fingerprint';

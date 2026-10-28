@@ -1,5 +1,5 @@
 import { recordKey, stableStringify } from './integrity';
-import type { BodyEntry, CollectionName, DataSnapshot, DayOverride, PlanEntry, ProgressPhoto, Routine, RotationState, TrainingGoal, WorkoutSession } from './types';
+import type { BodyEntry, CalendarDecision, CollectionName, DataSnapshot, DayOverride, PlanEntry, ProgressPhoto, Routine, RotationState, TrainingGoal, WorkoutSession } from './types';
 
 // Planejamento determinístico da restauração por mesclagem (função pura).
 // Política documentada em docs/BACKUP_RESTAURACAO.md:
@@ -12,6 +12,8 @@ import type { BodyEntry, CollectionName, DataSnapshot, DayOverride, PlanEntry, P
 //  metas (P12): mesmas regras por ID; o vínculo com a rotina acompanha a rotina deduplicada
 //  planejamento (P13): idem; mesma atividade vigente no mesmo dia = duplicata; treino de rotina em conflito que não
 //  existe na versão local da rotina não é aplicado (não liga o planejamento ao treino errado)
+//  decisões lembradas (P16): mesmas regras por ID (o ID já identifica perfil + conflito: duas decisões para o mesmo
+//  conflito têm o mesmo ID → duplicata ou conflito, nunca duas); a decisão local é mantida em caso de diferença
 //
 // Nada é sobrescrito: a aplicação usa somente inserções.
 
@@ -41,7 +43,7 @@ export interface MergePlan {
   notRestored: number;
 }
 
-const COLLECTIONS: CollectionName[] = ['settings', 'routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos', 'goals', 'planEntries'];
+const COLLECTIONS: CollectionName[] = ['settings', 'routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos', 'goals', 'planEntries', 'calendarDecisions'];
 
 function omit<T extends object>(o: T, keys: string[]): Partial<T> {
   const out = { ...o } as Record<string, unknown>;
@@ -68,7 +70,7 @@ const planSlotKey = (e: PlanEntry) =>
 export function planMerge(local: DataSnapshot, incoming: DataSnapshot): MergePlan {
   const counts = Object.fromEntries(COLLECTIONS.map((c) => [c, { add: 0, duplicate: 0, conflict: 0, skipped: 0 }])) as Record<CollectionName, CollectionCounts>;
   const items: MergeItem[] = [];
-  const toAdd: DataSnapshot = { settings: null, routines: [], sessions: [], rotations: [], overrides: [], bodyEntries: [], photos: [], goals: [], planEntries: [] };
+  const toAdd: DataSnapshot = { settings: null, routines: [], sessions: [], rotations: [], overrides: [], bodyEntries: [], photos: [], goals: [], planEntries: [], calendarDecisions: [] };
   const note = (kind: MergeItemKind, code: string, collection: CollectionName, id: string, message: string) => items.push({ kind, code, collection, id, message });
 
   /**
@@ -305,6 +307,17 @@ export function planMerge(local: DataSnapshot, incoming: DataSnapshot): MergePla
     }
   }
 
+  // ---- Decisões lembradas (P16): só por ID; nunca sobrescrevem a decisão local ----
+  {
+    const localByKey = index('calendarDecisions', local.calendarDecisions ?? []);
+    const seen = new Set<string>();
+    for (const d of (incoming.calendarDecisions ?? []) as CalendarDecision[]) {
+      if (byKey('calendarDecisions', d, localByKey, seen) !== 'new') continue;
+      toAdd.calendarDecisions.push(d);
+      counts.calendarDecisions.add++;
+    }
+  }
+
   // ---- Configurações: nunca mescladas campo a campo ----
   if (incoming.settings) {
     if (!local.settings) {
@@ -335,5 +348,6 @@ export function applyPlan(local: DataSnapshot, plan: MergePlan): DataSnapshot {
     photos: [...local.photos, ...a.photos],
     goals: [...local.goals, ...a.goals],
     planEntries: [...local.planEntries, ...a.planEntries],
+    calendarDecisions: [...(local.calendarDecisions ?? []), ...a.calendarDecisions],
   };
 }

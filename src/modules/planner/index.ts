@@ -70,3 +70,17 @@ export {
   type PlanImportRecord,
   type UndoPlan,
 } from './legacyImport';
+export { DECISION_CONFLICT_KINDS, DECISION_SCOPES, DECISION_VALUES } from './types';
+export {
+  DECISION_LIMITS,
+  CalendarDecisionError,
+  calendarDecisionSchema,
+  calendarDecisionIssues,
+  conflictIdentity,
+  decisionAllowed,
+  decisionRecordId,
+  isValidCalendarDecision,
+  reassignDecision,
+  scopeOf,
+  type CalendarDecisionErrorKind,
+} from './decisions';

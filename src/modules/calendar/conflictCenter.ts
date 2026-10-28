@@ -9,6 +9,8 @@ export type ConflictAction = 'open_day' | 'edit_plan' | 'see_legacy' | 'legacy_f
 
 export interface ConflictGroupDay {
   date: string;
+  /** O dia já passou (só leitura). */
+  isPast: boolean;
   /** Mensagens do dia neste grupo, sem repetição. */
   messages: string[];
   conflicts: CalendarConflict[];
@@ -83,12 +85,15 @@ function legacyChoiceFor(day: ResolvedDay, c: CalendarConflict): ConflictGroupDa
 /**
  * Agrupa os conflitos dos dias por tipo e gravidade. Avisos (`warning`) vêm sempre; informações só com
  * `includeInfo` (preferência de exibição — o que é escondido continua consultável no detalhe de cada dia).
+ * P16: conflitos com decisão lembrada valendo ficam fora (não são reapresentados como novos); `remembered: true`
+ * agrupa SÓ esses (para a seção "Decisões lembradas" do período).
  */
-export function groupConflicts(days: readonly ResolvedDay[], opts: { includeInfo: boolean }): ConflictGroup[] {
+export function groupConflicts(days: readonly ResolvedDay[], opts: { includeInfo: boolean; remembered?: boolean }): ConflictGroup[] {
   const groups = new Map<string, ConflictGroup>();
   for (const day of days) {
     for (const c of day.conflicts) {
-      if (c.severity === 'info' && !opts.includeInfo) continue;
+      if (!!c.remembered !== !!opts.remembered) continue;
+      if (c.severity === 'info' && !opts.includeInfo && !opts.remembered) continue;
       const id = `${c.kind}:${c.severity}`;
       let g = groups.get(id);
       if (!g) {
@@ -98,7 +103,7 @@ export function groupConflicts(days: readonly ResolvedDay[], opts: { includeInfo
       }
       let gd = g.days.find((x) => x.date === day.date);
       if (!gd) {
-        gd = { date: day.date, messages: [], conflicts: [], actions: ['open_day'], legacyChoice: null };
+        gd = { date: day.date, isPast: day.isPast, messages: [], conflicts: [], actions: ['open_day'], legacyChoice: null };
         g.days.push(gd);
       }
       if (!gd.messages.includes(c.message)) gd.messages.push(c.message);
@@ -115,10 +120,14 @@ export function groupConflicts(days: readonly ResolvedDay[], opts: { includeInfo
   return [...groups.values()].sort((a, b) => (a.severity === b.severity ? ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind) : a.severity === 'warning' ? -1 : 1));
 }
 
-/** Contagem para o botão "Revisar divergências": dias com aviso e observações informativas (à parte). */
-export function conflictCounts(days: readonly ResolvedDay[]): { warningDays: number; infoDays: number } {
+/**
+ * Contagem para o botão "Revisar divergências": dias com aviso e observações informativas (à parte), sem os
+ * conflitos com decisão lembrada valendo (P16), que são contados separadamente em `rememberedDays`.
+ */
+export function conflictCounts(days: readonly ResolvedDay[]): { warningDays: number; infoDays: number; rememberedDays: number } {
   return {
     warningDays: days.filter((d) => d.hasWarning).length,
-    infoDays: days.filter((d) => !d.hasWarning && d.conflicts.length > 0).length,
+    infoDays: days.filter((d) => !d.hasWarning && d.conflicts.some((c) => !c.remembered)).length,
+    rememberedDays: days.filter((d) => d.rememberedCount > 0).length,
   };
 }

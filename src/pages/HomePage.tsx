@@ -1,13 +1,13 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CalendarCheck2, CalendarDays, ChevronRight, Clock, Coffee, Dumbbell, FileUp, Flame, Moon, Play, Sparkles, TrendingDown, TrendingUp, Trophy, Weight } from 'lucide-react';
+import { AlertTriangle, CalendarCheck2, CalendarDays, ChevronRight, Clock, Coffee, Dumbbell, FileUp, Flame, Moon, Play, Sparkles, TrendingDown, TrendingUp, Trophy, Weight, BookmarkCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { useActiveRoutine, useActiveSession, useCompletedSessions, useToday } from '@/hooks/data';
 import { useCalendarInput, type CalendarData } from '@/hooks/useCalendar';
 import { StartChoiceDialog, type StartChoice } from '@/features/calendar/StartChoiceDialog';
 import { entryLine } from '@/features/calendar/calendarFormat';
-import { nextActivity, primaryEntries, resolveDay, resolveWeek, rotationStatus, type ResolvedDay, type ResolvedEntry } from '@/modules/calendar';
+import { nextActivity, primaryEntries, resolveDay, resolveWeek, rotationStatus, type ResolvedDay, type ResolvedEntry, pendingWarnings, rememberedConflicts } from '@/modules/calendar';
 import { useStartWorkout } from '@/features/routines/useStartWorkout';
 import { importFichaFile, loadSampleFicha } from '@/features/routines/importFicha';
 import { Button } from '@/components/ui/button';
@@ -169,7 +169,9 @@ function TodayCard({ routine, input }: { routine: Routine; input: CalendarData |
   const targetRoutineId = target && pendingRoutine ? pendingRoutine.id : routine.id;
   const sets = startTarget.exercises.reduce((a, e) => a + e.sets + e.warmupSets, 0);
   const estMin = Math.round(startTarget.exercises.reduce((a, e) => a + (e.sets + e.warmupSets) * (45 + e.restSec), 0) / 60);
-  const warnings = day.conflicts.filter((c) => c.severity === 'warning');
+  // P16: a mesma camada de decisão das outras telas; um aviso reconhecido não volta como novo, mas continua acessível.
+  const warnings = pendingWarnings(day);
+  const remembered = rememberedConflicts(day).filter((c) => c.severity === 'warning');
 
   const onStart = () => {
     if (target && pendingRoutine && pending?.origin.startsWith('plan_') && !pending.followsRotation) {
@@ -211,6 +213,16 @@ function TodayCard({ routine, input }: { routine: Routine; input: CalendarData |
             <span className="min-w-0 break-words">
               {warnings[0].message} <span className="font-medium text-primary">Ver no planejamento</span>
             </span>
+          </Link>
+        )}
+        {warnings.length === 0 && remembered.length > 0 && (
+          <Link
+            to={`/planejamento?data=${day.date}`}
+            className="flex min-h-11 items-center gap-2 rounded-xl border border-dashed px-3 py-2 text-xs text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            data-testid="home-remembered"
+          >
+            <BookmarkCheck className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+            <span className="min-w-0 break-words">Decisão lembrada: você manteve o planejamento de hoje. <span className="font-medium text-primary">Ver detalhes</span></span>
           </Link>
         )}
         {isDone ? (

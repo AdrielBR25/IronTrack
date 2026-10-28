@@ -6,7 +6,7 @@
 import type { DayOverride, ProgressionPrefs, Routine, RotationPolicy, RotationState, WorkoutSession } from '@/modules/training/types';
 import type { BodyEntry, ProgressPhoto } from '@/modules/body/types';
 import type { TrainingGoal } from '@/modules/goals/types';
-import type { PlanEntry } from '@/modules/planner/types';
+import type { CalendarDecision, PlanEntry } from '@/modules/planner/types';
 
 export type * from '@/modules/training/types';
 export type * from '@/modules/body/types';
@@ -47,10 +47,11 @@ export interface Settings {
 
 /**
  * Coleções com proprietário explícito (`profileId`). As demais herdam o dono (ver docs/PERFIL_LOCAL.md).
- * P12: metas (`goals`, Dexie v3). P13: planejamento semanal (`planEntries`, Dexie v4).
+ * P12: metas (`goals`, Dexie v3). P13: planejamento semanal (`planEntries`, Dexie v4). P16: decisões lembradas do
+ * calendário (`calendarDecisions`, Dexie v5).
  * A migração v1 → v2 usa a lista congelada da época (db.ts › V2_OWNED_TABLES).
  */
-export const OWNED_COLLECTIONS = ['routines', 'sessions', 'bodyEntries', 'photos', 'goals', 'planEntries'] as const;
+export const OWNED_COLLECTIONS = ['routines', 'sessions', 'bodyEntries', 'photos', 'goals', 'planEntries', 'calendarDecisions'] as const;
 export type OwnedCollection = (typeof OWNED_COLLECTIONS)[number];
 
 /** Retrato completo dos dados locais (conteúdo do backup e entrada da verificação de integridade). */
@@ -66,6 +67,8 @@ export interface DataSnapshot {
   goals: TrainingGoal[];
   /** P13: planejamento semanal (backup v5; vazio em backups antigos). */
   planEntries: PlanEntry[];
+  /** P16: decisões lembradas sobre divergências do calendário (backup v6; vazio em backups antigos). */
+  calendarDecisions: CalendarDecision[];
 }
 
 export type CollectionName = keyof DataSnapshot;

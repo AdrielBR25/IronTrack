@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useMemo } from 'react';
 import { db } from '@/db/db';
+import { listCalendarDecisions, type StoredDecisions } from '@/db/calendarDecisions';
 import { useActiveRoutine, useCurrentProfile, useRoutines, useToday } from '@/hooks/data';
 import { usePlanEntries, usePlannerSessions, useRotations } from '@/hooks/usePlanner';
 import { resolveMonth, resolveRange, resolveWeek, type CalendarInput, type ResolvedDay, type ResolvedMonth, type ResolvedWeek } from '@/modules/calendar';
@@ -18,6 +19,14 @@ function useOverrides(routineId: string | undefined): DayOverride[] | undefined 
   return useLiveQuery(async () => (routineId ? db.overrides.where('routineId').equals(routineId).toArray() : []), [routineId]);
 }
 
+/**
+ * P16: decisões lembradas do perfil (validadas; os registros ilegíveis vêm à parte). Observadas ao vivo: uma decisão
+ * tomada ou removida em outra aba atualiza as três telas.
+ */
+export function useStoredDecisions(): StoredDecisions | undefined {
+  return useLiveQuery(() => listCalendarDecisions(), []);
+}
+
 /** Entradas do calendário unificado (undefined enquanto carrega). Observadas ao vivo: outra aba atualiza a tela. */
 export function useCalendarInput(): CalendarData | undefined {
   const today = useToday();
@@ -28,8 +37,12 @@ export function useCalendarInput(): CalendarData | undefined {
   const profile = useCurrentProfile();
   const { routine: active, settings } = useActiveRoutine();
   const overrides = useOverrides(active?.id);
+  const stored = useStoredDecisions();
+  const decisions = stored?.decisions;
+  // Memoizado pelas fontes: o cronômetro do treino e outras atualizações visuais não recalculam o calendário nem as
+  // impressões digitais (só uma mudança real em alguma fonte ou nas decisões).
   return useMemo(() => {
-    if (!entries || !sessions || !routines || !rotations || active === undefined || !overrides) return undefined;
+    if (!entries || !sessions || !routines || !rotations || active === undefined || !overrides || !decisions) return undefined;
     return {
       today,
       profileId: profile?.id,
@@ -38,8 +51,9 @@ export function useCalendarInput(): CalendarData | undefined {
       routines,
       rotations,
       legacy: active && active.workouts.length ? { routineId: active.id, trainingDays: settings.trainingDays, overrides } : null,
+      decisions,
     };
-  }, [today, entries, sessions, routines, rotations, profile?.id, active, settings.trainingDays, overrides]);
+  }, [today, entries, sessions, routines, rotations, profile?.id, active, settings.trainingDays, overrides, decisions]);
 }
 
 export function useResolvedRange(from: string, to: string): { input: CalendarInput; days: ResolvedDay[] } | undefined {

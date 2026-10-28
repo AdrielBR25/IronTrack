@@ -41,7 +41,7 @@ export async function readLocalState(): Promise<{ data: BackupData; profiles: Lo
 }
 
 async function readTables(): Promise<BackupData> {
-  const [settings, routines, sessions, rotations, overrides, bodyEntries, photos, goals, planEntries] = await Promise.all([
+  const [settings, routines, sessions, rotations, overrides, bodyEntries, photos, goals, planEntries, calendarDecisions] = await Promise.all([
     db.settings.get('settings'),
     db.routines.toArray(),
     db.sessions.toArray(),
@@ -51,8 +51,9 @@ async function readTables(): Promise<BackupData> {
     db.photos.toArray(),
     db.goals.toArray(),
     db.planEntries.toArray(),
+    db.calendarDecisions.toArray(),
   ]);
-  return { settings: settings ?? null, routines, sessions, rotations, overrides, bodyEntries, photos, goals, planEntries };
+  return { settings: settings ?? null, routines, sessions, rotations, overrides, bodyEntries, photos, goals, planEntries, calendarDecisions };
 }
 
 function requireDefaultProfile(profiles: LocalProfile[]): LocalProfile {
@@ -104,6 +105,7 @@ const countOf = (d: BackupData): Record<CollectionName, number> => ({
   photos: d.photos.length,
   goals: d.goals.length,
   planEntries: d.planEntries.length,
+  calendarDecisions: d.calendarDecisions.length,
 });
 
 /** Analisa o backup contra os dados atuais sem gravar nada. */
@@ -171,8 +173,23 @@ export async function restoreBackupReplace(b: BackupFile, opts: RestoreConfirmat
     await db.photos.bulkPut(d.photos);
     await db.goals.bulkPut(d.goals);
     await db.planEntries.bulkPut(d.planEntries);
+    // P16: decisões do backup voltam com o dono local; só valem se o calendário atual tiver o MESMO conflito com a
+    // MESMA impressão digital (senão ficam sem efeito e aparecem como tal em "Decisões lembradas").
+    await db.calendarDecisions.bulkPut(d.calendarDecisions);
   });
-  return { routines: d0.routines.length, sessions: d0.sessions.length, bodyEntries: d0.bodyEntries.length, photos: d0.photos.length, goals: d0.goals.length, planEntries: d0.planEntries.length, skipped: 0, duplicates: 0, conflicts: 0, notRestored: 0 };
+  return {
+    routines: d0.routines.length,
+    sessions: d0.sessions.length,
+    bodyEntries: d0.bodyEntries.length,
+    photos: d0.photos.length,
+    goals: d0.goals.length,
+    planEntries: d0.planEntries.length,
+    calendarDecisions: d0.calendarDecisions.length,
+    skipped: 0,
+    duplicates: 0,
+    conflicts: 0,
+    notRestored: 0,
+  };
 }
 
 /**
@@ -213,6 +230,7 @@ export async function restoreBackupMerge(b: BackupFile, opts: RestoreConfirmatio
     await db.photos.bulkAdd(a.photos);
     await db.goals.bulkAdd(a.goals);
     await db.planEntries.bulkAdd(a.planEntries);
+    await db.calendarDecisions.bulkAdd(a.calendarDecisions);
     const t = plan.totals;
     return {
       routines: a.routines.length,
@@ -221,6 +239,7 @@ export async function restoreBackupMerge(b: BackupFile, opts: RestoreConfirmatio
       photos: a.photos.length,
       goals: a.goals.length,
       planEntries: a.planEntries.length,
+      calendarDecisions: a.calendarDecisions.length,
       skipped: t.duplicate + t.conflict + t.skipped,
       duplicates: t.duplicate,
       conflicts: t.conflict,

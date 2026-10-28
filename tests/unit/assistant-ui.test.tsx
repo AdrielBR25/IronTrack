@@ -403,7 +403,7 @@ describe('assistente: privacidade e integridade', () => {
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);
     expect(await dump()).toBe(before); // treinos, avaliações, fotos, perfil e configurações intactos
-    expect(db.tables.map((t) => t.name).sort()).toEqual(['bodyEntries', 'goals', 'overrides', 'photos', 'planEntries', 'profiles', 'rotations', 'routines', 'sessions', 'settings']);
+    expect(db.tables.map((t) => t.name).sort()).toEqual(['bodyEntries', 'calendarDecisions', 'goals', 'overrides', 'photos', 'planEntries', 'profiles', 'rotations', 'routines', 'sessions', 'settings']);
     expect(db.verno).toBe(DB_SCHEMA_VERSION);
 
     // Recarregar (montar de novo) perde a conversa: nada foi guardado.

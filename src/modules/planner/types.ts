@@ -51,3 +51,53 @@ export interface PlanActivityInput {
   /** null = seguir a rotação da rotina. */
   workoutId: string | null;
 }
+
+// ------------------------------------------------------------------ decisões lembradas do calendário (P16)
+// Ver ./decisions.ts e docs/DECISOES_CALENDARIO.md. Persistidas na tabela `calendarDecisions` (Dexie v5) e no backup (v6).
+
+/** Tipos de conflito do calendário (os mesmos de `ConflictKind` do calendário). */
+export const DECISION_CONFLICT_KINDS = [
+  'plan_vs_legacy_workout',
+  'plan_rest_vs_legacy_workout',
+  'plan_workout_vs_legacy_rest',
+  'exception_replaces_recurring',
+  'rotation_differs',
+  'session_off_plan',
+] as const;
+export type DecisionConflictKind = (typeof DECISION_CONFLICT_KINDS)[number];
+
+/**
+ * `keep_plan`: manter o planejamento atual e não avisar de novo enquanto nada mudar (só divergências
+ * planejamento × agenda anterior) · `hide_info`: ocultar uma observação informativa · `show`: voltar a mostrar
+ * (a decisão continua registrada, sem efeito, até ser removida ou limpa).
+ */
+export const DECISION_VALUES = ['keep_plan', 'hide_info', 'show'] as const;
+export type DecisionValue = (typeof DECISION_VALUES)[number];
+
+export const DECISION_SCOPES = ['conflict_day', 'info_notice'] as const;
+export type DecisionScope = (typeof DECISION_SCOPES)[number];
+
+/** Uma decisão lembrada (tabela `calendarDecisions`, Dexie v5; backup v6). */
+export interface CalendarDecision {
+  /** `decisionRecordId(profileId, conflictId)`. */
+  id: string;
+  profileId: string;
+  /** Identidade do conflito sem o perfil: `conflictIdentity(conflictType, date, subject)`. */
+  conflictId: string;
+  conflictType: DecisionConflictKind;
+  scope: DecisionScope;
+  /** Dia do conflito (yyyy-mm-dd). */
+  date: string;
+  /** Assunto dentro do dia, quando o tipo pode repetir (atividade do planejamento ou sessão); senão null. */
+  subject: string | null;
+  decision: DecisionValue;
+  /** Gravidade do conflito quando a decisão foi tomada (só para exibição; a impressão digital já a inclui). */
+  severity: 'warning' | 'info';
+  sourceFingerprint: string;
+  /** Texto do aviso no momento da decisão (só exibição em "Decisões lembradas"; nunca usado para comparar). */
+  summary: string;
+  createdAt: number;
+  updatedAt: number;
+  revision: number;
+}
+

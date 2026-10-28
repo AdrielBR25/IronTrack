@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Segmented } from '@/components/ui/segmented';
 import { PlanConflictError, clearPlanException, removePlanEntry, replacePlanDate, setPlanMarker, updatePlanActivity } from '@/db/planner';
 import { useActiveSession, useCurrentProfile, useSettings, useToday } from '@/hooks/data';
-import { useCalendarInput } from '@/hooks/useCalendar';
+import { useCalendarInput, useStoredDecisions } from '@/hooks/useCalendar';
 import { useGoals } from '@/hooks/useGoals';
 import { useStartWorkout } from '@/features/routines/useStartWorkout';
 import { ActivityForm, type ActivityFormMode } from '@/features/planner/ActivityForm';
@@ -18,6 +18,7 @@ import { ConsistencyCard, WeeklyGoalsCard } from '@/features/planner/WeekSummary
 import { ConflictNotice } from '@/features/calendar/ConflictNotice';
 import { CalendarLegend, MonthGrid, dayAccessibleText } from '@/features/calendar/MonthGrid';
 import { ConflictCenter } from '@/features/calendar/ConflictCenter';
+import { RememberedDecisions } from '@/features/calendar/RememberedDecisions';
 import { CalendarPrefsDialog } from '@/features/calendar/CalendarPrefsDialog';
 import { useCalendarPrefs, type CalendarPrefs } from '@/features/calendar/calendarPrefs';
 import { StartChoiceDialog, type StartChoice } from '@/features/calendar/StartChoiceDialog';
@@ -83,7 +84,9 @@ export default function WeeklyPlannerPage() {
   const [prefsOpen, setPrefsOpen] = useState(false);
   const [prefsPersisted, setPrefsPersisted] = useState(true);
   const updatePrefs = (patch: Partial<CalendarPrefs>) => setPrefsPersisted(setPrefs(patch));
-  const [centerOpen, setCenterOpen] = useState(params.get('revisar') === '1');
+  const [centerOpen, setCenterOpen] = useState(params.get('revisar') === '1' || params.get('decisoes') === '1');
+  const [reviewOpen, setReviewOpen] = useState(params.get('decisoes') === '1');
+  const stored = useStoredDecisions();
   const [legacyChoice, setLegacyChoice] = useState<{ date: string; choice: NonNullable<ConflictGroupDay['legacyChoice']> } | null>(null);
 
   // Link explícito (`?visao=mes`/`?visao=semana`) > escolha feita nesta tela > preferência de visão inicial.
@@ -319,8 +322,11 @@ export default function WeeklyPlannerPage() {
           onOpenDay={(d) => openDay(d)}
           onEditDay={(d) => openDay(d, true)}
           onUseLegacy={(date, choice) => setLegacyChoice({ date, choice })}
+          onReviewDecisions={() => setReviewOpen((v) => !v)}
+          reviewOpen={reviewOpen}
         />
       )}
+      {centerOpen && reviewOpen && input && <RememberedDecisions input={input} invalidCount={stored?.invalidIds.length ?? 0} onOpenDay={(d) => openDay(d)} />}
 
       {view === 'week' ? (
         <>
@@ -665,7 +671,7 @@ export default function WeeklyPlannerPage() {
         title="Usar a agenda antiga só neste dia?"
         description={
           legacyChoice
-            ? `${fmtDayLong(legacyChoice.date)} passa a ter só: ${legacyChoice.choice.kind === 'rest' ? 'descanso' : legacyChoice.choice.label} (exceção do planejamento). O planejamento semanal, a agenda antiga, a rotação e os treinos registrados não mudam.`
+            ? `Alteração de planejamento (não é só exibição): ${fmtDayLong(legacyChoice.date)} passa a ter só: ${legacyChoice.choice.kind === 'rest' ? 'descanso' : legacyChoice.choice.label} (exceção do planejamento). O planejamento semanal, a agenda antiga, a rotação e os treinos registrados não mudam.`
             : undefined
         }
         confirmLabel="Usar só neste dia"

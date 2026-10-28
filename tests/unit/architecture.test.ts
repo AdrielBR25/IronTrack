@@ -436,7 +436,8 @@ describe('arquitetura do planejamento semanal (P13)', () => {
     const allowed = ['modules/training/index.ts', 'modules/analytics/index.ts', 'modules/goals/index.ts'];
     const bad = edges.filter((e) => inDir(e.from, PL) && e.target && !inDir(e.target, PL) && !allowed.includes(e.target));
     expect(bad.map(fmt)).toEqual([]);
-    expect(edges.filter((e) => inDir(e.from, PL) && !e.target && !e.spec.startsWith('.')).map(fmt)).toEqual([]);
+    // P16: única dependência externa permitida é o Zod, só no registro das decisões lembradas (validação exigida).
+    expect(edges.filter((e) => inDir(e.from, PL) && !e.target && !e.spec.startsWith('.') && !(e.from === `${PL}/decisions.ts` && e.spec === 'zod')).map(fmt)).toEqual([]);
   });
 
   it('o domínio não grava nem acessa rede, relógio ou aleatoriedade', () => {

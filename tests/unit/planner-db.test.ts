@@ -96,13 +96,15 @@ describe('migração v3 → v4', () => {
     const before = await rawDump(dbName);
     await open(dbName);
     expect(db.verno).toBe(DB_SCHEMA_VERSION);
-    expect(DB_SCHEMA_VERSION).toBe(4);
+    // P16: a versão atual (5) também acrescenta a tabela das decisões lembradas, vazia.
+    expect(DB_SCHEMA_VERSION).toBe(5);
     expect(db.currentProfileId).toBe(P1.id);
     db.close();
     const after = await rawDump(dbName);
-    expect(after.verno).toBe(4);
-    const { planEntries, ...rest } = after.tables;
+    expect(after.verno).toBe(5);
+    const { planEntries, calendarDecisions, ...rest } = after.tables;
     expect(planEntries).toEqual([]);
+    expect(calendarDecisions).toEqual([]);
     expect(rest).toEqual(before.tables);
   });
 
@@ -114,7 +116,7 @@ describe('migração v3 → v4', () => {
     await raw.table('sessions').put(session('legado'));
     raw.close();
     await open(dbName);
-    expect(db.verno).toBe(4);
+    expect(db.verno).toBe(DB_SCHEMA_VERSION);
     expect((await db.sessions.get('legado'))?.profileId).toBe(db.currentProfileId);
     expect(db.planEntries.schema.indexes.map((i) => i.name).sort()).toEqual(['date', 'profileId', 'routineId', 'scope', 'updatedAt']);
     expect((await checkLocalIntegrity()).ok).toBe(true);

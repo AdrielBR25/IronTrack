@@ -2,7 +2,7 @@ import { OWNED_COLLECTIONS, type CollectionName, type DataSnapshot } from './typ
 import { isValidProfileId } from './profile';
 import { exerciseModelIssues, setModelIssues, type ModelIssue } from '@/modules/training';
 import { goalIssues } from '@/modules/goals';
-import { planEntryIssues } from '@/modules/planner';
+import { calendarDecisionIssues, planEntryIssues } from '@/modules/planner';
 
 // Verificação de integridade dos dados em memória (sem acesso ao banco nem à interface).
 // Usada antes de qualquer restauração de backup e para diagnosticar o banco local.
@@ -54,7 +54,8 @@ export type IssueCode =
   | 'INVALID_PLAN_ENTRY'
   | 'PLAN_ROUTINE_MISSING'
   | 'PLAN_WORKOUT_MISSING'
-  | 'PLAN_DAY_CONFLICT';
+  | 'PLAN_DAY_CONFLICT'
+  | 'INVALID_CALENDAR_DECISION';
 
 /** Coleções citadas nos problemas: as do retrato e a tabela de perfis. */
 export type IssueCollection = CollectionName | 'profiles';
@@ -158,7 +159,7 @@ export function checkIntegrity(d: DataSnapshot, ownership?: OwnershipContext): I
     issues.push({ severity, code, collection, id, message, action });
 
   // ---- IDs: vazios e duplicados em cada coleção ----
-  const collections: Exclude<CollectionName, 'settings'>[] = ['routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos', 'goals', 'planEntries'];
+  const collections: Exclude<CollectionName, 'settings'>[] = ['routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos', 'goals', 'planEntries', 'calendarDecisions'];
   for (const c of collections) {
     const seen = new Map<string, string>();
     const list = (d[c] ?? []) as unknown[];
@@ -363,6 +364,15 @@ export function checkIntegrity(d: DataSnapshot, ownership?: OwnershipContext): I
     }
   }
 
+  // ---- Decisões lembradas do calendário (P16): formato válido; referências não são exigidas (uma decisão cujo
+  // conflito não existe mais simplesmente fica sem efeito e aparece assim em "Decisões lembradas") ----
+  for (const c of d.calendarDecisions ?? []) {
+    if (!isNonEmptyId(c?.id)) continue;
+    const problems = calendarDecisionIssues(c);
+    if (problems.length)
+      add('error', 'INVALID_CALENDAR_DECISION', 'calendarDecisions', c.id, `Decisão do calendário inválida: ${problems.slice(0, 3).join('; ')}.`, 'Corrija o arquivo: decisões inválidas não são importadas nem descartadas automaticamente.');
+  }
+
   // ---- Configurações (referência opcional) ----
   const active_ = d.settings?.activeRoutineId;
   if (active_ && !routines.has(active_))
@@ -485,7 +495,7 @@ export function snapshotFingerprint(d: DataSnapshot, profiles?: unknown[]): stri
   const parts: string[] = [`settings=${d.settings ? hash64(stableStringify(d.settings)) : '-'}`];
   // Identidade local: qualquer mudança nos perfis (criação, nome, principal) também invalida a prévia.
   if (profiles) parts.push(`profiles=${profiles.length}:${hash64(profiles.map((p) => stableStringify(p)).sort().join('\n'))}`);
-  for (const c of ['routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos', 'goals', 'planEntries'] as const) {
+  for (const c of ['routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos', 'goals', 'planEntries', 'calendarDecisions'] as const) {
     const list = (d[c] ?? []) as unknown[];
     const entries = list
       .map((r) => {

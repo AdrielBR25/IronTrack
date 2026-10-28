@@ -14,7 +14,7 @@ describe('verificação de integridade', () => {
   });
 
   it('banco vazio é válido', () => {
-    const r = checkIntegrity({ settings: null, routines: [], sessions: [], rotations: [], overrides: [], bodyEntries: [], photos: [], goals: [], planEntries: [] });
+    const r = checkIntegrity({ settings: null, routines: [], sessions: [], rotations: [], overrides: [], bodyEntries: [], photos: [], goals: [], planEntries: [], calendarDecisions: [] });
     expect(r.ok).toBe(true);
     expect(r.issues).toEqual([]);
   });

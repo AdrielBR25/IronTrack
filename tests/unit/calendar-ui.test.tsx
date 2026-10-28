@@ -275,9 +275,9 @@ describe('Treinos: agenda unificada', () => {
 });
 
 describe('persistência', () => {
-  it('esquema e backup continuam nas mesmas versões (Dexie v4, backup v5)', () => {
-    expect(DB_SCHEMA_VERSION).toBe(4);
-    expect(BACKUP_SCHEMA_VERSION).toBe(5);
-    expect(db.tables.map((t) => t.name).sort()).toEqual(['bodyEntries', 'goals', 'overrides', 'photos', 'planEntries', 'profiles', 'rotations', 'routines', 'sessions', 'settings']);
+  it('o calendário não cria tabela própria (P16: só a de decisões lembradas, Dexie v5, backup v6)', () => {
+    expect(DB_SCHEMA_VERSION).toBe(5);
+    expect(BACKUP_SCHEMA_VERSION).toBe(6);
+    expect(db.tables.map((t) => t.name).sort()).toEqual(['bodyEntries', 'calendarDecisions', 'goals', 'overrides', 'photos', 'planEntries', 'profiles', 'rotations', 'routines', 'sessions', 'settings']);
   });
 });

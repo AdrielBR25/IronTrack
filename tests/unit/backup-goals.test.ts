@@ -55,12 +55,12 @@ async function roundTrip() {
 }
 
 describe('exportação', () => {
-  it('backup atual (v5; metas desde a v4) contém as metas do perfil, com IDs, versão e estado', async () => {
+  it('backup atual (v6; metas desde a v4) contém as metas do perfil, com IDs, versão e estado', async () => {
     const { a } = await seed();
     await setGoalStatus('g-freq', 'pause', '2026-03-10');
     const b = await exportBackup();
-    expect(BACKUP_SCHEMA_VERSION).toBe(5);
-    expect(b.schemaVersion).toBe(5);
+    expect(BACKUP_SCHEMA_VERSION).toBe(6);
+    expect(b.schemaVersion).toBe(6);
     expect(b.data.goals).toHaveLength(2);
     expect(b.data.goals.find((g) => g.id === 'g-load')).toEqual(a);
     expect(b.data.goals.find((g) => g.id === 'g-freq')).toMatchObject({ status: 'paused', revision: 2 });
