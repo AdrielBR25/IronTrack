@@ -89,6 +89,8 @@ export function snapshot(over: Partial<DataSnapshot> = {}): DataSnapshot {
     goals: [],
     planEntries: [],
     calendarDecisions: [],
+    customExercises: [],
+    exerciseFavorites: [],
     ...over,
   };
 }

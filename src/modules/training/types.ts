@@ -51,6 +51,14 @@ export interface ExerciseTemplate extends ExerciseModelFields {
   targetWeight?: number;
   notes?: string;
   substitutes?: string[];
+  // Origem na biblioteca (P17, docs/BIBLIOTECA_EXERCICIOS.md §2). Opcional: fichas antigas não têm. É só referência
+  // de onde a instância foi copiada; a identidade do exercício na ficha continua sendo `id`.
+  /** Exercício do catálogo padrão de onde a instância foi criada. */
+  catalogId?: string;
+  /** Versão da entrada do catálogo no momento da cópia. */
+  catalogVersion?: number;
+  /** Exercício personalizado (`cx_…`) de onde a instância foi criada. Exclusivo com `catalogId`. */
+  customExerciseId?: string;
 }
 
 export interface Workout {
@@ -115,6 +123,9 @@ export interface SessionExercise extends ExerciseModelFields {
   notes?: string;
   /** Nome original quando o exercício foi substituído durante o treino. */
   substitutedFrom?: string;
+  /** P17: origem na biblioteca copiada da ficha no início do treino (só referência; ver ExerciseTemplate). */
+  catalogId?: string;
+  customExerciseId?: string;
   sets: SessionSet[];
 }
 

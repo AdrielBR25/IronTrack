@@ -17,8 +17,11 @@ export const BACKUP_APP = 'irontrack';
 // v4 (P12): + coleção `goals` (metas de treinamento, com `profileId`). Backups v0–v3 viram v4 com `goals: []` ·
 // v5 (P13): + coleção `planEntries` (planejamento semanal, com `profileId`). Backups v0–v4 viram v5 com `planEntries: []` ·
 // v6 (P16): + coleção `calendarDecisions` (decisões lembradas do calendário, com `profileId`). Backups v0–v5 viram v6
-// com `calendarDecisions: []`.
-export const BACKUP_SCHEMA_VERSION = 6;
+// com `calendarDecisions: []` ·
+// v7 (P17): + coleções `customExercises` (exercícios personalizados) e `exerciseFavorites` (favoritos da biblioteca),
+// ambas com `profileId`; + origem opcional na biblioteca nos exercícios das fichas e sessões (`catalogId`,
+// `catalogVersion`, `customExerciseId`). Backups v0–v6 viram v7 com as duas coleções vazias; nada mais muda.
+export const BACKUP_SCHEMA_VERSION = 7;
 
 export type BackupData = DataSnapshot;
 
@@ -102,6 +105,9 @@ const backupSchema = z.object({
     planEntries: z.array(z.object({ id: z.string(), scope: z.string(), kind: z.string() }).passthrough()),
     // P16: idem para as decisões lembradas (validação completa em checkIntegrity › INVALID_CALENDAR_DECISION).
     calendarDecisions: z.array(z.object({ id: z.string(), conflictId: z.string() }).passthrough()),
+    // P17: idem para a biblioteca (validação completa em checkIntegrity › INVALID_CUSTOM_EXERCISE / INVALID_FAVORITE).
+    customExercises: z.array(z.object({ id: z.string(), name: z.string() }).passthrough()),
+    exerciseFavorites: z.array(z.object({ id: z.string(), target: z.string() }).passthrough()),
   }),
 });
 
@@ -152,6 +158,13 @@ const MIGRATIONS: Record<number, Migration> = {
     const data = (raw.data ?? {}) as Record<string, unknown>;
     return { ...raw, schemaVersion: 6, data: { ...data, calendarDecisions: data.calendarDecisions ?? [] } };
   },
+  // v6 → v7: a biblioteca não existia; as duas coleções entram vazias. Fichas e sessões antigas não têm origem na
+  // biblioteca e continuam válidas assim: nada é associado por nome. Um app anterior recusa v7 (com orientação para
+  // atualizar) em vez de restaurar e perder exercícios personalizados e favoritos sem avisar.
+  6: (raw) => {
+    const data = (raw.data ?? {}) as Record<string, unknown>;
+    return { ...raw, schemaVersion: 7, data: { ...data, customExercises: data.customExercises ?? [], exerciseFavorites: data.exerciseFavorites ?? [] } };
+  },
 };
 
 export function migrateBackup(raw: unknown): ParseResult<Record<string, unknown>> {
@@ -180,7 +193,7 @@ export function migrateBackup(raw: unknown): ParseResult<Record<string, unknown>
 
 export const BACKUP_LIMITS = {
   maxBytes: 100 * 1024 * 1024,
-  maxRecords: { routines: 1_000, sessions: 50_000, rotations: 1_000, overrides: 20_000, bodyEntries: 10_000, photos: 2_000, goals: 2_000, planEntries: 5_000, calendarDecisions: 1_000 } as Record<Exclude<CollectionName, 'settings'>, number>,
+  maxRecords: { routines: 1_000, sessions: 50_000, rotations: 1_000, overrides: 20_000, bodyEntries: 10_000, photos: 2_000, goals: 2_000, planEntries: 5_000, calendarDecisions: 1_000, customExercises: 2_000, exerciseFavorites: 5_000 } as Record<Exclude<CollectionName, 'settings'>, number>,
   maxPhotoChars: 15 * 1024 * 1024,
   maxWorkoutsPerRoutine: 100,
   maxExercisesPerItem: 300,
@@ -270,6 +283,8 @@ export function assignOwner(d: BackupData, profileId: string): BackupData {
   const out = { ...d };
   for (const c of OWNED_COLLECTIONS) (out[c] as { profileId?: string }[]) = (d[c] ?? []).map((r) => (r.profileId === profileId ? r : { ...r, profileId }));
   out.calendarDecisions = (d.calendarDecisions ?? []).map((r) => (r.profileId === profileId && r.id === `${profileId}~${r.conflictId}` ? r : { ...r, profileId, id: `${profileId}~${r.conflictId}` }));
+  // P17: o ID do favorito também inclui o perfil (`<perfil>~<alvo>`, ver `favoriteId` em '@/modules/exercises').
+  out.exerciseFavorites = (d.exerciseFavorites ?? []).map((r) => (r.profileId === profileId && r.id === `${profileId}~${r.target}` ? r : { ...r, profileId, id: `${profileId}~${r.target}` }));
   return out;
 }
 
@@ -284,6 +299,9 @@ export interface ImportSummary {
   planEntries: number;
   /** P16: decisões lembradas do calendário restauradas. */
   calendarDecisions: number;
+  /** P17: exercícios personalizados e favoritos restaurados. */
+  customExercises: number;
+  exerciseFavorites: number;
   /** Registros do backup não aplicados (duplicatas + conflitos + ignorados). */
   skipped: number;
   duplicates: number;

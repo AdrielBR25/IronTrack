@@ -1,5 +1,5 @@
 import { recordKey, stableStringify } from './integrity';
-import type { BodyEntry, CalendarDecision, CollectionName, DataSnapshot, DayOverride, PlanEntry, ProgressPhoto, Routine, RotationState, TrainingGoal, WorkoutSession } from './types';
+import type { BodyEntry, CalendarDecision, CollectionName, CustomExercise, ExerciseFavorite, DataSnapshot, DayOverride, PlanEntry, ProgressPhoto, Routine, RotationState, TrainingGoal, WorkoutSession } from './types';
 
 // Planejamento determinístico da restauração por mesclagem (função pura).
 // Política documentada em docs/BACKUP_RESTAURACAO.md:
@@ -14,6 +14,8 @@ import type { BodyEntry, CalendarDecision, CollectionName, DataSnapshot, DayOver
 //  existe na versão local da rotina não é aplicado (não liga o planejamento ao treino errado)
 //  decisões lembradas (P16): mesmas regras por ID (o ID já identifica perfil + conflito: duas decisões para o mesmo
 //  conflito têm o mesmo ID → duplicata ou conflito, nunca duas); a decisão local é mantida em caso de diferença
+//  biblioteca (P17): personalizados e favoritos só por ID (o do favorito já identifica perfil + exercício); a versão
+//  local é mantida em caso de diferença; nunca há associação por nome
 //
 // Nada é sobrescrito: a aplicação usa somente inserções.
 
@@ -43,7 +45,7 @@ export interface MergePlan {
   notRestored: number;
 }
 
-const COLLECTIONS: CollectionName[] = ['settings', 'routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos', 'goals', 'planEntries', 'calendarDecisions'];
+const COLLECTIONS: CollectionName[] = ['settings', 'routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos', 'goals', 'planEntries', 'calendarDecisions', 'customExercises', 'exerciseFavorites'];
 
 function omit<T extends object>(o: T, keys: string[]): Partial<T> {
   const out = { ...o } as Record<string, unknown>;
@@ -70,7 +72,7 @@ const planSlotKey = (e: PlanEntry) =>
 export function planMerge(local: DataSnapshot, incoming: DataSnapshot): MergePlan {
   const counts = Object.fromEntries(COLLECTIONS.map((c) => [c, { add: 0, duplicate: 0, conflict: 0, skipped: 0 }])) as Record<CollectionName, CollectionCounts>;
   const items: MergeItem[] = [];
-  const toAdd: DataSnapshot = { settings: null, routines: [], sessions: [], rotations: [], overrides: [], bodyEntries: [], photos: [], goals: [], planEntries: [], calendarDecisions: [] };
+  const toAdd: DataSnapshot = { settings: null, routines: [], sessions: [], rotations: [], overrides: [], bodyEntries: [], photos: [], goals: [], planEntries: [], calendarDecisions: [], customExercises: [], exerciseFavorites: [] };
   const note = (kind: MergeItemKind, code: string, collection: CollectionName, id: string, message: string) => items.push({ kind, code, collection, id, message });
 
   /**
@@ -318,6 +320,26 @@ export function planMerge(local: DataSnapshot, incoming: DataSnapshot): MergePla
     }
   }
 
+  // ---- Biblioteca (P17): só por ID; nunca sobrescrevem a versão local ----
+  {
+    const localByKey = index('customExercises', local.customExercises ?? []);
+    const seen = new Set<string>();
+    for (const c of (incoming.customExercises ?? []) as CustomExercise[]) {
+      if (byKey('customExercises', c, localByKey, seen) !== 'new') continue;
+      toAdd.customExercises.push(c);
+      counts.customExercises.add++;
+    }
+  }
+  {
+    const localByKey = index('exerciseFavorites', local.exerciseFavorites ?? []);
+    const seen = new Set<string>();
+    for (const f of (incoming.exerciseFavorites ?? []) as ExerciseFavorite[]) {
+      if (byKey('exerciseFavorites', f, localByKey, seen) !== 'new') continue;
+      toAdd.exerciseFavorites.push(f);
+      counts.exerciseFavorites.add++;
+    }
+  }
+
   // ---- Configurações: nunca mescladas campo a campo ----
   if (incoming.settings) {
     if (!local.settings) {
@@ -349,5 +371,7 @@ export function applyPlan(local: DataSnapshot, plan: MergePlan): DataSnapshot {
     goals: [...local.goals, ...a.goals],
     planEntries: [...local.planEntries, ...a.planEntries],
     calendarDecisions: [...(local.calendarDecisions ?? []), ...a.calendarDecisions],
+    customExercises: [...(local.customExercises ?? []), ...a.customExercises],
+    exerciseFavorites: [...(local.exerciseFavorites ?? []), ...a.exerciseFavorites],
   };
 }

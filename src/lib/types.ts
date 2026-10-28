@@ -7,11 +7,13 @@ import type { DayOverride, ProgressionPrefs, Routine, RotationPolicy, RotationSt
 import type { BodyEntry, ProgressPhoto } from '@/modules/body/types';
 import type { TrainingGoal } from '@/modules/goals/types';
 import type { CalendarDecision, PlanEntry } from '@/modules/planner/types';
+import type { CustomExercise, ExerciseFavorite } from '@/modules/exercises/types';
 
 export type * from '@/modules/training/types';
 export type * from '@/modules/body/types';
 export type * from '@/modules/goals/types';
 export type * from '@/modules/planner/types';
+export type * from '@/modules/exercises/types';
 export type { LocalProfile } from './profile';
 
 export type WeightUnit = 'kg' | 'lb';
@@ -48,10 +50,11 @@ export interface Settings {
 /**
  * Coleções com proprietário explícito (`profileId`). As demais herdam o dono (ver docs/PERFIL_LOCAL.md).
  * P12: metas (`goals`, Dexie v3). P13: planejamento semanal (`planEntries`, Dexie v4). P16: decisões lembradas do
- * calendário (`calendarDecisions`, Dexie v5).
+ * calendário (`calendarDecisions`, Dexie v5). P17: exercícios personalizados e favoritos da biblioteca
+ * (`customExercises`, `exerciseFavorites`, Dexie v6).
  * A migração v1 → v2 usa a lista congelada da época (db.ts › V2_OWNED_TABLES).
  */
-export const OWNED_COLLECTIONS = ['routines', 'sessions', 'bodyEntries', 'photos', 'goals', 'planEntries', 'calendarDecisions'] as const;
+export const OWNED_COLLECTIONS = ['routines', 'sessions', 'bodyEntries', 'photos', 'goals', 'planEntries', 'calendarDecisions', 'customExercises', 'exerciseFavorites'] as const;
 export type OwnedCollection = (typeof OWNED_COLLECTIONS)[number];
 
 /** Retrato completo dos dados locais (conteúdo do backup e entrada da verificação de integridade). */
@@ -69,6 +72,10 @@ export interface DataSnapshot {
   planEntries: PlanEntry[];
   /** P16: decisões lembradas sobre divergências do calendário (backup v6; vazio em backups antigos). */
   calendarDecisions: CalendarDecision[];
+  /** P17: exercícios personalizados da biblioteca (backup v7; vazio em backups antigos). */
+  customExercises: CustomExercise[];
+  /** P17: favoritos da biblioteca (backup v7; vazio em backups antigos). */
+  exerciseFavorites: ExerciseFavorite[];
 }
 
 export type CollectionName = keyof DataSnapshot;

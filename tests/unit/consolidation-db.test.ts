@@ -83,8 +83,8 @@ describe('importação transacional', () => {
     expect(rec).toMatchObject({ status: 'applied', day: WED, routineId: 'r1', profileId: db.currentProfileId });
     expect(rec!.changes.created).toHaveLength(5);
     // P16: o banco subiu para a v5 (tabela de decisões lembradas); a importação não criou tabela.
-    expect(DB_SCHEMA_VERSION).toBe(5);
-    expect(db.verno).toBe(5);
+    expect(DB_SCHEMA_VERSION).toBe(6);
+    expect(db.verno).toBe(6);
   });
 
   it('modo "só visualizar" e prévia sem mudanças não gravam nada', async () => {
@@ -250,8 +250,8 @@ describe('backup', () => {
     await seed();
     await importNow();
     const b = await exportBackup();
-    expect(BACKUP_SCHEMA_VERSION).toBe(6);
-    expect(b.schemaVersion).toBe(6);
+    expect(BACKUP_SCHEMA_VERSION).toBe(7);
+    expect(b.schemaVersion).toBe(7);
     expect(b.data.planEntries).toHaveLength(5);
     expect(JSON.stringify(b)).not.toContain(IMPORT_RECORD_PREFIX);
     expect(b.data.settings!.id).toBe('settings');

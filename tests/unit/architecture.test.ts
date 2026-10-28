@@ -113,6 +113,8 @@ describe('arquitetura', () => {
       if (ownModule === 'modules/planner' && ['modules/training/index.ts', 'modules/analytics/index.ts', 'modules/goals/index.ts'].includes(e.target)) return false;
       // P14: o calendário unificado combina, só para exibir, treinamento, metas e planejamento (APIs públicas).
       if (ownModule === 'modules/calendar' && ['modules/training/index.ts', 'modules/goals/index.ts', 'modules/planner/index.ts'].includes(e.target)) return false;
+      // P17: a biblioteca cria instâncias no modelo da ficha (treinamento) e reutiliza a normalização muscular do analytics.
+      if (ownModule === 'modules/exercises' && ['modules/training/index.ts', 'modules/analytics/index.ts'].includes(e.target)) return false;
       return !inDir(e.target, ownModule) && !allowedShared.has(e.target);
     });
     expect(bad.map(fmt)).toEqual([]);
@@ -154,9 +156,9 @@ describe('arquitetura', () => {
     // Exceção documentada (P10): a verificação de integridade valida os campos de modalidade com as mesmas regras
     // puras do domínio de treinamento, sempre pela API pública (docs/ARQUITETURA.md).
     // P12: a mesma exceção para as metas (validação de metas nos backups pela API pública de '@/modules/goals').
-    // P13: idem para o planejamento ('@/modules/planner').
+    // P13: idem para o planejamento ('@/modules/planner'). P17: idem para a biblioteca ('@/modules/exercises').
     const integrityRules = (e: Edge) =>
-      e.from === 'lib/integrity.ts' && (e.target === 'modules/training/index.ts' || e.target === 'modules/goals/index.ts' || e.target === 'modules/planner/index.ts');
+      e.from === 'lib/integrity.ts' && ['modules/training/index.ts', 'modules/goals/index.ts', 'modules/planner/index.ts', 'modules/exercises/index.ts'].includes(e.target ?? '');
     const toDomain = edges.filter(
       (e) => inDir(e.from, 'lib') && e.target && inDir(e.target, 'modules') && e.from !== 'lib/types.ts' && !DEPRECATED_SHIMS.includes(e.from) && !integrityRules(e),
     );

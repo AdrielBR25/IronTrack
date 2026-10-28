@@ -180,7 +180,7 @@ describe('banco e backup intactos', () => {
     const after = await exportBackup();
     expect(db.verno).toBe(DB_SCHEMA_VERSION);
     expect(after.schemaVersion).toBe(BACKUP_SCHEMA_VERSION);
-    expect(db.tables.map((t) => t.name).sort()).toEqual(['bodyEntries', 'calendarDecisions', 'goals', 'overrides', 'photos', 'planEntries', 'profiles', 'rotations', 'routines', 'sessions', 'settings']);
+    expect(db.tables.map((t) => t.name).sort()).toEqual(['bodyEntries', 'calendarDecisions', 'customExercises', 'exerciseFavorites', 'goals', 'overrides', 'photos', 'planEntries', 'profiles', 'rotations', 'routines', 'sessions', 'settings']);
     expect({ ...after, exportedAt: 0 }).toEqual({ ...before, exportedAt: 0 });
     expect(JSON.stringify(after)).not.toMatch(/consent|binding|SIMULAÇÃO/);
   });

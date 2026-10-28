@@ -41,7 +41,7 @@ export async function readLocalState(): Promise<{ data: BackupData; profiles: Lo
 }
 
 async function readTables(): Promise<BackupData> {
-  const [settings, routines, sessions, rotations, overrides, bodyEntries, photos, goals, planEntries, calendarDecisions] = await Promise.all([
+  const [settings, routines, sessions, rotations, overrides, bodyEntries, photos, goals, planEntries, calendarDecisions, customExercises, exerciseFavorites] = await Promise.all([
     db.settings.get('settings'),
     db.routines.toArray(),
     db.sessions.toArray(),
@@ -52,8 +52,10 @@ async function readTables(): Promise<BackupData> {
     db.goals.toArray(),
     db.planEntries.toArray(),
     db.calendarDecisions.toArray(),
+    db.customExercises.toArray(),
+    db.exerciseFavorites.toArray(),
   ]);
-  return { settings: settings ?? null, routines, sessions, rotations, overrides, bodyEntries, photos, goals, planEntries, calendarDecisions };
+  return { settings: settings ?? null, routines, sessions, rotations, overrides, bodyEntries, photos, goals, planEntries, calendarDecisions, customExercises, exerciseFavorites };
 }
 
 function requireDefaultProfile(profiles: LocalProfile[]): LocalProfile {
@@ -106,6 +108,8 @@ const countOf = (d: BackupData): Record<CollectionName, number> => ({
   goals: d.goals.length,
   planEntries: d.planEntries.length,
   calendarDecisions: d.calendarDecisions.length,
+  customExercises: d.customExercises.length,
+  exerciseFavorites: d.exerciseFavorites.length,
 });
 
 /** Analisa o backup contra os dados atuais sem gravar nada. */
@@ -176,6 +180,10 @@ export async function restoreBackupReplace(b: BackupFile, opts: RestoreConfirmat
     // P16: decisões do backup voltam com o dono local; só valem se o calendário atual tiver o MESMO conflito com a
     // MESMA impressão digital (senão ficam sem efeito e aparecem como tal em "Decisões lembradas").
     await db.calendarDecisions.bulkPut(d.calendarDecisions);
+    // P17: personalizados e favoritos voltam com o dono local. Nada é associado por nome: fichas do backup mantêm a
+    // origem gravada nelas (ou nenhuma, em backups anteriores à biblioteca).
+    await db.customExercises.bulkPut(d.customExercises);
+    await db.exerciseFavorites.bulkPut(d.exerciseFavorites);
   });
   return {
     routines: d0.routines.length,
@@ -185,6 +193,8 @@ export async function restoreBackupReplace(b: BackupFile, opts: RestoreConfirmat
     goals: d0.goals.length,
     planEntries: d0.planEntries.length,
     calendarDecisions: d0.calendarDecisions.length,
+    customExercises: d0.customExercises.length,
+    exerciseFavorites: d0.exerciseFavorites.length,
     skipped: 0,
     duplicates: 0,
     conflicts: 0,
@@ -231,6 +241,8 @@ export async function restoreBackupMerge(b: BackupFile, opts: RestoreConfirmatio
     await db.goals.bulkAdd(a.goals);
     await db.planEntries.bulkAdd(a.planEntries);
     await db.calendarDecisions.bulkAdd(a.calendarDecisions);
+    await db.customExercises.bulkAdd(a.customExercises);
+    await db.exerciseFavorites.bulkAdd(a.exerciseFavorites);
     const t = plan.totals;
     return {
       routines: a.routines.length,
@@ -240,6 +252,8 @@ export async function restoreBackupMerge(b: BackupFile, opts: RestoreConfirmatio
       goals: a.goals.length,
       planEntries: a.planEntries.length,
       calendarDecisions: a.calendarDecisions.length,
+      customExercises: a.customExercises.length,
+      exerciseFavorites: a.exerciseFavorites.length,
       skipped: t.duplicate + t.conflict + t.skipped,
       duplicates: t.duplicate,
       conflicts: t.conflict,

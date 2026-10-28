@@ -86,13 +86,15 @@ describe('migração v2 → v3', () => {
     await open(dbName);
     expect(db.verno).toBe(DB_SCHEMA_VERSION);
     // P13/P16: a versão atual (5) também acrescenta as tabelas do planejamento e das decisões, vazias.
-    expect(DB_SCHEMA_VERSION).toBe(5);
+    expect(DB_SCHEMA_VERSION).toBe(6);
     expect(db.currentProfileId).toBe(P1.id);
     expect(await db.goals.count()).toBe(0);
     db.close();
     const after = await rawDump(dbName);
     expect(after.verno).toBe(DB_SCHEMA_VERSION);
-    const { goals, planEntries, calendarDecisions, ...rest } = after.tables;
+    const { goals, planEntries, calendarDecisions, customExercises, exerciseFavorites, ...rest } = after.tables;
+    expect(customExercises).toEqual([]);
+    expect(exerciseFavorites).toEqual([]);
     expect(goals).toEqual([]);
     expect(planEntries).toEqual([]);
     expect(calendarDecisions).toEqual([]);

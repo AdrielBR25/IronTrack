@@ -1,5 +1,5 @@
 import Dexie, { type Table, type Transaction } from 'dexie';
-import { OWNED_COLLECTIONS, type BodyEntry, type CalendarDecision, type DayOverride, type LocalProfile, type PlanEntry, type ProgressPhoto, type Routine, type RotationState, type Settings, type TrainingGoal, type WorkoutSession } from '@/lib/types';
+import { OWNED_COLLECTIONS, type BodyEntry, type CalendarDecision, type CustomExercise, type DayOverride, type ExerciseFavorite, type LocalProfile, type PlanEntry, type ProgressPhoto, type Routine, type RotationState, type Settings, type TrainingGoal, type WorkoutSession } from '@/lib/types';
 import { DEFAULT_SETTINGS } from '@/lib/defaults';
 import { ProfileError, generateProfileId, isValidProfileId, newDefaultProfile, pickDefaultProfile } from '@/lib/profile';
 import { installModelSnapshotHooks } from './modelGuard';
@@ -8,7 +8,7 @@ import { installModelSnapshotHooks } from './modelGuard';
  * Versão atual do esquema IndexedDB (Dexie). É independente da versão do formato
  * JSON de backup (BACKUP_SCHEMA_VERSION). Histórico e regras em docs/MIGRACOES.md.
  */
-export const DB_SCHEMA_VERSION = 5;
+export const DB_SCHEMA_VERSION = 6;
 
 /** Tabelas com dono na época da migração v1 → v2 (congelada: a v2 não tem a tabela de metas). */
 export const V2_OWNED_TABLES = ['routines', 'sessions', 'bodyEntries', 'photos'] as const;
@@ -25,6 +25,8 @@ export class IronTrackDB extends Dexie {
   goals!: Table<TrainingGoal, string>;
   planEntries!: Table<PlanEntry, string>;
   calendarDecisions!: Table<CalendarDecision, string>;
+  customExercises!: Table<CustomExercise, string>;
+  exerciseFavorites!: Table<ExerciseFavorite, string>;
 
   /** ID do perfil principal, carregado ao abrir o banco (antes de qualquer outra operação). */
   currentProfileId: string | null = null;
@@ -81,9 +83,14 @@ export class IronTrackDB extends Dexie {
     // sem transformação. Tabela própria (e não um registro em `settings`) porque cada decisão tem dono, identidade,
     // revisão e vai para o backup como as outras coleções. Detalhes em docs/DECISOES_CALENDARIO.md §8.
     this.version(5).stores({ calendarDecisions: 'id, profileId, date, updatedAt' });
+    // v6 (IronTrack 2.0 F01/P17): biblioteca de exercícios — personalizados e favoritos. Só acrescenta duas tabelas
+    // vazias, sem transformação: fichas, sessões, metas e histórico não são tocados (a origem na biblioteca é um campo
+    // opcional dentro da ficha, sem índice). O catálogo padrão é estático no código e não vai para o banco.
+    // Detalhes em docs/BIBLIOTECA_EXERCICIOS.md §13.
+    this.version(6).stores({ customExercises: 'id, profileId, updatedAt', exerciseFavorites: 'id, profileId, target' });
 
     // Proprietário dos registros novos e proteção contra troca silenciosa de dono.
-    for (const t of [this.routines, this.sessions, this.bodyEntries, this.photos, this.goals, this.planEntries, this.calendarDecisions] as Table<{ profileId?: string }, string>[]) {
+    for (const t of [this.routines, this.sessions, this.bodyEntries, this.photos, this.goals, this.planEntries, this.calendarDecisions, this.customExercises, this.exerciseFavorites] as Table<{ profileId?: string }, string>[]) {
       t.hook('creating', (_pk, obj) => {
         if (obj.profileId === undefined || obj.profileId === null) {
           if (!this.currentProfileId) throw new ProfileError('Perfil local não inicializado: o registro não foi gravado.');
@@ -220,7 +227,7 @@ export function setDb(next: IronTrackDB) {
 
 /** Tabelas de dados do app (tudo menos `profiles`): o conteúdo do backup e o que "apagar tudo" limpa. */
 export function dataTables() {
-  return [db.settings, db.routines, db.sessions, db.rotations, db.overrides, db.bodyEntries, db.photos, db.goals, db.planEntries, db.calendarDecisions];
+  return [db.settings, db.routines, db.sessions, db.rotations, db.overrides, db.bodyEntries, db.photos, db.goals, db.planEntries, db.calendarDecisions, db.customExercises, db.exerciseFavorites];
 }
 
 /** Apaga todos os dados do app numa única transação. O perfil local (nome e ID) é mantido. */

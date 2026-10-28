@@ -97,12 +97,14 @@ describe('migração v3 → v4', () => {
     await open(dbName);
     expect(db.verno).toBe(DB_SCHEMA_VERSION);
     // P16: a versão atual (5) também acrescenta a tabela das decisões lembradas, vazia.
-    expect(DB_SCHEMA_VERSION).toBe(5);
+    expect(DB_SCHEMA_VERSION).toBe(6);
     expect(db.currentProfileId).toBe(P1.id);
     db.close();
     const after = await rawDump(dbName);
-    expect(after.verno).toBe(5);
-    const { planEntries, calendarDecisions, ...rest } = after.tables;
+    expect(after.verno).toBe(6);
+    const { planEntries, calendarDecisions, customExercises, exerciseFavorites, ...rest } = after.tables;
+    expect(customExercises).toEqual([]);
+    expect(exerciseFavorites).toEqual([]);
     expect(planEntries).toEqual([]);
     expect(calendarDecisions).toEqual([]);
     expect(rest).toEqual(before.tables);

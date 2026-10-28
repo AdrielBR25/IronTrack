@@ -90,8 +90,8 @@ describe('persistência', () => {
     db.close();
     setDb(new IronTrackDB(dbName));
     await db.open();
-    expect(DB_SCHEMA_VERSION).toBe(5);
-    expect(db.verno).toBe(5);
+    expect(DB_SCHEMA_VERSION).toBe(6);
+    expect(db.verno).toBe(6);
     expect(resolveDay(await screen(), WED).hasWarning).toBe(false);
     expect((await shown()).remembered?.decisionId).toBe(d.id);
   });
@@ -257,7 +257,7 @@ describe('backup v6', () => {
     await seed();
     await remember();
     const b = await roundTrip();
-    expect(BACKUP_SCHEMA_VERSION).toBe(6);
+    expect(BACKUP_SCHEMA_VERSION).toBe(7);
     expect(b.data.calendarDecisions).toHaveLength(1);
     const before = await readSnapshot();
     await db.calendarDecisions.clear();
@@ -310,7 +310,7 @@ describe('backup v6', () => {
     delete raw.data.calendarDecisions;
     await remember();
     const b = parse(raw);
-    expect(b.schemaVersion).toBe(6);
+    expect(b.schemaVersion).toBe(7);
     expect(b.data.calendarDecisions).toEqual([]);
     const p = await previewRestore(b);
     await restoreBackupReplace(b, { expectedLocalFingerprint: p.localFingerprint });

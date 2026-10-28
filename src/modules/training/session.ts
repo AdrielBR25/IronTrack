@@ -1,4 +1,4 @@
-import type { ExerciseModelFields, RestDefaults, Routine, SessionExercise, SessionSet, SetType, Workout, WorkoutSession } from './types';
+import type { ExerciseModelFields, ExerciseTemplate, RestDefaults, Routine, SessionExercise, SessionSet, SetType, Workout, WorkoutSession } from './types';
 import { exerciseKey, uid } from '@/lib/utils';
 import { fmtRepRange } from './routineSchema';
 import { exerciseMeasures, pickModelFields, type ExerciseMeasures } from './exerciseModel';
@@ -97,6 +97,13 @@ function buildSets(plan: SetPlan, last: SessionSet[] | undefined): SessionSet[] 
   return sets;
 }
 
+/** Origem na biblioteca (P17), copiada só quando existe (sem criar chaves `undefined`). */
+function pickLibraryRef(t: Pick<ExerciseTemplate, 'catalogId' | 'customExerciseId'>): Pick<SessionExercise, 'catalogId' | 'customExerciseId'> {
+  if (typeof t.catalogId === 'string' && t.catalogId) return { catalogId: t.catalogId };
+  if (typeof t.customExerciseId === 'string' && t.customExerciseId) return { customExerciseId: t.customExerciseId };
+  return {};
+}
+
 export function buildSession(routine: Routine, workout: Workout, history: WorkoutSession[], now = Date.now()): WorkoutSession {
   const exercises: SessionExercise[] = workout.exercises.map((t) => {
     const key = exerciseKey(t.name);
@@ -115,6 +122,7 @@ export function buildSession(routine: Routine, workout: Workout, history: Workou
       plannedSets: t.sets,
       notes: t.notes,
       ...pickModelFields(t),
+      ...pickLibraryRef(t),
       sets: buildSets(t, last?.sets),
     };
   });
@@ -225,8 +233,10 @@ export function substituteExercise(session: WorkoutSession, exId: string, newNam
       const lastNormal = (last?.sets ?? []).filter((s) => s.type === 'normal');
       const ms = exerciseMeasures(e);
       let n = 0;
+      // P17: o exercício trocado no treino não é mais o item da biblioteca de origem; a referência sai da cópia.
+      const { catalogId: _c, customExerciseId: _x, ...rest } = e;
       return {
-        ...e,
+        ...rest,
         name: newName,
         exerciseKey: key,
         substitutedFrom: e.substitutedFrom ?? e.name,

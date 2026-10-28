@@ -85,8 +85,8 @@ describe('migração: o modelo v3 não exige upgrade físico do IndexedDB', () =
   it('o modelo não criou índices: rotinas e treinos mantêm a declaração v2 (a v3 do P12 só acrescenta metas) e o backup passou a v3 (hoje v6)', async () => {
     // P12/P13/P16: o esquema físico subiu (3: `goals`; 4: `planEntries`; 5: `calendarDecisions`), não por causa do
     // modelo de exercícios.
-    expect(DB_SCHEMA_VERSION).toBe(5);
-    expect(BACKUP_SCHEMA_VERSION).toBe(6);
+    expect(DB_SCHEMA_VERSION).toBe(6);
+    expect(BACKUP_SCHEMA_VERSION).toBe(7);
     const cur = new IronTrackDB(name());
     await cur.open();
     const schema = Object.fromEntries(cur.tables.map((t) => [t.name, [t.schema.primKey.src, ...t.schema.indexes.map((i) => i.src)].join(', ')]));
@@ -122,11 +122,13 @@ describe('migração: o modelo v3 não exige upgrade físico do IndexedDB', () =
     db.close();
     const after = await rawDump(dbName);
     // P12/P13/P16: abrir cria só as tabelas de metas, planejamento e decisões, vazias (v5); nada existente é reescrito.
-    expect(after.verno).toBe(5);
+    expect(after.verno).toBe(6);
     expect(after.tables.goals).toEqual([]);
     expect(after.tables.planEntries).toEqual([]);
     expect(after.tables.calendarDecisions).toEqual([]);
-    const { goals: _g, planEntries: _p, calendarDecisions: _c, ...rest } = after.tables;
+    expect(after.tables.customExercises).toEqual([]);
+    expect(after.tables.exerciseFavorites).toEqual([]);
+    const { goals: _g, planEntries: _p, calendarDecisions: _c, customExercises: _x, exerciseFavorites: _f, ...rest } = after.tables;
     expect(rest).toEqual(before.tables);
     // O app do P09 declara só o esquema v2: o Dexie 4 abre o banco v3 com os dados novos sem VersionError.
     const p09 = new Dexie(dbName);
@@ -280,7 +282,7 @@ describe('backup v3 (lido como v5 desde o P13)', () => {
     await seeded(modelSnapshot());
     const before = await readSnapshot();
     const file = await exportBackup();
-    expect(file.schemaVersion).toBe(6);
+    expect(file.schemaVersion).toBe(7);
     const text = JSON.stringify(file);
     for (const k of ['"modality":"timed"', '"durationSec":45', '"distance":5000', '"side":"direito"', '"assistanceKg":25', '"loadMode":"adicional"', '"secondaryMuscles":["Glúteos"]', '"distanceUnit":"km"'])
       expect(text).toContain(k);
@@ -299,9 +301,11 @@ describe('backup v3 (lido como v5 desde o P13)', () => {
     const v5 = parse({ ...backupOf(assignOwner(d, P1.id)), schemaVersion: 5, profile: { id: P1.id, displayName: 'P' } });
     const v6 = parse({ ...backupOf(assignOwner(d, P1.id)), schemaVersion: 6, profile: { id: P1.id, displayName: 'P' } });
     for (const b of [v0, v1, v2, v3, v4, v5, v6]) {
-      expect(b.schemaVersion).toBe(6);
+      expect(b.schemaVersion).toBe(7);
       expect(b.data.planEntries).toEqual([]);
       expect(b.data.calendarDecisions).toEqual([]);
+      expect(b.data.customExercises).toEqual([]);
+      expect(b.data.exerciseFavorites).toEqual([]);
       expect(b.data.goals).toEqual([]);
       expect(b.data.sessions.find((s) => s.id === 'm1')!.exercises[1].sets[0]).toMatchObject({ durationSec: 1500, distance: 5000 });
     }
@@ -310,7 +314,7 @@ describe('backup v3 (lido como v5 desde o P13)', () => {
   });
 
   it('versão incompatível (futura) e arquivo malformado são recusados sem gravar', async () => {
-    const future = parseBackup(JSON.stringify({ ...backupOf(modelSnapshot()), schemaVersion: 7, profile: null }));
+    const future = parseBackup(JSON.stringify({ ...backupOf(modelSnapshot()), schemaVersion: 8, profile: null }));
     expect(!future.ok && future.errors[0]).toMatch(/versão mais nova/);
     const malformed = parseBackup('{"app":"irontrack","kind":"backup","schemaVersion":3,"exportedAt":"x","profile":null,"data":{"sessions":"oops"}}');
     expect(malformed.ok).toBe(false);

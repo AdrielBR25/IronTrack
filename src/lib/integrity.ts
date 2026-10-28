@@ -3,6 +3,7 @@ import { isValidProfileId } from './profile';
 import { exerciseModelIssues, setModelIssues, type ModelIssue } from '@/modules/training';
 import { goalIssues } from '@/modules/goals';
 import { calendarDecisionIssues, planEntryIssues } from '@/modules/planner';
+import { customExerciseIssues, favoriteIssues, isCustomId, CATALOG_ID_RE } from '@/modules/exercises';
 
 // Verificação de integridade dos dados em memória (sem acesso ao banco nem à interface).
 // Usada antes de qualquer restauração de backup e para diagnosticar o banco local.
@@ -55,7 +56,13 @@ export type IssueCode =
   | 'PLAN_ROUTINE_MISSING'
   | 'PLAN_WORKOUT_MISSING'
   | 'PLAN_DAY_CONFLICT'
-  | 'INVALID_CALENDAR_DECISION';
+  | 'INVALID_CALENDAR_DECISION'
+  // P17: biblioteca de exercícios (docs/BIBLIOTECA_EXERCICIOS.md §13–14).
+  | 'INVALID_CUSTOM_EXERCISE'
+  | 'INVALID_FAVORITE'
+  | 'FAVORITE_TARGET_MISSING'
+  | 'INVALID_LIBRARY_REF'
+  | 'LIBRARY_REF_MISSING';
 
 /** Coleções citadas nos problemas: as do retrato e a tabela de perfis. */
 export type IssueCollection = CollectionName | 'profiles';
@@ -159,7 +166,7 @@ export function checkIntegrity(d: DataSnapshot, ownership?: OwnershipContext): I
     issues.push({ severity, code, collection, id, message, action });
 
   // ---- IDs: vazios e duplicados em cada coleção ----
-  const collections: Exclude<CollectionName, 'settings'>[] = ['routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos', 'goals', 'planEntries', 'calendarDecisions'];
+  const collections: Exclude<CollectionName, 'settings'>[] = ['routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos', 'goals', 'planEntries', 'calendarDecisions', 'customExercises', 'exerciseFavorites'];
   for (const c of collections) {
     const seen = new Map<string, string>();
     const list = (d[c] ?? []) as unknown[];
@@ -184,6 +191,8 @@ export function checkIntegrity(d: DataSnapshot, ownership?: OwnershipContext): I
   // ---- Rotinas ----
   const routines = new Map<string, { workoutIds: Set<string>; count: number }>();
   const templateIds = new Set<string>();
+  /** P17: origens na biblioteca citadas por fichas e sessões (conferidas depois dos personalizados). */
+  const libraryRefs: { collection: 'routines' | 'sessions'; id: string; what: string; ref: { catalogId?: unknown; catalogVersion?: unknown; customExerciseId?: unknown } }[] = [];
   for (const r of d.routines ?? []) {
     if (!isNonEmptyId(r?.id)) continue;
     if (!Array.isArray(r.workouts)) {
@@ -218,6 +227,7 @@ export function checkIntegrity(d: DataSnapshot, ownership?: OwnershipContext): I
         if (e.targetWeight != null && (!isFiniteNum(e.targetWeight) || e.targetWeight < 0))
           add('warning', 'INVALID_NUMBER', 'routines', r.id, `Exercício ${e.id} com carga planejada inválida.`, 'Revise a carga no editor de treinos.');
         reportModel(add, 'routines', r.id, `Exercício ${e.id}`, exerciseModelIssues(e));
+        libraryRefs.push({ collection: 'routines', id: r.id, what: `Exercício ${e.id}`, ref: e });
       }
     }
     routines.set(r.id, { workoutIds: wIds, count: r.workouts.length });
@@ -271,6 +281,7 @@ export function checkIntegrity(d: DataSnapshot, ownership?: OwnershipContext): I
     let badNumbers = 0;
     const model: ModelIssue[] = [];
     for (const ex of s.exercises) {
+      if (ex) libraryRefs.push({ collection: 'sessions', id: s.id, what: 'Treino', ref: ex });
       const exIssues = ex ? exerciseModelIssues(ex) : [];
       model.push(...exIssues);
       // Com metadados inválidos, as séries não são comparadas com eles (evita avisos derivados de um erro).
@@ -372,6 +383,50 @@ export function checkIntegrity(d: DataSnapshot, ownership?: OwnershipContext): I
     if (problems.length)
       add('error', 'INVALID_CALENDAR_DECISION', 'calendarDecisions', c.id, `Decisão do calendário inválida: ${problems.slice(0, 3).join('; ')}.`, 'Corrija o arquivo: decisões inválidas não são importadas nem descartadas automaticamente.');
   }
+
+  // ---- Biblioteca (P17): personalizados e favoritos com formato válido; origens opcionais nas fichas e sessões ----
+  const customIds = new Set<string>();
+  for (const c of d.customExercises ?? []) {
+    if (!isNonEmptyId(c?.id)) continue;
+    customIds.add(c.id);
+    const problems = customExerciseIssues(c);
+    if (problems.length)
+      add('error', 'INVALID_CUSTOM_EXERCISE', 'customExercises', c.id, `Exercício personalizado inválido: ${problems.slice(0, 3).join('; ')}.`, 'Corrija o arquivo: exercícios inválidos não são importados nem descartados automaticamente.');
+  }
+  for (const f of d.exerciseFavorites ?? []) {
+    if (!isNonEmptyId(f?.id)) continue;
+    const problems = favoriteIssues(f);
+    if (problems.length) {
+      add('error', 'INVALID_FAVORITE', 'exerciseFavorites', f.id, `Favorito inválido: ${problems.slice(0, 3).join('; ')}.`, 'Corrija o arquivo: favoritos inválidos não são importados nem descartados automaticamente.');
+      continue;
+    }
+    if (f.target.startsWith('custom:') && !customIds.has(f.target.slice(7)))
+      add('info', 'FAVORITE_TARGET_MISSING', 'exerciseFavorites', f.id, 'Favorito de um exercício personalizado que não está nos dados.', 'Nenhuma: o favorito é preservado e aparece como indisponível na biblioteca.');
+  }
+  const badRefs = new Map<string, { collection: 'routines' | 'sessions'; id: string; examples: Set<string> }>();
+  const missingRefs = new Map<string, { collection: 'routines' | 'sessions'; id: string; count: number }>();
+  for (const { collection, id, what, ref } of libraryRefs) {
+    const problems: string[] = [];
+    const { catalogId, catalogVersion, customExerciseId } = ref;
+    if (catalogId !== undefined && !(typeof catalogId === 'string' && catalogId.length <= 100 && CATALOG_ID_RE.test(catalogId))) problems.push('catalogId inválido');
+    if (catalogVersion !== undefined && !(isFiniteNum(catalogVersion) && Number.isInteger(catalogVersion) && catalogVersion >= 1)) problems.push('catalogVersion inválida');
+    if (customExerciseId !== undefined && !isCustomId(customExerciseId)) problems.push('customExerciseId inválido');
+    if (catalogId !== undefined && customExerciseId !== undefined) problems.push('origem dupla (catálogo e personalizado)');
+    const k = `${collection}|${id}`;
+    if (problems.length) {
+      const b = badRefs.get(k) ?? { collection, id, examples: new Set<string>() };
+      for (const p of problems) b.examples.add(`${what}: ${p}`);
+      badRefs.set(k, b);
+    } else if (typeof customExerciseId === 'string' && !customIds.has(customExerciseId)) {
+      const m = missingRefs.get(k) ?? { collection, id, count: 0 };
+      m.count++;
+      missingRefs.set(k, m);
+    }
+  }
+  for (const b of badRefs.values())
+    add('warning', 'INVALID_LIBRARY_REF', b.collection, b.id, `Origem na biblioteca em formato inesperado: ${[...b.examples].slice(0, 3).join('; ')}.`, 'Os dados são preservados; a referência é ignorada pela biblioteca (o exercício continua funcionando).');
+  for (const m of missingRefs.values())
+    add('info', 'LIBRARY_REF_MISSING', m.collection, m.id, `${m.count} exercício(s) vindo(s) de um exercício personalizado que não está nos dados.`, 'Nenhuma: a ficha e o histórico guardam a própria cópia do exercício.');
 
   // ---- Configurações (referência opcional) ----
   const active_ = d.settings?.activeRoutineId;
@@ -495,7 +550,7 @@ export function snapshotFingerprint(d: DataSnapshot, profiles?: unknown[]): stri
   const parts: string[] = [`settings=${d.settings ? hash64(stableStringify(d.settings)) : '-'}`];
   // Identidade local: qualquer mudança nos perfis (criação, nome, principal) também invalida a prévia.
   if (profiles) parts.push(`profiles=${profiles.length}:${hash64(profiles.map((p) => stableStringify(p)).sort().join('\n'))}`);
-  for (const c of ['routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos', 'goals', 'planEntries', 'calendarDecisions'] as const) {
+  for (const c of ['routines', 'sessions', 'rotations', 'overrides', 'bodyEntries', 'photos', 'goals', 'planEntries', 'calendarDecisions', 'customExercises', 'exerciseFavorites'] as const) {
     const list = (d[c] ?? []) as unknown[];
     const entries = list
       .map((r) => {

@@ -41,6 +41,9 @@ const V4_STORES = { ...V3_STORES, ...V4_DECLARATION };
 // v5 (F01/P16): só a tabela das decisões lembradas do calendário.
 const V5_DECLARATION = { calendarDecisions: 'id, profileId, date, updatedAt' };
 const V5_STORES = { ...V4_STORES, ...V5_DECLARATION };
+// v6 (F01/P17): só as tabelas da biblioteca de exercícios (personalizados e favoritos).
+const V6_DECLARATION = { customExercises: 'id, profileId, updatedAt', exerciseFavorites: 'id, profileId, target' };
+const V6_STORES = { ...V5_STORES, ...V6_DECLARATION };
 
 let n = 0;
 const uniqueName = () => `migration-test-${++n}`;
@@ -96,13 +99,13 @@ function ownersOf(d: DataSnapshot) {
   return new Set([...d.routines, ...d.sessions, ...d.bodyEntries, ...d.photos].map((r) => r.profileId));
 }
 
-/** Versão hipotética 5, só para testar a infraestrutura de upgrade sobre a atual (v4, P13). */
-class IronTrackDBv6 extends IronTrackDB {
+/** Versão hipotética 7, só para testar a infraestrutura de upgrade sobre a atual (v6, P17). */
+class IronTrackDBv7 extends IronTrackDB {
   constructor(name: string, upgrade: Parameters<typeof migration>[2]) {
     super(name);
-    this.version(6)
+    this.version(7)
       .stores({ sessions: 'id, status, startedAt, workoutId, routineId, profileId, finishedAt' })
-      .upgrade(migration(6, 'teste: índice finishedAt e campo derivado', upgrade));
+      .upgrade(migration(7, 'teste: índice finishedAt e campo derivado', upgrade));
   }
 }
 
@@ -130,8 +133,8 @@ async function openRaw(name: string) {
 }
 
 describe('esquema IndexedDB', () => {
-  it('versões 1 a 4 permanecem idênticas às publicadas (não alterar retroativamente) e v5 é a atual', async () => {
-    expect(DB_SCHEMA_VERSION).toBe(5);
+  it('versões 1 a 5 permanecem idênticas às publicadas (não alterar retroativamente) e v6 é a atual', async () => {
+    expect(DB_SCHEMA_VERSION).toBe(6);
     const cur = new IronTrackDB(uniqueName());
     const versions = (cur as unknown as { _versions: { _cfg: { version: number; storesSource: Record<string, string> } }[] })._versions;
     expect(versions.find((v) => v._cfg.version === 1)?._cfg.storesSource).toEqual(LEGACY_V1_STORES);
@@ -139,10 +142,11 @@ describe('esquema IndexedDB', () => {
     expect(versions.find((v) => v._cfg.version === 3)?._cfg.storesSource).toEqual(V3_DECLARATION);
     expect(versions.find((v) => v._cfg.version === 4)?._cfg.storesSource).toEqual(V4_DECLARATION);
     expect(versions.find((v) => v._cfg.version === 5)?._cfg.storesSource).toEqual(V5_DECLARATION);
+    expect(versions.find((v) => v._cfg.version === 6)?._cfg.storesSource).toEqual(V6_DECLARATION);
     await cur.open();
     expect(cur.verno).toBe(DB_SCHEMA_VERSION);
     const schema = Object.fromEntries(cur.tables.map((t) => [t.name, [t.schema.primKey.src, ...t.schema.indexes.map((i) => i.src)].join(', ')]));
-    expect(schema).toEqual(V5_STORES);
+    expect(schema).toEqual(V6_STORES);
     cur.close();
   });
 });
@@ -233,7 +237,7 @@ describe('migração real v1 → v2 (e v3, que só acrescenta a tabela de metas)
 
   it('banco v1 vazio também ganha exatamente um perfil', async () => {
     const name = uniqueName();
-    await createLegacyV1(name, { settings: null, routines: [], sessions: [], rotations: [], overrides: [], bodyEntries: [], photos: [], goals: [], planEntries: [], calendarDecisions: [] });
+    await createLegacyV1(name, { settings: null, routines: [], sessions: [], rotations: [], overrides: [], bodyEntries: [], photos: [], goals: [], planEntries: [], calendarDecisions: [], customExercises: [], exerciseFavorites: [] });
     setDb(new IronTrackDB(name));
     await db.open();
     expect(await db.profiles.count()).toBe(1);
@@ -303,8 +307,8 @@ describe('migração real v1 → v2 (e v3, que só acrescenta a tabela de metas)
   });
 });
 
-describe('infraestrutura de migrações (versão 6 hipotética)', () => {
-  it('upgrade real v6 → v6 preserva os dados, o perfil e aplica a transformação', async () => {
+describe('infraestrutura de migrações (versão 7 hipotética)', () => {
+  it('upgrade real v6 → v7 preserva os dados, o perfil e aplica a transformação', async () => {
     const name = uniqueName();
     const d = legacyData();
     await createLegacyV1(name, d);
@@ -313,7 +317,7 @@ describe('infraestrutura de migrações (versão 6 hipotética)', () => {
     const id = db.currentProfileId;
     db.close();
 
-    const v6 = new IronTrackDBv6(name, async (tx) => {
+    const v6 = new IronTrackDBv7(name, async (tx) => {
       await tx
         .table('sessions')
         .toCollection()
@@ -322,7 +326,7 @@ describe('infraestrutura de migrações (versão 6 hipotética)', () => {
         });
     });
     await v6.open();
-    expect(v6.verno).toBe(6);
+    expect(v6.verno).toBe(7);
     expect(v6.currentProfileId).toBe(id);
     const sessions = await v6.table('sessions').toArray();
     expect(sessions).toHaveLength(d.sessions.length);
@@ -334,7 +338,7 @@ describe('infraestrutura de migrações (versão 6 hipotética)', () => {
     v6.close();
 
     // reabertura do banco atualizado
-    const again = new IronTrackDBv6(name, () => {
+    const again = new IronTrackDBv7(name, () => {
       throw new Error('não deveria rodar de novo');
     });
     await again.open();
@@ -351,7 +355,7 @@ describe('infraestrutura de migrações (versão 6 hipotética)', () => {
     const before = await readSnapshot();
     db.close();
 
-    const broken = new IronTrackDBv6(name, async (tx) => {
+    const broken = new IronTrackDBv7(name, async (tx) => {
       await tx
         .table('sessions')
         .toCollection()
@@ -366,7 +370,7 @@ describe('infraestrutura de migrações (versão 6 hipotética)', () => {
     );
     expect(err).toBeTruthy();
     const msg = describeOpenError(err);
-    expect(msg).toMatch(/versão 6/);
+    expect(msg).toMatch(/versão 7/);
     expect(msg).toMatch(/não foram apagados/);
     broken.close();
 
@@ -384,10 +388,10 @@ describe('infraestrutura de migrações (versão 6 hipotética)', () => {
     await expect(fn({} as never)).rejects.toThrow(/versão 3 \(exemplo\): boom/);
   });
 
-  it('app anterior (v4) abre banco já atualizado para v6 sem apagar dados', async () => {
+  it('app anterior abre banco já atualizado para v7 sem apagar dados', async () => {
     const name = uniqueName();
     await createLegacyV1(name, snapshot({ routines: [routine()], rotations: [rotation()] }));
-    const v6 = new IronTrackDBv6(name, () => undefined);
+    const v6 = new IronTrackDBv7(name, () => undefined);
     await v6.open();
     const id = v6.currentProfileId;
     v6.close();
