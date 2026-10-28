@@ -1,8 +1,8 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useMemo } from 'react';
-import { listCustomExercises, listFavorites } from '@/db/library';
-import { recentCompletedSessions } from '@/db/repo';
-import { buildIndex, libraryItems, recentKeys, resolveFavorites, type LibraryIndex, type LibraryItem, type LibraryKey, type ExerciseFavorite } from '@/modules/exercises';
+import { db } from '@/db/db';
+import { completedSessionsOfProfile, listCustomExercises, listFavorites } from '@/db/library';
+import { buildIndex, libraryItems, mostUsed, recentKeys, resolveFavorites, sheetKeys, type LibraryIndex, type LibraryItem, type LibraryKey, type ExerciseFavorite, type MostUsed } from '@/modules/exercises';
 import { getCatalog } from '@/modules/exercises/catalog';
 import type { CustomExercise } from '@/lib/types';
 
@@ -18,6 +18,11 @@ export interface LibraryData {
   favorites: Set<LibraryKey>;
   orphanFavorites: ExerciseFavorite[];
   recent: LibraryKey[];
+  /** P18: itens presentes nas fichas pela origem da instância (quantidade de instâncias). Não é uso executado. */
+  inSheets: Map<LibraryKey, number>;
+  /** P18: itens usados em sessões concluídas, pela origem gravada na cópia da sessão. */
+  usedInSessions: Set<LibraryKey>;
+  mostUsed: MostUsed;
 }
 
 /**
@@ -28,8 +33,18 @@ export interface LibraryData {
 export function useLibrary(): { data: LibraryData | undefined; error: string | null } {
   const stored = useLiveQuery(async () => {
     try {
-      const [customs, favorites, sessions] = await Promise.all([listCustomExercises(), listFavorites(), recentCompletedSessions(RECENT_SESSIONS)]);
-      return { ok: true as const, customs, favorites, recent: recentKeys(sessions) };
+      const [customs, favorites, sessions, routines] = await Promise.all([listCustomExercises(), listFavorites(), completedSessionsOfProfile(), db.routines.toArray()]);
+      const pid = db.currentProfileId;
+      const used = mostUsed(sessions, pid, Number.MAX_SAFE_INTEGER);
+      return {
+        ok: true as const,
+        customs,
+        favorites,
+        recent: recentKeys(sessions, 12, RECENT_SESSIONS),
+        inSheets: sheetKeys(routines, pid),
+        usedInSessions: new Set(used.ranked.map((r) => r.key)),
+        mostUsed: { ...used, ranked: used.ranked.slice(0, 10) },
+      };
     } catch (e) {
       return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
     }
@@ -47,6 +62,9 @@ export function useLibrary(): { data: LibraryData | undefined; error: string | n
       favorites: fav.keys,
       orphanFavorites: fav.orphans,
       recent: stored.recent,
+      inSheets: stored.inSheets,
+      usedInSessions: stored.usedInSessions,
+      mostUsed: stored.mostUsed,
     };
   }, [stored]);
   return { data, error: stored && !stored.ok ? stored.error : null };

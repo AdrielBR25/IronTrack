@@ -6,7 +6,8 @@
 //  - favoritos têm ID determinístico (`<perfil>~<alvo>`): favoritar em duas abas grava um registro só;
 //  - fichas: cada ação é uma operação aplicada à versão gravada, dentro da transação (nunca a ficha inteira da tela),
 //    então o que outra aba fez no mesmo treino não é perdido em silêncio;
-//  - nada aqui escreve em sessões, metas, planejamento ou histórico. O catálogo é estático (não vai para o banco).
+//  - nada aqui escreve em sessões, metas, planejamento ou histórico. O catálogo é estático (não vai para o banco);
+//  - P18: associar/desassociar origem e operações em lote conferem a impressão digital da prévia (tudo ou nada).
 import { db, getSettings } from './db';
 import {
   CUSTOM_LIMITS,
@@ -30,7 +31,10 @@ import {
   type ExerciseFavorite,
   type LibraryKey,
   type LibraryReferences,
+  type LibraryRef,
   type WorkoutOp,
+  type WorkoutOpErrorCode,
+  WORKOUT_OP_MESSAGE,
 } from '@/modules/exercises';
 import type { Routine, Workout } from '@/lib/types';
 
@@ -83,6 +87,12 @@ export async function createCustomExercise(id: string, fields: CustomFields, now
     await db.customExercises.add(ex);
     return ex;
   });
+}
+
+/** Personalizado válido do perfil local pelo ID (undefined se não existir ou estiver inválido). Só leitura. */
+export async function customExerciseById(id: string): Promise<CustomExercise | undefined> {
+  const c = own(await db.customExercises.get(id));
+  return c && isValidCustomExercise(c) ? c : undefined;
 }
 
 async function currentCustom(id: string): Promise<CustomExercise> {
@@ -193,14 +203,7 @@ export async function mutateWorkout(routineId: string, workoutId: string, op: Wo
     if (!r) throw new WorkoutOpError('missing_routine');
     const w = r.workouts.find((x) => x.id === workoutId);
     if (!w) throw new WorkoutOpError('missing_workout');
-    if (op.type === 'add' || op.type === 'replace') {
-      const cid = op.exercise.customExerciseId;
-      if (cid) {
-        const c = own(await db.customExercises.get(cid));
-        if (!c) throw new CustomExerciseError('deleted');
-        if (c.archivedAt !== null) throw new CustomExerciseError('archived');
-      }
-    }
+    await assertCustomsUsable(customIdsOf(op));
     const siblings = r.workouts.filter((x) => x.id !== w.id).map((x) => x.label);
     const { workout, changed } = applyWorkoutOp(w, op, siblings);
     if (!changed) return { routine: r, workout: w, changed };
@@ -208,6 +211,145 @@ export async function mutateWorkout(routineId: string, workoutId: string, op: Wo
     await db.routines.put(next);
     return { routine: next, workout, changed };
   });
+}
+
+/** Personalizados que a operação liga a uma instância (adição, substituição ou associação). */
+function customIdsOf(op: WorkoutOp): string[] {
+  switch (op.type) {
+    case 'add':
+    case 'replace':
+      return op.exercise.customExerciseId ? [op.exercise.customExerciseId] : [];
+    case 'addMany':
+      return op.exercises.flatMap((e) => (e.customExerciseId ? [e.customExerciseId] : []));
+    case 'replaceMany':
+      return op.pairs.flatMap((p) => (p.exercise.customExerciseId ? [p.exercise.customExerciseId] : []));
+    case 'link':
+      return 'customExerciseId' in op.ref ? [op.ref.customExerciseId] : [];
+    default:
+      return [];
+  }
+}
+
+/** Confere, dentro da transação, que os personalizados existem no perfil e não estão arquivados. */
+async function assertCustomsUsable(ids: readonly string[]) {
+  for (const cid of new Set(ids)) {
+    const c = own(await db.customExercises.get(cid));
+    if (!c) throw new CustomExerciseError('deleted');
+    if (c.archivedAt !== null) throw new CustomExerciseError('archived');
+  }
+}
+
+// ---------- P18: associação assistida (docs/RECONHECIMENTO_EXERCICIOS.md §5–8) ----------
+
+/** Uma associação confirmada pela pessoa, com a impressão digital da instância que ela viu na prévia. */
+export interface LinkRequest {
+  routineId: string;
+  workoutId: string;
+  /** ID da instância na ficha (nunca muda). */
+  id: string;
+  expected: string;
+  ref: LibraryRef;
+  /** Nome exibido no resultado. */
+  name: string;
+}
+
+export type LinkStatus = 'linked' | 'already' | WorkoutOpErrorCode | 'custom_deleted' | 'custom_archived';
+
+export interface LinkBatchResult {
+  /** true = tudo gravado numa transação; false = nada gravado (ao menos uma entrada recusada). */
+  applied: boolean;
+  results: { request: LinkRequest; status: LinkStatus; message: string | null }[];
+}
+
+export const LINK_STATUS_MESSAGE: Record<'linked' | 'already' | 'custom_deleted' | 'custom_archived', string> = {
+  linked: 'Associado.',
+  already: 'Já estava associado a este exercício (nada mudou).',
+  custom_deleted: 'O exercício personalizado escolhido não existe mais.',
+  custom_archived: 'O exercício personalizado escolhido está arquivado.',
+};
+
+/**
+ * Aplica associações confirmadas numa ÚNICA transação de escrita (o navegador serializa entre abas). Revalida tudo
+ * sobre a versão gravada: instância ainda existe, não ganhou outra origem e não mudou desde a prévia. Se qualquer
+ * entrada for recusada, NADA é gravado e o resultado diz o motivo de cada uma (tudo ou nada). Repetir a mesma
+ * confirmação é idempotente. Só a origem muda: nome, ID, parâmetros, sessões, metas e rotação ficam como estão.
+ */
+export async function applyLinks(requests: readonly LinkRequest[], now = Date.now()): Promise<LinkBatchResult> {
+  return db.transaction('rw', [db.routines, db.customExercises], async () => {
+    const routines = new Map<string, Routine>();
+    const results: LinkBatchResult['results'] = [];
+    let ok = true;
+    for (const req of requests) {
+      let r = routines.get(req.routineId);
+      if (!r) {
+        const stored = own(await db.routines.get(req.routineId));
+        if (stored) routines.set(req.routineId, (r = stored));
+      }
+      const fail = (status: LinkStatus, message: string) => {
+        ok = false;
+        results.push({ request: req, status, message });
+      };
+      if (!r) {
+        fail('missing_routine', WORKOUT_OP_MESSAGE.missing_routine);
+        continue;
+      }
+      const w = r.workouts.find((x) => x.id === req.workoutId);
+      if (!w) {
+        fail('missing_workout', WORKOUT_OP_MESSAGE.missing_workout);
+        continue;
+      }
+      if ('customExerciseId' in req.ref) {
+        const c = own(await db.customExercises.get(req.ref.customExerciseId));
+        if (!c) {
+          fail('custom_deleted', LINK_STATUS_MESSAGE.custom_deleted);
+          continue;
+        }
+        if (c.archivedAt !== null) {
+          fail('custom_archived', LINK_STATUS_MESSAGE.custom_archived);
+          continue;
+        }
+      }
+      try {
+        const { workout, changed } = applyWorkoutOp(w, { type: 'link', id: req.id, expected: req.expected, ref: req.ref });
+        if (changed) routines.set(r.id, { ...r, workouts: r.workouts.map((x) => (x.id === w.id ? workout : x)) });
+        results.push({ request: req, status: changed ? 'linked' : 'already', message: changed ? LINK_STATUS_MESSAGE.linked : LINK_STATUS_MESSAGE.already });
+      } catch (e) {
+        if (e instanceof WorkoutOpError) fail(e.code, WORKOUT_OP_MESSAGE[e.code]);
+        else throw e;
+      }
+    }
+    if (!ok) return { applied: false, results };
+    const touched = new Set(results.filter((x) => x.status === 'linked').map((x) => x.request.routineId));
+    for (const id of touched) {
+      const r = routines.get(id)!;
+      await db.routines.put({ ...r, updatedAt: Math.max(now, r.updatedAt + 1) });
+    }
+    return { applied: true, results };
+  });
+}
+
+/** Remove a origem de uma instância (explícito; desfeito por uma nova associação). Nada mais muda. */
+export async function unlinkExercise(routineId: string, workoutId: string, id: string, expected: string, now = Date.now()): Promise<WorkoutMutation> {
+  return mutateWorkout(routineId, workoutId, { type: 'unlink', id, expected }, now);
+}
+
+/** Metas ativas do perfil ligadas a cada exercício da ficha (por ID). Só leitura. */
+export async function goalsLinkedToMany(templateIds: readonly string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>(templateIds.map((id) => [id, 0]));
+  const pid = db.currentProfileId;
+  if (!pid) return out;
+  const goals = await db.goals.where('profileId').equals(pid).toArray();
+  for (const g of goals) {
+    if (g.status === 'archived') continue;
+    for (const id of g.exercise?.templateIds ?? []) if (out.has(id)) out.set(id, out.get(id)! + 1);
+  }
+  return out;
+}
+
+/** Sessões concluídas do perfil (para "Mais utilizados"). Só leitura, pelo índice de status. */
+export async function completedSessionsOfProfile() {
+  const pid = db.currentProfileId;
+  return (await db.sessions.where('status').equals('completed').toArray()).filter((s) => !pid || !s.profileId || s.profileId === pid);
 }
 
 /** Configurações (descansos padrão e grupos) usadas ao criar instâncias. */
