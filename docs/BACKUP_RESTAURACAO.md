@@ -234,3 +234,9 @@ mesmo se um treino for concluído durante a exportação. O JSON é indentado (l
   referência a um item da versão 2 do catálogo mesmo sem conhecê-lo (a ficha é uma cópia e continua funcionando).
 - Restaurar um backup enquanto a confirmação de associação está aberta: se a instância voltou diferente, a associação
   é recusada (impressão digital). Ver [RECONHECIMENTO_EXERCICIOS.md](RECONHECIMENTO_EXERCICIOS.md) §16 e §17.
+
+## Desempenho por exercício (P19, ainda backup v7)
+
+Recordes, gráficos, comparações e observações são derivados das sessões a cada leitura: nada é gravado, então o formato
+do backup **não mudou** (continua v7, Dexie v6) e importação, mesclagem, substituição, rollback e remapeamento de perfil
+seguem iguais. Restaurar um backup reconstrói o mesmo desempenho (teste em `tests/unit/performance-ui.test.tsx`).

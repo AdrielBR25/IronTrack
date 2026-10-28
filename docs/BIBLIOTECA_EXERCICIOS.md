@@ -283,3 +283,11 @@ exporta. O assistente (ContextBuilder) e o consentimento não foram alterados.
 - Testes conferem que todo ID da versão 1 continua existindo, que não há IDs nem nomes repetidos e que o total é
   ≥ 100.
 
+
+## Desempenho do exercício (P19)
+
+O detalhe do item ganhou a seção "Desempenho" com "Ver evolução", "Ver recordes" e "Ver sessões", que abrem
+`#/desempenho/exercicio/c:<catalogId>` (ou `p:<customExerciseId>`): a visão agregada das instâncias que **registraram a
+origem na sessão**, identificada como "Visão agregada de instâncias vinculadas a este exercício.", com acesso a cada
+instância. Sem treino concluído com a origem, mostra estado vazio. Nada é associado nem gravado. Ver
+[DESEMPENHO_EXERCICIOS.md](DESEMPENHO_EXERCICIOS.md).

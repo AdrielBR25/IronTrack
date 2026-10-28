@@ -242,3 +242,11 @@ requisição de rede. O reconhecimento funciona offline.
 - Não há "substituir em todas as fichas"; a associação em lote é por exercício, com revisão de cada um.
 - Sessões antigas não ganham origem; "Mais utilizados" só cresce com treinos feitos depois da associação.
 - O apelido "agachamento livre" ainda aparece em duas entradas do catálogo (herdado do P17).
+
+## Efeito no desempenho (P19)
+
+Associar um exercício antigo à biblioteca grava a origem só na ficha. No desempenho por exercício
+([DESEMPENHO_EXERCICIOS.md](DESEMPENHO_EXERCICIOS.md)) isso **não** reclassifica sessões antigas: a instância da ficha
+continua com todo o seu histórico (identidade `i:<templateId>`), e a visão agregada do catálogo/personalizado só inclui
+as sessões concluídas depois, que registraram a origem. Exercícios antigos sem `templateId` aparecem como "Histórico sem
+vínculo", nunca juntados pelo nome a outros exercícios.

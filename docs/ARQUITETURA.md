@@ -511,3 +511,14 @@ Detalhes em [RECONHECIMENTO_EXERCICIOS.md](RECONHECIMENTO_EXERCICIOS.md).
 - **Sem esquema novo**: Dexie v6 e backup v7. A associação grava só a referência de origem que a instância já previa.
 - Concorrência: impressão digital da instância conferida dentro da transação rw; operações sempre na versão gravada.
 - Nada vai para a IA, o ContextBuilder ou o gateway.
+
+## 21. Desempenho por exercício (P19)
+
+Novo domínio puro `src/modules/performance` (API pública em `index.ts`). Pode importar só as APIs públicas de
+`@/modules/training` (sessões e validações do modelo) e `@/modules/analytics` (1RM canônico, `computeTrend`, limiares,
+calendário), regra conferida em `tests/unit/architecture.test.ts`. Não importa metas: a tela cruza metas e desempenho só
+para exibir. Leitura pelo hook `src/hooks/usePerformance.ts` (única consulta ao Dexie); telas `PerformancePage` e
+`ExercisePerformancePage` carregadas sob demanda; componentes em `src/features/performance`. Identidades próprias dos
+painéis (instância, histórico sem vínculo, visões agregadas), sem alterar os agrupamentos do analytics (por nome) nem
+das metas (por `templateId`). Sem persistência: Dexie v6 e backup v7 inalterados. Detalhes em
+[DESEMPENHO_EXERCICIOS.md](DESEMPENHO_EXERCICIOS.md).

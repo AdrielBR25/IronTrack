@@ -213,3 +213,10 @@ Nenhuma regra de metas mudou ([RECONHECIMENTO_EXERCICIOS.md](RECONHECIMENTO_EXER
 - **substituir vários** dá ID novo a cada substituto. A prévia mostra as metas ligadas e o texto fixo "As metas
   vinculadas ao exercício anterior continuarão vinculadas a ele."; nenhuma meta é redirecionada;
 - modelos multimodais (carga, repetições, tempo, distância, frequência) e as fórmulas de 1RM ficam iguais.
+
+## 18. Desempenho por exercício (P19)
+
+O detalhe de desempenho mostra as metas relacionadas (não arquivadas, cujos `templateIds` incluem a instância ou as
+instâncias da visão agregada) com o componente `RelatedGoals`, só leitura. Nenhuma meta é criada, editada,
+redirecionada ou tem critério de conclusão ou evidência alterados; o progresso continua vindo de `evaluateGoals`. Ver
+[DESEMPENHO_EXERCICIOS.md](DESEMPENHO_EXERCICIOS.md) §15.
