@@ -158,8 +158,10 @@ export default function WeeklyPlannerPage() {
       setMonday(weekOf(linkDate));
       setMonth(monthOf(linkDate));
     }
+    if (params.get('revisar') === '1' || params.get('decisoes') === '1') setCenterOpen(true);
+    if (params.get('decisoes') === '1') setReviewOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [linkView, linkDate, params.get('revisar')]);
+  }, [linkView, linkDate, params.get('revisar'), params.get('decisoes')]);
 
   const changeView = (v: CalendarView) => {
     setView(v);
