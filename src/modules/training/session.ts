@@ -1,6 +1,7 @@
-import type { RestDefaults, Routine, SessionExercise, SessionSet, SetType, Workout, WorkoutSession } from './types';
+import type { ExerciseModelFields, RestDefaults, Routine, SessionExercise, SessionSet, SetType, Workout, WorkoutSession } from './types';
 import { exerciseKey, uid } from '@/lib/utils';
 import { fmtRepRange } from './routineSchema';
+import { exerciseMeasures, pickModelFields, type ExerciseMeasures } from './exerciseModel';
 
 // Lógica pura da sessão de treino. Cada operação devolve uma nova sessão,
 // que é persistida no IndexedDB a cada alteração (recuperação de sessão).
@@ -29,19 +30,41 @@ function roundPlate(n: number) {
   return Math.round(n / 2.5) * 2.5;
 }
 
-function buildSets(
-  plannedSets: number,
-  warmupSets: number,
-  repMin: number,
-  repMax: number,
-  targetWeight: number | undefined,
-  last: SessionSet[] | undefined,
-): SessionSet[] {
+interface SetPlan extends ExerciseModelFields {
+  sets: number;
+  warmupSets: number;
+  repMin: number;
+  repMax: number;
+  targetWeight?: number;
+}
+
+/** Campos novos (P10) pré-preenchidos numa série pendente, só os que a modalidade registra. */
+function modelPrefill(ms: ExerciseMeasures, plan: ExerciseModelFields, prev: SessionSet | undefined): Partial<SessionSet> {
+  const out: Partial<SessionSet> = {};
+  if (ms.duration) {
+    const d = prev?.durationSec ?? plan.targetDurationSec;
+    if (d != null) out.durationSec = d;
+    if (plan.targetDurationSec != null) out.plannedDurationSec = plan.targetDurationSec;
+  }
+  if (ms.distance) {
+    const d = prev?.distance ?? plan.targetDistance;
+    if (d != null) out.distance = d;
+    if (plan.targetDistance != null) out.plannedDistance = plan.targetDistance;
+  }
+  if (ms.assistance && prev?.assistanceKg != null) out.assistanceKg = prev.assistanceKg;
+  // O lado nunca é pré-preenchido: a série unilateral não é duplicada nem atribuída a um lado por palpite.
+  return out;
+}
+
+function buildSets(plan: SetPlan, last: SessionSet[] | undefined): SessionSet[] {
+  const { sets: plannedSets, warmupSets, repMin, repMax, targetWeight } = plan;
+  const ms = exerciseMeasures(plan);
   const lastNormal = (last ?? []).filter((s) => s.type === 'normal');
   const lastWarm = (last ?? []).filter((s) => s.type === 'warmup');
   const topLastWeight = lastNormal.length ? Math.max(...lastNormal.map((s) => s.weight ?? 0)) : undefined;
-  const plannedWeight = targetWeight ?? topLastWeight ?? null;
-  const plannedReps = fmtRepRange(repMin, repMax);
+  const plannedWeight = ms.weight === 'none' ? null : (targetWeight ?? topLastWeight ?? null);
+  // Exercícios por tempo e cardio não têm repetições: nada de converter repetições em segundos.
+  const plannedReps = ms.reps ? fmtRepRange(repMin, repMax) : null;
   const sets: SessionSet[] = [];
   for (let i = 0; i < warmupSets; i++) {
     const prev = lastWarm[i];
@@ -51,10 +74,11 @@ function buildSets(
       id: uid(),
       type: 'warmup',
       status: 'pending',
-      weight: prev?.weight ?? (base ? roundPlate(base * pct) : null),
-      reps: prev?.reps ?? 8,
+      weight: ms.weight === 'none' ? null : (prev?.weight ?? (base ? roundPlate(base * pct) : null)),
+      reps: ms.reps ? (prev?.reps ?? 8) : null,
       plannedWeight: null,
       plannedReps: null,
+      ...modelPrefill(ms, {}, prev),
     });
   }
   for (let i = 0; i < plannedSets; i++) {
@@ -63,10 +87,11 @@ function buildSets(
       id: uid(),
       type: 'normal',
       status: 'pending',
-      weight: prev?.weight ?? targetWeight ?? null,
-      reps: prev?.reps ?? repMax,
+      weight: ms.weight === 'none' ? null : (prev?.weight ?? targetWeight ?? null),
+      reps: ms.reps ? (prev?.reps ?? repMax) : null,
       plannedWeight,
       plannedReps,
+      ...modelPrefill(ms, plan, prev),
     });
   }
   return sets;
@@ -89,7 +114,8 @@ export function buildSession(routine: Routine, workout: Workout, history: Workou
       restSec: t.restSec,
       plannedSets: t.sets,
       notes: t.notes,
-      sets: buildSets(t.sets, t.warmupSets, t.repMin, t.repMax, t.targetWeight, last?.sets),
+      ...pickModelFields(t),
+      sets: buildSets(t, last?.sets),
     };
   });
   return {
@@ -130,14 +156,17 @@ export function completeSet(session: WorkoutSession, exId: string, setId: string
 export function carryForwardWeight(session: WorkoutSession, exId: string, setId: string): WorkoutSession {
   const ex = session.exercises.find((e) => e.id === exId);
   const done = ex?.sets.find((s) => s.id === setId);
-  if (!ex || !done || done.weight === null || done.type === 'drop') return session;
+  if (!ex || !done || done.type === 'drop') return session;
+  // Assistência (P10) segue a mesma regra da carga; nenhum outro campo é propagado.
+  const patch: Partial<SessionSet> = {};
+  if (done.weight !== null) patch.weight = done.weight;
+  if (done.assistanceKg != null) patch.assistanceKg = done.assistanceKg;
+  if (!Object.keys(patch).length) return session;
   const idx = ex.sets.indexOf(done);
   return {
     ...session,
     exercises: session.exercises.map((e) =>
-      e.id !== exId
-        ? e
-        : { ...e, sets: e.sets.map((s, i) => (i > idx && s.status === 'pending' && s.type === done.type && !s.edited ? { ...s, weight: done.weight } : s)) },
+      e.id !== exId ? e : { ...e, sets: e.sets.map((s, i) => (i > idx && s.status === 'pending' && s.type === done.type && !s.edited ? { ...s, ...patch } : s)) },
     ),
   };
 }
@@ -160,15 +189,17 @@ export function addSet(session: WorkoutSession, exId: string, type: SetType = 'n
     exercises: session.exercises.map((e) => {
       if (e.id !== exId) return e;
       const ref = [...e.sets].reverse().find((s) => s.type !== 'warmup') ?? e.sets[e.sets.length - 1];
-      const weight = ref?.weight ?? null;
+      const ms = exerciseMeasures(e);
+      const weight = ms.weight === 'none' ? null : (ref?.weight ?? null);
       const set: SessionSet = {
         id: uid(),
         type,
         status: 'pending',
         weight: type === 'drop' && weight ? Math.round((weight * 0.75) / 2.5) * 2.5 : weight,
-        reps: ref?.reps ?? e.repMax,
+        reps: ms.reps ? (ref?.reps ?? e.repMax) : null,
         plannedWeight: null,
         plannedReps: null,
+        ...modelPrefill(ms, {}, ref),
       };
       return { ...e, sets: [...e.sets, set] };
     }),
@@ -192,6 +223,7 @@ export function substituteExercise(session: WorkoutSession, exId: string, newNam
     exercises: session.exercises.map((e) => {
       if (e.id !== exId) return e;
       const lastNormal = (last?.sets ?? []).filter((s) => s.type === 'normal');
+      const ms = exerciseMeasures(e);
       let n = 0;
       return {
         ...e,
@@ -202,6 +234,7 @@ export function substituteExercise(session: WorkoutSession, exId: string, newNam
           if (s.status !== 'pending' || s.type === 'warmup') return s;
           const prev = lastNormal[n] ?? lastNormal[lastNormal.length - 1];
           n++;
+          if (!ms.reps || ms.weight === 'none') return { ...s, weight: ms.weight === 'none' ? s.weight : (prev?.weight ?? null), reps: ms.reps ? (prev?.reps ?? e.repMax) : s.reps };
           return { ...s, weight: prev?.weight ?? null, reps: prev?.reps ?? e.repMax, plannedWeight: prev?.weight ?? null };
         }),
       };

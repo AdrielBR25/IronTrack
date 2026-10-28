@@ -1,12 +1,20 @@
 import { z } from 'zod';
-import type { Equipment, ExerciseCategory, RestDefaults, Routine } from './types';
+import type { DistanceUnit, Equipment, ExerciseCategory, ExerciseLaterality, ExerciseModelFields, LoadMode, RestDefaults, Routine, TrainingModality } from './types';
+import { LOAD_MODES_BY_MODALITY, MODEL_LIMITS, fromMetersTo, toMetersFrom } from './exerciseModel';
 import { uid } from '@/lib/utils';
 import { formatZodError, parseJsonText, type ParseResult } from '@/lib/validation';
 
 // Esquema da ficha de treino (importação/exportação). Documentado em docs/FICHA_JSON.md.
 
 export const FICHA_FORMAT = 'irontrack.ficha';
-export const FICHA_VERSION = 1;
+/** v1: formato original · v2 (P10): + campos opcionais de modalidade. Arquivos v1 continuam aceitos. */
+export const FICHA_VERSION = 2;
+
+// Campos opcionais do modelo v3 na ficha (P10). Só são lidos quando escritos explicitamente: um número em
+// "repeticoes" nunca vira duração ou distância, e a modalidade nunca é deduzida do nome do exercício.
+const MODALITY_MAP: Record<string, TrainingModality> = { musculacao: 'resistance', peso_corporal: 'bodyweight', tempo: 'timed', cardio: 'cardio' };
+const MODALITY_REVERSE: Record<TrainingModality, string> = { resistance: 'musculacao', bodyweight: 'peso_corporal', timed: 'tempo', cardio: 'cardio' };
+const LOAD_MODE_KEYS = ['externa', 'corporal', 'adicional', 'assistida'] as const satisfies readonly LoadMode[];
 
 const EQUIP_MAP: Record<string, Equipment> = {
   barra: 'barbell',
@@ -108,6 +116,32 @@ const exerciseSchema = z.object({
   carga: z.number({ invalid_type_error: 'carga deve ser um número em kg' }).min(0).max(1000).optional(),
   observacoes: z.string().max(500).optional(),
   substitutos: z.array(z.string().trim().min(1)).max(10).optional(),
+  modalidade: z.enum(['musculacao', 'peso_corporal', 'tempo', 'cardio'], { errorMap: () => ({ message: 'modalidade deve ser: musculacao, peso_corporal, tempo ou cardio' }) }).optional(),
+  lateralidade: z.enum(['bilateral', 'unilateral'], { errorMap: () => ({ message: 'lateralidade deve ser "bilateral" ou "unilateral"' }) }).optional(),
+  tipo_carga: z.enum(LOAD_MODE_KEYS, { errorMap: () => ({ message: 'tipo_carga deve ser: externa, corporal, adicional ou assistida' }) }).optional(),
+  grupos_secundarios: z
+    .array(z.string().trim().min(1, 'grupo secundário vazio').max(MODEL_LIMITS.maxMuscleChars), { invalid_type_error: 'grupos_secundarios deve ser uma lista de textos' })
+    .max(MODEL_LIMITS.maxSecondaryMuscles, `no máximo ${MODEL_LIMITS.maxSecondaryMuscles} grupos secundários`)
+    .optional(),
+  unidade_distancia: z.enum(['m', 'km', 'mi'], { errorMap: () => ({ message: 'unidade_distancia deve ser "m", "km" ou "mi"' }) }).optional(),
+  duracao: z
+    .number({ invalid_type_error: 'duracao deve ser em segundos (número inteiro)' })
+    .int('duracao deve ser um número inteiro de segundos')
+    .min(1, 'duracao deve ser maior que zero')
+    .max(MODEL_LIMITS.maxDurationSec, `duracao máxima de ${MODEL_LIMITS.maxDurationSec} s`)
+    .optional(),
+  distancia: z.number({ invalid_type_error: 'distancia deve ser um número' }).positive('distancia deve ser maior que zero').finite().optional(),
+}).superRefine((e, ctx) => {
+  const issue = (path: string, message: string) => ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message });
+  const m = e.modalidade ? MODALITY_MAP[e.modalidade] : undefined;
+  if (m && e.tipo_carga && !LOAD_MODES_BY_MODALITY[m].includes(e.tipo_carga)) issue('tipo_carga', `tipo_carga "${e.tipo_carga}" não combina com a modalidade "${e.modalidade}"`);
+  if (e.duracao !== undefined && m !== 'timed' && m !== 'cardio') issue('duracao', 'duracao só vale com "modalidade": "tempo" ou "cardio" (escreva a modalidade explicitamente)');
+  if (e.distancia !== undefined) {
+    if (m !== 'cardio') issue('distancia', 'distancia só vale com "modalidade": "cardio"');
+    if (!e.unidade_distancia) issue('distancia', 'informe "unidade_distancia" ("m", "km" ou "mi"): a distância não é interpretada sem unidade');
+    else if (toMetersFrom(e.distancia, e.unidade_distancia) > MODEL_LIMITS.maxDistanceM) issue('distancia', 'distancia máxima de 1 000 km');
+  }
+  if (e.lateralidade === 'unilateral' && m === 'cardio') issue('lateralidade', 'cardio não pode ser unilateral');
 });
 
 const workoutSchema = z.object({
@@ -122,7 +156,7 @@ export const fichaSchema = z
     formato: z.literal(FICHA_FORMAT, {
       errorMap: () => ({ message: `o campo "formato" deve ser "${FICHA_FORMAT}"` }),
     }),
-    versao: z.number().int().min(1).max(FICHA_VERSION, { message: `versão não suportada (máximo ${FICHA_VERSION})` }),
+    versao: z.number().int().min(1).max(FICHA_VERSION, { message: `versão não suportada (máximo ${FICHA_VERSION}); atualize o IronTrack` }),
     nome: z.string({ required_error: 'a ficha precisa de um nome' }).trim().min(1).max(60),
     descricao: z.string().max(500).optional(),
     treinos: z.array(workoutSchema, { required_error: 'a ficha precisa da lista "treinos"' }).min(1, 'a ficha precisa de pelo menos 1 treino').max(10),
@@ -176,10 +210,24 @@ export function fichaToRoutine(ficha: FichaJson, settings: Pick<RestDefaults, 'r
           targetWeight: e.carga,
           notes: e.observacoes,
           substitutes: e.substitutos,
+          ...fichaModelFields(e),
         };
       }),
     })),
   };
+}
+
+/** Só os campos escritos na ficha; nada é deduzido. */
+function fichaModelFields(e: z.infer<typeof exerciseSchema>): ExerciseModelFields {
+  const out: ExerciseModelFields = {};
+  if (e.modalidade) out.modality = MODALITY_MAP[e.modalidade];
+  if (e.lateralidade) out.laterality = e.lateralidade as ExerciseLaterality;
+  if (e.tipo_carga) out.loadMode = e.tipo_carga;
+  if (e.grupos_secundarios?.length) out.secondaryMuscles = [...new Set(e.grupos_secundarios.map((g) => g.trim()))];
+  if (e.unidade_distancia) out.distanceUnit = e.unidade_distancia as DistanceUnit;
+  if (e.duracao !== undefined) out.targetDurationSec = e.duracao;
+  if (e.distancia !== undefined && e.unidade_distancia) out.targetDistance = toMetersFrom(e.distancia, e.unidade_distancia);
+  return out;
 }
 
 export function parseFicha(
@@ -193,10 +241,28 @@ export function parseFicha(
   return { ok: true, value: fichaToRoutine(res.data, settings) };
 }
 
+const round3 = (n: number) => Math.round(n * 1000) / 1000;
+
+function modelToFicha(e: ExerciseModelFields) {
+  return {
+    ...(e.modality ? { modalidade: MODALITY_REVERSE[e.modality] as 'musculacao' } : {}),
+    ...(e.laterality ? { lateralidade: e.laterality } : {}),
+    ...(e.loadMode ? { tipo_carga: e.loadMode } : {}),
+    ...(e.secondaryMuscles?.length ? { grupos_secundarios: [...e.secondaryMuscles] } : {}),
+    ...(e.distanceUnit ? { unidade_distancia: e.distanceUnit } : {}),
+    ...(e.targetDurationSec !== undefined ? { duracao: e.targetDurationSec } : {}),
+    // Distância só é exportada com unidade explícita (na ficha a distância é escrita na unidade do exercício).
+    ...(e.targetDistance !== undefined && e.distanceUnit ? { distancia: round3(fromMetersTo(e.targetDistance, e.distanceUnit)) } : {}),
+  };
+}
+
 export function routineToFicha(r: Routine): FichaJson {
+  const usesModel = r.workouts.some((w) => w.exercises.some((e) => Object.keys(modelToFicha(e)).length > 0));
   return {
     formato: FICHA_FORMAT,
-    versao: FICHA_VERSION,
+    // Fichas sem campos novos continuam v1 (abrem em versões anteriores do app); com campos novos, v2, para que
+    // uma versão antiga recuse o arquivo em vez de descartar os campos em silêncio.
+    versao: usesModel ? FICHA_VERSION : 1,
     nome: r.name,
     ...(r.description ? { descricao: r.description } : {}),
     treinos: r.workouts.map((w) => ({
@@ -215,6 +281,7 @@ export function routineToFicha(r: Routine): FichaJson {
         ...(e.targetWeight !== undefined ? { carga: e.targetWeight } : {}),
         ...(e.notes ? { observacoes: e.notes } : {}),
         ...(e.substitutes?.length ? { substitutos: e.substitutes } : {}),
+        ...modelToFicha(e),
       })),
     })),
   };

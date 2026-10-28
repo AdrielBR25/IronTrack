@@ -1,6 +1,6 @@
 import { addDays, startOfWeek, tsToISODate, weekday } from '@/lib/dates';
 import type { WorkoutSession } from './types';
-import { exerciseVolume, isValidWorkingSet, sessionVolume } from './volume';
+import { exerciseVolume, isCompletedWorkSet, isValidWorkingSet, sessionVolume } from './volume';
 
 export function sessionsInRange(sessions: WorkoutSession[], fromISO: string, toISOExclusive: string) {
   return sessions.filter((s) => {
@@ -65,7 +65,7 @@ export function weeklySeries(sessions: WorkoutSession[], today: string, weeks = 
       week: from,
       volume: list.reduce((a, s) => a + sessionVolume(s), 0),
       count: list.length,
-      sets: list.reduce((a, s) => a + s.exercises.reduce((b, e) => b + e.sets.filter(isValidWorkingSet).length, 0), 0),
+      sets: list.reduce((a, s) => a + s.exercises.reduce((b, e) => b + e.sets.filter(isCompletedWorkSet).length, 0), 0),
       durationSec: list.reduce((a, s) => a + (s.durationSec ?? 0), 0),
     });
   }
@@ -76,7 +76,7 @@ export function setsByMuscle(sessions: WorkoutSession[], fromISO: string, toISOE
   const map = new Map<string, number>();
   for (const s of sessionsInRange(sessions, fromISO, toISOExclusive))
     for (const e of s.exercises) {
-      const n = e.sets.filter(isValidWorkingSet).length;
+      const n = e.sets.filter(isCompletedWorkSet).length;
       if (n) map.set(e.muscleGroup, (map.get(e.muscleGroup) ?? 0) + n);
     }
   return [...map.entries()].map(([group, sets]) => ({ group, sets })).sort((a, b) => b.sets - a.sets);

@@ -5,6 +5,7 @@
 // Fora deste diretório, importe sempre por '@/modules/training'.
 export type * from './types';
 export * from './equipment';
+export * from './exerciseModel';
 export * from './routineSchema';
 export * from './session';
 export * from './rotation';

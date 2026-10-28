@@ -1,8 +1,19 @@
 import type { SessionExercise, SessionSet, WorkoutSession } from './types';
+import { isValidDistanceM, isValidDurationSec } from './exerciseModel';
 
-/** Série válida = concluída, não é aquecimento, com repetições > 0. */
+/** Série válida = concluída, não é aquecimento, com repetições > 0. Base de volume, recordes e 1RM antigos. */
 export function isValidWorkingSet(s: SessionSet): boolean {
   return s.status === 'done' && s.type !== 'warmup' && (s.reps ?? 0) > 0;
+}
+
+/**
+ * Série de trabalho concluída para contagem (P10): repetições > 0 ou, sem repetições, duração ou distância
+ * válidas (exercícios por tempo e cardio). Registros antigos não têm duração nem distância, então a contagem
+ * deles é idêntica à de `isValidWorkingSet`. Não entra em volume, recordes nem 1RM.
+ */
+export function isCompletedWorkSet(s: SessionSet): boolean {
+  if (s.status !== 'done' || s.type === 'warmup') return false;
+  return (s.reps ?? 0) > 0 || isValidDurationSec(s.durationSec) || isValidDistanceM(s.distance);
 }
 
 /** Volume (kg) de uma série = carga × repetições, apenas para séries válidas. */
@@ -20,7 +31,7 @@ export function sessionVolume(session: WorkoutSession): number {
 }
 
 export function validSetCount(session: WorkoutSession): number {
-  return session.exercises.reduce((acc, ex) => acc + ex.sets.filter(isValidWorkingSet).length, 0);
+  return session.exercises.reduce((acc, ex) => acc + ex.sets.filter(isCompletedWorkSet).length, 0);
 }
 
 /** 1RM estimado (Epley). Útil para comparar séries com repetições diferentes. */

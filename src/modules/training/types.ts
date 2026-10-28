@@ -7,7 +7,35 @@ export type Equipment = 'barbell' | 'dumbbell' | 'machine' | 'cable' | 'bodyweig
 export type SetType = 'warmup' | 'normal' | 'drop';
 export type SetStatus = 'pending' | 'done' | 'skipped';
 
-export interface ExerciseTemplate {
+// Modelo de exercícios v3 (IronTrack 2.0 F01/P10, docs/MIGRACAO_EXERCICIOS_V3.md). Todos os campos são
+// opcionais: ausente significa "não informado", nunca zero, e registros antigos continuam válidos sem
+// reescrita. O vocabulário é o mesmo dos contratos de analytics do P09 (ExplicitExerciseAttributes).
+
+/** Modalidade do exercício. Ausente = desconhecida (comportamento antigo: carga × repetições). */
+export type TrainingModality = 'resistance' | 'bodyweight' | 'timed' | 'cardio';
+export type ExerciseLaterality = 'bilateral' | 'unilateral';
+/** Como a carga é registrada: externa, só o corpo, corpo + carga adicional ou corpo com assistência. */
+export type LoadMode = 'externa' | 'corporal' | 'adicional' | 'assistida';
+/** Unidade de exibição e digitação da distância. A distância persistida é sempre em metros. */
+export type DistanceUnit = 'm' | 'km' | 'mi';
+/** Lado executado numa série de exercício unilateral. Ausente = não informado. */
+export type SetSide = 'direito' | 'esquerdo' | 'ambos';
+
+/** Metadados opcionais do exercício (ficha e cópia na sessão). */
+export interface ExerciseModelFields {
+  modality?: TrainingModality;
+  laterality?: ExerciseLaterality;
+  loadMode?: LoadMode;
+  /** Grupos auxiliares (até 4). Não recebem séries na contagem por grupo. */
+  secondaryMuscles?: string[];
+  distanceUnit?: DistanceUnit;
+  /** Duração planejada por série (s), em exercícios por tempo e cardio. */
+  targetDurationSec?: number;
+  /** Distância planejada (m), em cardio. */
+  targetDistance?: number;
+}
+
+export interface ExerciseTemplate extends ExerciseModelFields {
   id: string;
   name: string;
   muscleGroup: string;
@@ -60,9 +88,19 @@ export interface SessionSet {
   completedAt?: number;
   /** Peso alterado manualmente nesta série (não recebe propagação automática). */
   edited?: boolean;
+  /** Duração da série em segundos (inteiro > 0). */
+  durationSec?: number | null;
+  /** Distância em metros (> 0). A unidade exibida é `distanceUnit` do exercício. */
+  distance?: number | null;
+  side?: SetSide | null;
+  /** Assistência em kg (≥ 0), em exercícios de peso corporal assistidos. Exclusiva com `weight` > 0. */
+  assistanceKg?: number | null;
+  /** Duração (s) e distância (m) planejadas, copiadas da ficha. */
+  plannedDurationSec?: number | null;
+  plannedDistance?: number | null;
 }
 
-export interface SessionExercise {
+export interface SessionExercise extends ExerciseModelFields {
   id: string;
   exerciseKey: string;
   templateId?: string;

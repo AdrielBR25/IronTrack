@@ -1,6 +1,6 @@
 import { addDays, weekday } from '@/lib/dates';
 import type { DayOverride, RotationPolicy, WorkoutSession } from './types';
-import { isValidWorkingSet } from './volume';
+import { isCompletedWorkSet } from './volume';
 
 // Rotação contínua (A → B → C → A ...). Um ponteiro (nextIndex) indica o próximo
 // treino. Ele só muda por ação do usuário: concluir treino (conforme a política),
@@ -44,7 +44,7 @@ export function completionPct(session: WorkoutSession): number {
 }
 
 export function shouldAdvance(session: WorkoutSession, policy: RotationPolicy, thresholdPct: number): boolean {
-  const anyValid = session.exercises.some((e) => e.sets.some(isValidWorkingSet));
+  const anyValid = session.exercises.some((e) => e.sets.some(isCompletedWorkSet));
   if (!anyValid) return false;
   if (policy === 'finish') return true;
   return completionPct(session) >= thresholdPct;
