@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { createHash, randomBytes } from 'node:crypto';
 import { createGateway, type Gateway, type GatewayLogEvent } from '../services/ai-gateway/src/gateway.ts';
 import { issueCredential, revokeCredential } from '../services/ai-gateway/src/credentials.ts';
-import { freshStart, loadSample } from './helpers';
+import { freshStart, loadSample, storageOutsideAux } from './helpers';
 
 // Assistente remoto (IronTrack 2.0 F01/P06) contra o GATEWAY REAL rodando localmente, com um
 // "provedor" simulado também local (formato da Messages API da Anthropic). Sem internet, sem chave
@@ -153,7 +153,10 @@ test('assistente remoto: gateway local real, seleção explícita, prévia com d
   expect(logText).not.toContain(fakeKey);
   // Nada guardado no navegador.
   expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
-  expect((await page.evaluate(() => Object.keys(localStorage))).filter((k) => !/install/i.test(k))).toEqual([]);
+  const stored = await storageOutsideAux(page);
+  expect(stored.other).toEqual([]);
+  expect(stored.auxText).not.toContain('Quantos dias');
+  expect(stored.auxText).not.toContain(token);
   expect(await noHorizontalScroll(page)).toBe(true);
   await page.screenshot({ path: info.outputPath('assistente-remoto-resposta.png'), fullPage: true });
 

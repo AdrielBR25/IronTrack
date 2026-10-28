@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { freshStart, loadSample } from './helpers';
+import { freshStart, loadSample, storageOutsideAux } from './helpers';
 
 // Assistente IA (IronTrack 2.0 F01/P05): só o provedor simulado, dados fictícios do app de exemplo.
 
@@ -116,8 +116,10 @@ test('assistente: seleção de dados, prévia, cancelar, autorizar e resposta si
 
   // A conversa não é persistida.
   expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
-  const keys = await page.evaluate(() => Object.keys(localStorage));
-  expect(keys.filter((k) => !/install/i.test(k))).toEqual([]);
+  // Só o estado auxiliar documentado do P11 (capacidade, fotografia de modalidade, cronômetro), sem nada da conversa.
+  const stored = await storageOutsideAux(page);
+  expect(stored.other).toEqual([]);
+  expect(stored.auxText).not.toContain('minha semana');
   await page.reload();
   await expect(page.getByTestId('chat-empty')).toBeVisible();
   expect(external).toEqual([]);
