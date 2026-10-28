@@ -88,6 +88,7 @@ const fmtKm = (m: number) => `${fmtNum(m / 1000, 2)} km`;
 const fmtPace = (secPerKm: number) => `${fmtDurationSec(secPerKm)} /km`;
 
 const signedPct = (v: number) => `${v > 0 ? '+' : ''}${fmtNum(v, 1)}%`;
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 const monthFmt = new Intl.DateTimeFormat('pt-BR', { month: 'short', year: '2-digit' });
 const fmtMonth = (iso: string) => monthFmt.format(new Date(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)) - 1, 1)).replace('.', '');
 
@@ -337,7 +338,7 @@ function ExerciseSection({ report, analytics }: { report: TrainingReport; analyt
             : 'Cardio: duração e distância registradas, sem calorias nem frequência cardíaca. Ritmo só com os dois campos.'}
         </p>
       )}
-      {bodyweight && (
+      {bodyweight && !modal && (
         <p className="mt-2 text-xs text-muted-foreground" data-testid="bodyweight-note">
           {addedLoad
             ? 'Exercício de peso corporal com carga adicional: repetições e carga adicional aparecem separadas. O peso do corpo não é somado e não há 1RM estimado.'
@@ -457,7 +458,7 @@ function ModalityPanel({ m }: { m: ModalityMetrics }) {
           {m.timed.available ? (
             <>
               <Stat label="Maior duração" value={fmtDurationSec(m.timed.longestSec!)} />
-              <Stat label="Tempo total" value={fmtDurationSec(m.timed.totalSec!)} hint={`${m.timed.sets} séries em ${m.timed.sessions} sessões`} />
+              <Stat label="Tempo total" value={fmtDurationSec(m.timed.totalSec!)} hint={`${count(m.timed.sets, 'série', 'séries')} em ${count(m.timed.sessions, 'sessão', 'sessões')}`} />
             </>
           ) : (
             <p className="col-span-2 text-sm text-muted-foreground">{UNAVAILABLE_ANALYSIS_TEXT} Nenhuma série com duração registrada no período.</p>
@@ -468,8 +469,8 @@ function ModalityPanel({ m }: { m: ModalityMetrics }) {
         <dl className="grid grid-cols-2 gap-2 text-sm" data-testid="cardio-metrics">
           {m.cardio.available ? (
             <>
-              <Stat label="Duração total" value={m.cardio.totalDurationSec !== null ? fmtDurationSec(m.cardio.totalDurationSec) : '—'} hint={`${m.cardio.sessionsWithDuration} sessões com duração`} />
-              <Stat label="Distância total" value={m.cardio.totalDistanceM !== null ? fmtKm(m.cardio.totalDistanceM) : '—'} hint={`${m.cardio.sessionsWithDistance} sessões com distância`} />
+              <Stat label="Duração total" value={m.cardio.totalDurationSec !== null ? fmtDurationSec(m.cardio.totalDurationSec) : '—'} hint={`${count(m.cardio.sessionsWithDuration, 'sessão', 'sessões')} com duração`} />
+              <Stat label="Distância total" value={m.cardio.totalDistanceM !== null ? fmtKm(m.cardio.totalDistanceM) : '—'} hint={`${count(m.cardio.sessionsWithDistance, 'sessão', 'sessões')} com distância`} />
               <Stat label="Ritmo médio" value={m.cardio.averagePaceSecPerKm !== null ? fmtPace(m.cardio.averagePaceSecPerKm) : '—'} hint="só sessões com duração e distância" />
               <Stat label="Velocidade média" value={m.cardio.averageSpeedKmh !== null ? `${fmtNum(m.cardio.averageSpeedKmh, 1)} km/h` : '—'} />
             </>

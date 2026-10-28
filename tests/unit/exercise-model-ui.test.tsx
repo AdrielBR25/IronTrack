@@ -299,6 +299,9 @@ describe('histórico e Desempenho', () => {
     await waitFor(() => byTestId('timed-metrics'));
     expect(byTestId('timed-metrics')!.textContent).toContain('Maior duração');
     expect(byTestId('modality-note')!.textContent).toContain('Exercício por tempo');
+    // Prancha é por tempo com carga corporal: só a nota de tempo aparece (sem a de repetições, que contradiz).
+    expect(byTestId('bodyweight-note')).toBeNull();
+    expect(byTestId('timed-metrics')!.textContent).toMatch(/\d+ séries? em \d+ sess(ão|ões)/);
     await setValue(select, 'corrida');
     await waitFor(() => byTestId('cardio-metrics'));
     expect(byTestId('cardio-metrics')!.textContent).toContain('15 km');
