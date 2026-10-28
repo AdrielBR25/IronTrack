@@ -202,3 +202,14 @@ A biblioteca ([BIBLIOTECA_EXERCICIOS.md](BIBLIOTECA_EXERCICIOS.md)) não mudou n
   redirecionado sozinho;
 - duplicar uma instância também não liga a meta à cópia;
 - backup atual: v7 (metas continuam em `data.goals`, sem mudança de formato).
+
+## 17. Reconhecimento de exercícios antigos (P18)
+
+Nenhuma regra de metas mudou ([RECONHECIMENTO_EXERCICIOS.md](RECONHECIMENTO_EXERCICIOS.md)):
+
+- **associar** um exercício antigo à biblioteca grava só a origem; o ID da instância é o mesmo, então a meta continua
+  ligada a ele, com o mesmo progresso;
+- **desfazer a associação** também não toca metas;
+- **substituir vários** dá ID novo a cada substituto. A prévia mostra as metas ligadas e o texto fixo "As metas
+  vinculadas ao exercício anterior continuarão vinculadas a ele."; nenhuma meta é redirecionada;
+- modelos multimodais (carga, repetições, tempo, distância, frequência) e as fórmulas de 1RM ficam iguais.

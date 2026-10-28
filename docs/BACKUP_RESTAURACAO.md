@@ -224,3 +224,13 @@ mesmo se um treino for concluído durante a exportação. O JSON é indentado (l
   `catalogVersion`, `customExerciseId`); nada é associado por nome. Origem que aponta para item inexistente só gera
   aviso informativo (`LIBRARY_REF_MISSING`) e não bloqueia.
 - Backups v0–v6 continuam importáveis (sem biblioteca). Ver [BIBLIOTECA_EXERCICIOS.md](BIBLIOTECA_EXERCICIOS.md).
+
+## Reconhecimento de exercícios antigos (P18, ainda backup v7)
+
+- O formato não mudou. Exercícios antigos associados à biblioteca passam a levar `catalogId` + `catalogVersion` (ou
+  `customExerciseId`) na instância da ficha; os que ainda não foram associados continuam sem esses campos.
+- Sessões antigas **não** ganham origem ao associar a ficha; voltam do backup exatamente como foram registradas.
+- Substituir e mesclar preservam as referências e os IDs das instâncias; um app anterior (P17) preserva a
+  referência a um item da versão 2 do catálogo mesmo sem conhecê-lo (a ficha é uma cópia e continua funcionando).
+- Restaurar um backup enquanto a confirmação de associação está aberta: se a instância voltou diferente, a associação
+  é recusada (impressão digital). Ver [RECONHECIMENTO_EXERCICIOS.md](RECONHECIMENTO_EXERCICIOS.md) §11 e §18.

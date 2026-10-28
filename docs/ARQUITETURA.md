@@ -492,3 +492,22 @@ Detalhes em [BIBLIOTECA_EXERCICIOS.md](BIBLIOTECA_EXERCICIOS.md).
 - **Dexie v6** e **backup v7** (`data.customExercises`, `data.exerciseFavorites`). O catálogo não vai para o banco nem
   para o backup.
 - O editor de fichas passou a gravar por operações (`mutateWorkout`) em vez de regravar a rotina inteira da tela.
+
+## 20. Reconhecimento de exercícios antigos e construtor avançado (P18)
+
+Detalhes em [RECONHECIMENTO_EXERCICIOS.md](RECONHECIMENTO_EXERCICIOS.md).
+
+| Camada | Arquivo | Responsabilidade |
+| --- | --- | --- |
+| Domínio (puro) | `modules/exercises/recognition.ts` | similaridade de nomes, sugestões explicadas (forte, possível, nenhuma), inventário, referências, impressão digital, comparação |
+| Domínio (puro) | `modules/exercises/usage.ts` | "Mais utilizados" (sessões concluídas por origem) e rótulos de uso |
+| Domínio (puro) | `modules/exercises/bulk.ts` | adição múltipla e prévia da substituição múltipla |
+| Domínio (puro) | `modules/exercises/workoutOps.ts` | novas operações `link`, `unlink`, `addMany`, `replaceMany`; `expected` em `replace`; `update` preserva a origem |
+| Domínio (puro) | `modules/exercises/catalog/expansion.ts`, `entry.ts` | catálogo versão 2 (110 itens), ainda fora do pacote principal |
+| Banco | `db/library.ts` | `applyLinks` (lote tudo ou nada com revalidação), `unlinkExercise`, `goalsLinkedToMany`, `completedSessionsOfProfile`, `customExerciseById` |
+| Interface | `pages/ExerciseRecognitionPage.tsx`, `pages/BulkReplacePage.tsx` (rotas sob demanda), `features/library/LinkConfirmDialog.tsx`, `LibraryPickerDialog.tsx`, `AddManyDialog.tsx` | reconhecimento, confirmação, lote, desfazer, adicionar e substituir vários |
+
+- Rotas novas: `#/exercicios/reconhecer` (`?treino=<rotina>/<treino>` filtra) e `#/treinos/:rotina/:treino/substituir`.
+- **Sem esquema novo**: Dexie v6 e backup v7. A associação grava só a referência de origem que a instância já previa.
+- Concorrência: impressão digital da instância conferida dentro da transação rw; operações sempre na versão gravada.
+- Nada vai para a IA, o ContextBuilder ou o gateway.

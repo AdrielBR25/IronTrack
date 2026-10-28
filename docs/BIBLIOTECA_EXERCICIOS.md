@@ -12,7 +12,7 @@ Código: `src/modules/exercises/` (domínio puro: `types.ts`, `vocab.ts`, `catal
 
 ## 1. Modelo do catálogo
 
-O catálogo padrão é **estático**, versionado no código (`CATALOG_VERSION = 1`) e nunca vai para o banco nem para o
+O catálogo padrão é **estático**, versionado no código (`CATALOG_VERSION = 2` desde o P18; ver §21) e nunca vai para o banco nem para o
 backup. Cada entrada (`CatalogExercise`):
 
 ```ts
@@ -33,10 +33,11 @@ interface CatalogExercise {
   tags: string[];
   source: 'irontrack-base';
   version: number;              // versão da entrada (sobe quando o conteúdo muda)
+  since: number;                // versão do catálogo em que a entrada apareceu (P18)
 }
 ```
 
-São 53 entradas cobrindo peito, costas, ombros, bíceps, tríceps, pernas, glúteos, panturrilhas, abdômen, cardio,
+No P17 eram 53 entradas; o P18 acrescentou 57 (total **110**, ver §21 e `docs/RECONHECIMENTO_EXERCICIOS.md`), cobrindo peito, costas, ombros, bíceps, tríceps, pernas, glúteos, panturrilhas, abdômen, cardio,
 exercícios por tempo e calistenia. Duplicatas semânticas foram fundidas numa entrada com apelidos ("Flexão de braços" =
 "flexão", "apoio"; "Barra fixa" = "pull-up", "chin-up"; "Prancha" = "prancha isométrica"; "Afundo" já é unilateral;
 "Remada unilateral com halter" = "serrote"; "Rosca alternada" é unilateral). Variações com execução realmente diferente
@@ -258,9 +259,27 @@ exporta. O assistente (ContextBuilder) e o consentimento não foram alterados.
 ## 20. Limitações
 
 - O catálogo é fixo nesta versão (sem atualização remota); itens futuros entram com nova `CATALOG_VERSION`.
-- Fichas antigas não ganham origem automaticamente (por decisão: nada é associado por nome). Elas aparecem nas
-  sugestões de substituição pelo grupo e equipamento, mas não contam em "Usado recentemente".
+- Fichas antigas não ganham origem automaticamente (por decisão: nada é associado por nome). Desde o P18 a pessoa pode
+  associá-las com confirmação em "Reconhecer exercícios antigos" (`docs/RECONHECIMENTO_EXERCICIOS.md`).
 - Sem imagens ou vídeos de execução.
-- A substituição troca um exercício por vez; não há "substituir em todas as fichas".
+- A substituição troca um exercício por vez ou vários do mesmo treino (P18, "Substituir vários"); não há
+  "substituir em todas as fichas".
 - A integridade só confere o formato das origens do catálogo (o catálogo não é carregado na verificação).
 - Exercícios personalizados não têm metadados de padrão de movimento e dificuldade.
+
+## 21. Versionamento do catálogo (P18)
+
+- `CATALOG_VERSION` sobe quando entradas são acrescentadas ou alteradas. Versão 1 = 53 entradas do P17; versão 2 =
+  110 entradas (57 novas em `catalog/expansion.ts`, com `since: 2`).
+- Cada entrada tem a própria `version`, que sobe quando o conteúdo dela muda. A instância na ficha guarda a
+  `catalogVersion` do momento em que foi adicionada ou associada; isso é só informação (a ficha é uma cópia).
+- IDs publicados **nunca** são removidos, renomeados ou reaproveitados para outro exercício. Uma entrada
+  descontinuada iria para `RETIRED_CATALOG_IDS` (hoje vazia) e continuaria resolvível para fichas antigas.
+- Nada é redirecionado: se uma variação ganha entrada própria, as fichas que apontam para a entrada antiga continuam
+  apontando para ela. Na versão 2, quatro entradas subiram para `version: 2` porque perderam apelidos ou instruções
+  que passaram a ter entrada própria: `triceps-polia` (corda → `triceps-corda`), `afundo` (passada → `passada`),
+  `elevacao-de-pernas` (abdominal infra → `abdominal-infra`) e `elevacao-lateral-unilateral` (só halteres; polia →
+  `elevacao-lateral-polia`).
+- Testes conferem que todo ID da versão 1 continua existindo, que não há IDs nem nomes repetidos e que o total é
+  ≥ 100.
+

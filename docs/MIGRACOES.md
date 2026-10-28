@@ -13,6 +13,9 @@ Implementação em `src/db/db.ts`; testes em `tests/unit/migrations.test.ts`.
 | 5 | IronTrack 2.0 F01/P16 | Tabela `calendarDecisions` (`id, profileId, date, updatedAt`), sem função de upgrade; nenhuma tabela antiga muda (ver [DECISOES_CALENDARIO.md](DECISOES_CALENDARIO.md) §8). |
 | 6 | IronTrack 2.0 F01/P17 | Tabelas `customExercises` (`id, profileId, updatedAt`) e `exerciseFavorites` (`id, profileId, target`), sem função de upgrade; nenhuma tabela antiga muda (ver [BIBLIOTECA_EXERCICIOS.md](BIBLIOTECA_EXERCICIOS.md) §13). |
 
+O Prompt 18 (reconhecimento de exercícios antigos, catálogo versão 2) **não** criou versão nova: a associação grava
+só a referência de origem opcional que a instância já tinha desde a versão 6 (ver
+[RECONHECIMENTO_EXERCICIOS.md](RECONHECIMENTO_EXERCICIOS.md) §18).
 O Prompt 01 não alterou o esquema (só criou a infraestrutura). O Prompt 02 criou a versão 2 (`DB_SCHEMA_VERSION = 2`).
 O Prompt 10 (modelo de exercícios v3) **não** criou versão nova: os campos de modalidade ficam dentro dos registros,
 sem índice e sem transformação, e o app anterior continua abrindo o banco. Justificativa e testes em
