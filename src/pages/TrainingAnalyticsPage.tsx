@@ -8,6 +8,10 @@ import { NativeSelect } from '@/components/ui/input';
 import { Segmented } from '@/components/ui/segmented';
 import { BarsChart, ChartCard, Empty, TrendChart } from '@/components/charts';
 import { useCompletedSessions, useToday } from '@/hooks/data';
+import { useGoals } from '@/hooks/useGoals';
+import { RelatedGoals } from '@/features/goals/RelatedGoals';
+import { evaluateGoals, GOAL_CHART_METRIC, relatedGoalsForExercise, weeklyFrequencyGoals, type GoalEvaluation } from '@/modules/goals';
+import type { WorkoutSession } from '@/lib/types';
 import { useUnits } from '@/hooks/useUnits';
 import { fmtDateShort } from '@/lib/dates';
 import { cn, fmtNum } from '@/lib/utils';
@@ -246,7 +250,17 @@ function ExerciseAnalyses({ ex }: { ex: ExerciseSummary }) {
   );
 }
 
-function ExerciseSection({ report, analytics }: { report: TrainingReport; analytics: ReturnType<typeof createTrainingAnalytics> }) {
+function ExerciseSection({
+  report,
+  analytics,
+  goals,
+  sessions,
+}: {
+  report: TrainingReport;
+  analytics: ReturnType<typeof createTrainingAnalytics>;
+  goals: GoalEvaluation[];
+  sessions: WorkoutSession[];
+}) {
   const { show, unit, fmtW } = useUnits();
   const [key, setKey] = useState('');
   const [metric, setMetric] = useState<ExMetric>('e1rm');
@@ -291,6 +305,8 @@ function ExerciseSection({ report, analytics }: { report: TrainingReport; analyt
     });
   }, [analytics, ex, report.range, effective, show]);
 
+  // P12: metas ligadas a este exercício (pelo ID da ficha) e a linha do objetivo na métrica correspondente.
+  const related = useMemo(() => (ex ? relatedGoalsForExercise(goals, sessions, ex.key) : []), [goals, sessions, ex]);
   if (!ex) return null;
   const fmt = (v: number) =>
     effective === 'bestReps'
@@ -326,8 +342,22 @@ function ExerciseSection({ report, analytics }: { report: TrainingReport; analyt
         <Segmented size="sm" aria-label="Métrica do exercício" value={effective} onChange={setMetric} options={options} />
       </div>
       <div className="mt-3" data-testid="exercise-chart">
-        <TrendChart data={data} x="ts" y="v" fmt={fmt} xFmt={(t) => fmtDateShort(Number(t))} />
+        <TrendChart
+          data={data}
+          x="ts"
+          y="v"
+          fmt={fmt}
+          xFmt={(t) => fmtDateShort(Number(t))}
+          goals={related
+            .filter((g) => GOAL_CHART_METRIC[g.goal.type] === effective)
+            .map((g) => {
+              const kg = g.goal.unit === 'kg';
+              const value = kg ? Math.round((show(g.goal.targetValue) ?? 0) * 10) / 10 : g.goal.targetValue;
+              return { value, label: `Meta: ${fmt(value)}` };
+            })}
+        />
       </div>
+      <RelatedGoals items={related} weightUnit={unit} />
       {!loadMetrics && !bodyweight && !modal && (
         <p className="mt-2 text-xs text-muted-foreground">Exercício sem carga registrada: a evolução é medida em repetições, sem converter em quilos.</p>
       )}
@@ -596,6 +626,9 @@ export default function TrainingAnalyticsPage() {
   const analytics = useMemo(() => createTrainingAnalytics(sessions ?? []), [sessions]);
   const report = useMemo(() => analytics.report(period, today), [analytics, period, today]);
   const insights = useMemo(() => buildInsights(report), [report]);
+  const goals = useGoals();
+  const goalEvaluations = useMemo(() => evaluateGoals(goals ?? [], sessions ?? [], today), [goals, sessions, today]);
+  const weeklyGoals = useMemo(() => weeklyFrequencyGoals(goalEvaluations), [goalEvaluations]);
 
   const buckets = useMemo(
     () => report.buckets.map((b) => ({ start: b.start, sessions: b.sessions, sets: b.sets, volume: Math.round(show(b.volume) ?? 0) })),
@@ -656,8 +689,16 @@ export default function TrainingAnalyticsPage() {
           <div className="grid gap-4 md:grid-cols-2">
             <ChartCard title={`Frequência por ${per}`} description={`sessões concluídas por ${per} (segunda a domingo)`}>
               <div data-testid="chart-frequency">
-                <BarsChart data={buckets} x="start" y="sessions" fmt={(v) => `${v} ${v === 1 ? 'sessão' : 'sessões'}`} xFmt={bucketFmt} />
+                <BarsChart
+                  data={buckets}
+                  x="start"
+                  y="sessions"
+                  fmt={(v) => `${v} ${v === 1 ? 'sessão' : 'sessões'}`}
+                  xFmt={bucketFmt}
+                  goals={monthly ? [] : weeklyGoals.slice(0, 1).map((g) => ({ value: g.goal.targetValue, label: `Meta: ${g.goal.targetValue}/semana` }))}
+                />
               </div>
+              <RelatedGoals items={weeklyGoals} weightUnit={unit} title="Metas de frequência" testId="related-frequency-goals" />
             </ChartCard>
             <ChartCard title={`Volume por ${per}`} description="carga × repetições, só séries com carga">
               <div data-testid="chart-volume">
@@ -668,7 +709,7 @@ export default function TrainingAnalyticsPage() {
 
           <MuscleGroupsCard dist={report.muscleDistribution} unclassified={report.unclassifiedSets} />
 
-          <ExerciseSection report={report} analytics={analytics} />
+          <ExerciseSection report={report} analytics={analytics} goals={goalEvaluations} sessions={sessions} />
 
           <IndicatorGuideCard />
         </>

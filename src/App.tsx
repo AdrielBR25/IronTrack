@@ -16,6 +16,7 @@ const HistoryPage = lazy(() => import('@/pages/HistoryPage'));
 const SessionDetailPage = lazy(() => import('@/pages/SessionDetailPage'));
 const ProgressPage = lazy(() => import('@/pages/ProgressPage'));
 const TrainingAnalyticsPage = lazy(() => import('@/pages/TrainingAnalyticsPage'));
+const TrainingGoalsPage = lazy(() => import('@/pages/TrainingGoalsPage'));
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'));
 const AIAssistantPage = lazy(() => import('@/pages/AIAssistantPage'));
 import { useSettings } from '@/hooks/data';
@@ -38,6 +39,7 @@ export default function App() {
           <Route path="/historico/:id" element={<SessionDetailPage />} />
           <Route path="/evolucao" element={<ProgressPage />} />
           <Route path="/evolucao/desempenho" element={<TrainingAnalyticsPage />} />
+          <Route path="/metas" element={<TrainingGoalsPage />} />
           <Route path="/assistente" element={<AIAssistantPage />} />
           <Route path="/config" element={<SettingsPage />} />
           <Route path="*" element={<HomePage />} />

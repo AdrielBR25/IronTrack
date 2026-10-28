@@ -1,4 +1,4 @@
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipProps } from 'recharts';
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, LabelList, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipProps } from 'recharts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 // Gráficos de série única: cor de destaque, marcas finas, grade discreta e tooltip.
@@ -35,6 +35,28 @@ function Tip({ active, payload, label, fmt, labelFmt }: TooltipProps<number, str
   );
 }
 
+/** P12: linha de meta (valor desejado), tracejada e com rótulo em texto; a escala se estende para mostrá-la. */
+export interface GoalLine {
+  value: number;
+  label: string;
+}
+
+function goalLines(lines: GoalLine[] | undefined) {
+  return (lines ?? [])
+    .filter((l) => Number.isFinite(l.value) && l.value > 0)
+    .map((l, i) => (
+      <ReferenceLine
+        key={`${l.label}-${i}`}
+        y={l.value}
+        stroke={WARN}
+        strokeDasharray="6 4"
+        strokeWidth={1.5}
+        ifOverflow="extendDomain"
+        label={{ value: l.label, position: 'insideTopLeft', fill: AXIS, fontSize: 11 }}
+      />
+    ));
+}
+
 export function Empty({ text = 'Sem dados suficientes ainda.' }: { text?: string }) {
   return <div className="flex h-40 items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">{text}</div>;
 }
@@ -46,6 +68,7 @@ export function TrendChart<T extends object>({
   fmt,
   xFmt,
   height = 200,
+  goals,
 }: {
   data: T[];
   x: keyof T & string;
@@ -53,6 +76,7 @@ export function TrendChart<T extends object>({
   fmt: (v: number) => string;
   xFmt: (v: string | number) => string;
   height?: number;
+  goals?: GoalLine[];
 }) {
   if (data.length < 2) return <Empty text={data.length === 1 ? 'Registre mais uma sessão para ver a linha de evolução.' : undefined} />;
   return (
@@ -70,6 +94,7 @@ export function TrendChart<T extends object>({
           <YAxis stroke={AXIS} fontSize={11} tickLine={false} axisLine={false} width={48} domain={['auto', 'auto']} tickFormatter={compact} />
           <Tooltip content={<Tip fmt={fmt} labelFmt={xFmt} />} cursor={{ stroke: AXIS, strokeDasharray: '3 3' }} />
           <Area type="monotone" dataKey={y} stroke={PRIMARY} strokeWidth={2} fill={`url(#g-${y})`} dot={{ r: 3, fill: PRIMARY, strokeWidth: 0 }} activeDot={{ r: 5, stroke: 'hsl(var(--card))', strokeWidth: 2 }} isAnimationActive={false} />
+          {goalLines(goals)}
         </AreaChart>
       </ResponsiveContainer>
     </div>
@@ -84,6 +109,7 @@ export function BarsChart<T extends object>({
   xFmt,
   height = 200,
   horizontal,
+  goals,
 }: {
   data: T[];
   x: keyof T & string;
@@ -92,6 +118,8 @@ export function BarsChart<T extends object>({
   xFmt?: (v: string | number) => string;
   height?: number;
   horizontal?: boolean;
+  /** Só no gráfico vertical. */
+  goals?: GoalLine[];
 }) {
   if (!data.length || data.every((d) => !Number((d as Record<string, unknown>)[y]))) return <Empty />;
   if (horizontal) {
@@ -117,6 +145,7 @@ export function BarsChart<T extends object>({
           <YAxis stroke={AXIS} fontSize={11} tickLine={false} axisLine={false} width={48} allowDecimals={false} tickFormatter={compact} />
           <Tooltip content={<Tip fmt={fmt} labelFmt={xFmt} />} cursor={{ fill: 'hsl(var(--accent))' }} />
           <Bar dataKey={y} fill={PRIMARY} radius={[4, 4, 0, 0]} maxBarSize={28} isAnimationActive={false} />
+          {goalLines(goals)}
         </BarChart>
       </ResponsiveContainer>
     </div>

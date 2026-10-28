@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronRight, Dumbbell, LineChart, Ruler, Trophy } from 'lucide-react';
+import { ChevronRight, Dumbbell, LineChart, Ruler, Target, Trophy } from 'lucide-react';
 import { PageHeader } from '@/components/AppLayout';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { NativeSelect } from '@/components/ui/input';
@@ -170,6 +170,20 @@ export default function ProgressPage() {
             <span className="min-w-0 flex-1">
               <span className="block font-semibold">Análise de desempenho</span>
               <span className="block text-sm text-muted-foreground">Frequência, volume, tendências, recordes e insights por período</span>
+            </span>
+            <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
+          </Link>
+          <Link
+            to="/metas"
+            data-testid="open-goals"
+            className="mb-4 flex items-center gap-3 rounded-2xl border p-4 transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
+              <Target className="h-5 w-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block font-semibold">Metas</span>
+              <span className="block text-sm text-muted-foreground">Objetivos pessoais com progresso calculado dos seus treinos</span>
             </span>
             <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
           </Link>

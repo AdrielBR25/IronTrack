@@ -106,6 +106,8 @@ describe('arquitetura', () => {
       const ownModule = e.from.split('/').slice(0, 2).join('/');
       // P08: analytics é um modelo de leitura sobre o treinamento e só pode usar a API pública dele.
       if (ownModule === 'modules/analytics' && e.target === 'modules/training/index.ts') return false;
+      // P12: metas leem treinos pela API pública do treinamento e medem com os contratos públicos do analytics.
+      if (ownModule === 'modules/goals' && (e.target === 'modules/training/index.ts' || e.target === 'modules/analytics/index.ts')) return false;
       return !inDir(e.target, ownModule) && !allowedShared.has(e.target);
     });
     expect(bad.map(fmt)).toEqual([]);
@@ -146,7 +148,8 @@ describe('arquitetura', () => {
     // O compartilhado não conhece os domínios (exceto o agregador de tipos e as reexportações).
     // Exceção documentada (P10): a verificação de integridade valida os campos de modalidade com as mesmas regras
     // puras do domínio de treinamento, sempre pela API pública (docs/ARQUITETURA.md).
-    const integrityRules = (e: Edge) => e.from === 'lib/integrity.ts' && e.target === 'modules/training/index.ts';
+    // P12: a mesma exceção para as metas (validação de metas nos backups pela API pública de '@/modules/goals').
+    const integrityRules = (e: Edge) => e.from === 'lib/integrity.ts' && (e.target === 'modules/training/index.ts' || e.target === 'modules/goals/index.ts');
     const toDomain = edges.filter(
       (e) => inDir(e.from, 'lib') && e.target && inDir(e.target, 'modules') && e.from !== 'lib/types.ts' && !DEPRECATED_SHIMS.includes(e.from) && !integrityRules(e),
     );
@@ -375,5 +378,42 @@ describe('arquitetura do motor de analytics', () => {
     const layout = readFileSync(join(ROOT, 'components/AppLayout.tsx'), 'utf8');
     expect((layout.match(/^\s*\{ to: '\//gm) ?? []).length).toBe(6);
     expect(layout).toContain('grid-cols-6');
+  });
+});
+
+describe('arquitetura das metas de treinamento (P12)', () => {
+  const GO = 'modules/goals';
+  const rels = files.map(rel);
+  const goalFiles = rels.filter((f) => inDir(f, GO));
+  const source = (f: string) => readFileSync(join(ROOT, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+  it('o domínio de metas existe e depende só de treinamento, analytics (API pública) e utilitários puros', () => {
+    expect(goalFiles).toEqual(expect.arrayContaining([`${GO}/index.ts`, `${GO}/progress.ts`, `${GO}/validation.ts`]));
+    const bad = edges.filter((e) => inDir(e.from, GO) && e.target && !inDir(e.target, GO) && !['modules/training/index.ts', 'modules/analytics/index.ts', 'lib/dates.ts', 'lib/utils.ts'].includes(e.target));
+    expect(bad.map(fmt)).toEqual([]);
+    expect(edges.filter((e) => inDir(e.from, GO) && !e.target && !e.spec.startsWith('.')).map(fmt)).toEqual([]);
+  });
+
+  it('o motor de metas não grava nem acessa rede: sem IndexedDB, storage, fetch, IA ou escrita em sessões', () => {
+    const FORBIDDEN = /\b(indexedDB|localStorage|sessionStorage|fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|document\.cookie|caches\.|Math\.random|Date\.now\s*\(\s*\))/;
+    expect(goalFiles.filter((f) => FORBIDDEN.test(source(f)))).toEqual([]);
+  });
+
+  it('metas não vão para a IA: módulo de IA, integrações e assistente não importam metas nem src/db/goals', () => {
+    const bad = edges.filter((e) => e.target && (inDir(e.target, GO) || e.target === 'db/goals.ts' || e.target === 'hooks/useGoals.ts') && inDir(e.from, 'modules/ai', 'integrations', 'features/assistant', 'pages/AIAssistantPage.tsx'));
+    expect(bad.map(fmt)).toEqual([]);
+  });
+
+  it('só src/db (gravações) e a restauração de backup tocam a tabela de metas', () => {
+    const writers = rels.filter((f) => !inDir(f, 'db') && f !== 'lib/backup.ts' && /\bdb\.goals\b/.test(source(f)));
+    expect(writers).toEqual([]);
+  });
+
+  it('a página de metas é carregada sob demanda em /metas, sem novo item na navegação', () => {
+    const app = readFileSync(join(ROOT, 'App.tsx'), 'utf8');
+    expect(app).toMatch(/lazy\(\(\) => import\('@\/pages\/TrainingGoalsPage'\)\)/);
+    expect(app).toMatch(/path="\/metas"/);
+    const layout = readFileSync(join(ROOT, 'components/AppLayout.tsx'), 'utf8');
+    expect((layout.match(/^\s*\{ to: '\//gm) ?? []).length).toBe(6);
   });
 });
