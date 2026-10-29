@@ -6,7 +6,10 @@
 import { AIError, AIService, ProviderRegistry, type AIProviderDescriptor } from '@/modules/ai';
 import { MockAIProvider } from '@/modules/ai/adapters/MockAIProvider';
 import { GatewayAIProvider, gatewayErrorCode, parseGatewayCatalog, type GatewayTransport } from '@/modules/ai/adapters/GatewayAIProvider';
-import { createGatewayTransport, isAccessTokenFormat, validateGatewayUrl } from './gatewayTransport';
+import { createAccountTransport, createGatewayTransport, isAccessTokenFormat, validateGatewayUrl } from './gatewayTransport';
+
+/** P21: rótulo do destino quando a IA é usada pela conta (no lugar do endereço do gateway). */
+export const ACCOUNT_GATEWAY_LABEL = 'Servidor do IronTrack (sua conta)';
 
 /** Cenários do modo de demonstração (o comportamento do provedor simulado). */
 export const DEMO_SCENARIOS = ['echo', 'hang', 'fail', 'invalid_response'] as const;
@@ -61,6 +64,11 @@ export interface AssistantComposition {
    * disponibilidade de cada provedor. Falha com o mesmo erro tipado da conexão.
    */
   testGateway(signal?: AbortSignal): Promise<GatewayConnection>;
+  /**
+   * P21: conecta pela conta (sessão do app, mesma origem). Sem token digitado e sem endereço: as chaves ficam na
+   * Railway e a cota é por conta. Busca só o catálogo (sem dados pessoais) e registra os provedores habilitados.
+   */
+  connectAccount(signal?: AbortSignal): Promise<GatewayConnection>;
 }
 
 export interface AssistantCompositionOptions {
@@ -72,6 +80,8 @@ export interface AssistantCompositionOptions {
   fetchImpl?: typeof fetch;
   /** Substitui o transporte inteiro (testes). */
   transportFactory?: (origin: string, token: string) => GatewayTransport;
+  /** P21: substitui o transporte da conta (testes). */
+  accountTransportFactory?: () => GatewayTransport;
 }
 
 /**
@@ -125,6 +135,23 @@ export function createAssistantService(opts: AssistantCompositionOptions = {}): 
       if ((DEMO_SCENARIOS as readonly string[]).includes(s)) mock.behavior = s;
     },
     disconnectGateway,
+    async connectAccount(signal) {
+      disconnectGateway();
+      const mine = generation;
+      const transport = opts.accountTransportFactory ? opts.accountTransportFactory() : createAccountTransport(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {});
+      const entries = await fetchCatalog(transport, signal);
+      if (mine !== generation) throw new AIError('cancelled');
+      const infos: RemoteProviderInfo[] = [];
+      for (const entry of entries) {
+        if (registry.has(entry.id)) continue;
+        registry.register(new GatewayAIProvider({ entry, transport, gatewayOrigin: ACCOUNT_GATEWAY_LABEL }));
+        remoteIds.push(entry.id);
+        const d = service.listProviders().find((p) => p.id === entry.id)!;
+        infos.push({ ...d, available: entry.available });
+      }
+      current = { origin: ACCOUNT_GATEWAY_LABEL, transport };
+      return { origin: ACCOUNT_GATEWAY_LABEL, providers: infos };
+    },
     async connectGateway({ url, token }, signal) {
       const check = validateGatewayUrl(url);
       if (!check.ok) throw new AIError('provider_invalid');

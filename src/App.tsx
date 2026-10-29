@@ -31,6 +31,9 @@ const BulkReplacePage = lazy(() => import('@/pages/BulkReplacePage'));
 const PerformancePage = lazy(() => import('@/pages/PerformancePage'));
 const ExercisePerformancePage = lazy(() => import('@/pages/ExercisePerformancePage'));
 import { useSettings } from '@/hooks/data';
+// P21: contas e sincronização (só com VITE_ACCOUNTS=on; sem isso as rotas nem existem).
+import { ACCOUNTS_ENABLED } from '@/cloud/config';
+import * as Cloud from '@/cloud/ui/routes';
 
 export default function App() {
   const settings = useSettings();
@@ -68,6 +71,19 @@ export default function App() {
           <Route path="/planejamento/importar" element={<LegacyImportPage />} />
           <Route path="/assistente" element={<AIAssistantPage />} />
           <Route path="/config" element={<SettingsPage />} />
+          {ACCOUNTS_ENABLED && (
+            <>
+              <Route path="/conta" element={<Cloud.AccountPage />} />
+              <Route path="/conta/sincronizacao" element={<Cloud.SyncPage />} />
+              <Route path="/conta/importar" element={<Cloud.ImportPage />} />
+              <Route path="/conta/entrar" element={<Cloud.LoginRoute />} />
+              <Route path="/conta/criar" element={<Cloud.SignupRoute />} />
+              <Route path="/conta/esqueci" element={<Cloud.ForgotRoute />} />
+              <Route path="/conta/redefinir-senha" element={<Cloud.ResetRoute />} />
+              <Route path="/conta/verificar-email" element={<Cloud.VerifyRoute />} />
+              <Route path="/conta/termos" element={<Cloud.TermsRoute />} />
+            </>
+          )}
           <Route path="*" element={<HomePage />} />
         </Route>
       </Routes>

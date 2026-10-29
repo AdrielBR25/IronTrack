@@ -86,7 +86,7 @@ export interface LegacyLocalData {
  * Lê (somente leitura) o banco do modo sem conta deste navegador, para a importação. Não cria o banco se ele não
  * existir e não grava nada nele além do que o próprio app faz ao abrir (garantir o perfil principal).
  */
-export async function readLegacyLocalData(): Promise<LegacyLocalData | null> {
+export async function readLegacyLocalData(opts: { withPhotos?: boolean } = {}): Promise<LegacyLocalData | null> {
   if (!(await Dexie.exists('irontrack'))) return null;
   const legacy = new IronTrackDB('irontrack');
   try {
@@ -102,7 +102,7 @@ export async function readLegacyLocalData(): Promise<LegacyLocalData | null> {
         legacy.rotations.toArray(),
         legacy.overrides.toArray(),
         legacy.bodyEntries.toArray(),
-        legacy.photos.count(),
+        opts.withPhotos ? legacy.photos.toArray() : legacy.photos.count(),
         legacy.goals.toArray(),
         legacy.planEntries.toArray(),
         legacy.calendarDecisions.toArray(),
@@ -111,8 +111,8 @@ export async function readLegacyLocalData(): Promise<LegacyLocalData | null> {
       ]);
       return {
         profile,
-        photos,
-        data: { settings: settings ?? null, routines, sessions, rotations, overrides, bodyEntries, photos: [], goals, planEntries, calendarDecisions, customExercises, exerciseFavorites },
+        photos: typeof photos === 'number' ? photos : photos.length,
+        data: { settings: settings ?? null, routines, sessions, rotations, overrides, bodyEntries, photos: typeof photos === 'number' ? [] : photos, goals, planEntries, calendarDecisions, customExercises, exerciseFavorites },
       };
     });
   } finally {

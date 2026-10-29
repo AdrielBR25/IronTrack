@@ -7,6 +7,23 @@ import { OfflineBadge } from './UpdatePrompt';
 import { useActiveSession, useNow } from '@/hooks/data';
 import { sessionProgress, remainingMs } from '@/modules/training';
 import { Suspense, useEffect } from 'react';
+import { SyncStatusChip } from '@/cloud/ui/SyncStatusChip';
+import { ImportOffer } from '@/cloud/ui/ImportOffer';
+import { useAccountPointer } from '@/cloud/accountPointer';
+import { ACCOUNTS_ENABLED } from '@/cloud/config';
+
+/** P21: onde os dados ficam (texto do rodapé lateral). */
+function StorageNote() {
+  const p = useAccountPointer();
+  if (ACCOUNTS_ENABLED && p?.mode === 'account')
+    return (
+      <div className="space-y-1.5 px-2">
+        <SyncStatusChip />
+        <p className="text-xs text-muted-foreground">Conta: {p.email}. Dados neste aparelho e na nuvem; fotos só neste aparelho.</p>
+      </div>
+    );
+  return <p className="px-2 text-xs text-muted-foreground">Dados salvos só neste navegador.</p>;
+}
 
 export const NAV: { to: string; label: string; icon: typeof Home; end?: boolean; title?: string; ariaLabel?: string; also?: string[] }[] = [
   { to: '/', label: 'Início', icon: Home, end: true },
@@ -87,15 +104,17 @@ export function AppLayout() {
         <div className="mt-auto space-y-3">
           <ActivePill />
           <OfflineBadge />
-          <p className="px-2 text-xs text-muted-foreground">Dados salvos só neste navegador.</p>
+          <StorageNote />
         </div>
       </aside>
 
       <main className="min-w-0 flex-1 pb-[calc(9rem+env(safe-area-inset-bottom))] md:pb-10">
         <div className="mx-auto w-full max-w-3xl px-4 pt-[calc(1rem+env(safe-area-inset-top))] md:px-8 md:pt-8">
-          <div className="flex justify-end empty:hidden md:hidden">
+          <div className="flex justify-end gap-2 empty:hidden md:hidden">
             <OfflineBadge className="mb-2" />
+            <SyncStatusChip className="mb-2" />
           </div>
+          <ImportOffer />
           <motion.div key={pathname} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.18 }}>
             <Suspense fallback={<div className="h-40 animate-pulse rounded-2xl bg-card" />}>
               <Outlet />

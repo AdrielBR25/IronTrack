@@ -590,3 +590,47 @@ describe('arquitetura da consolidação de agendas (P15)', () => {
     expect((layout.match(/^\s*\{ to: '\//gm) ?? []).length).toBe(6);
   });
 });
+
+describe('arquitetura do modo nuvem (P21)', () => {
+  const CLOUD = 'cloud';
+  const src = (f: string) => readFileSync(join(ROOT, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const cloudFiles = files.map(rel).filter((f) => inDir(f, CLOUD));
+
+  it('rede da conta só no cliente da API (mesma origem, cookie da sessão, anti-CSRF, sem redirecionamento)', () => {
+    expect(cloudFiles.filter((f) => /fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon/.test(src(f)))).toEqual(['cloud/api.ts']);
+    const api = src('cloud/api.ts');
+    expect(api).toMatch(/credentials:\s*'same-origin'/);
+    expect(api).toMatch(/redirect:\s*'error'/);
+    expect(api).toMatch(/headers\[CSRF_HEADER\] = CSRF_VALUE/);
+    expect(api).not.toMatch(/https?:\/\//);
+  });
+
+  it('IA pela conta: o transporte usa caminho fixo de mesma origem, sem token nem endereço', () => {
+    const t = src('integrations/ai/gatewayTransport.ts');
+    expect(t).toMatch(/ACCOUNT_AI_BASE = '\/api\/v1\/ai'/);
+    expect(t).toMatch(/credentials:\s*'same-origin'/);
+    expect(t).toMatch(/headers\[CSRF_HEADER\] = CSRF_VALUE/);
+  });
+
+  it('nenhuma URL de backend, credencial ou variável de ambiente além de VITE_ACCOUNTS no app', () => {
+    const all = files.map(rel);
+    const bad = all.filter((f) => /DATABASE_URL|railway\.app|railway\.internal|postgres(ql)?:\/\/|RESEND_API_KEY|OPENAI_API_KEY\s*=|ANTHROPIC_API_KEY\s*=|GEMINI_API_KEY\s*=/.test(src(f)));
+    expect(bad).toEqual([]);
+    const envs = all.flatMap((f) => [...src(f).matchAll(/import\.meta\.env\.(VITE_\w+)/g)].map((m) => `${f}:${m[1]}`));
+    expect(envs.filter((e) => e.startsWith('cloud/'))).toEqual(['cloud/config.ts:VITE_ACCOUNTS']);
+  });
+
+  it('o ponteiro da conta não guarda senha nem token; as telas da conta não acessam o Dexie', () => {
+    expect(src('cloud/accountPointer.ts')).not.toMatch(/password|senha\b|token|cookie/i);
+    const bad = edges.filter((e) => inDir(e.from, 'cloud/ui') && (e.spec === 'dexie' || e.spec === 'dexie-react-hooks' || (e.target === 'db/db.ts' && e.names.includes('db'))));
+    expect(bad.map(fmt)).toEqual([]);
+  });
+
+  it('o resto do app só conhece a nuvem por pontos de entrada explícitos', () => {
+    const ALLOWED = new Set(['main.tsx', 'App.tsx', 'components/AppLayout.tsx', 'pages/SettingsPage.tsx', 'features/assistant/useAssistant.ts']);
+    const outside = edges.filter((e) => e.target && inDir(e.target, CLOUD) && !inDir(e.from, CLOUD) && !ALLOWED.has(e.from));
+    expect(outside.map(fmt)).toEqual([]);
+    // Os domínios, a persistência e o compartilhado nunca dependem da nuvem.
+    expect(edges.filter((e) => e.target && inDir(e.target, CLOUD) && inDir(e.from, 'modules', 'db', 'lib', 'hooks', 'integrations')).map(fmt)).toEqual([]);
+  });
+});

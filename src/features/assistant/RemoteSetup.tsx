@@ -40,7 +40,9 @@ export function ModeSelector({ a }: { a: AssistantState }) {
     <fieldset className="grid gap-2 sm:grid-cols-2" data-testid="mode-selector">
       <legend className="mb-1.5 text-sm font-semibold">Modo do assistente</legend>
       {opt('simulated', 'Simulado (padrão)', 'Nenhuma chamada externa. Respostas fictícias geradas no aparelho.', FlaskConical)}
-      {opt('remote', 'Remoto via gateway', 'Os dados que você autorizar vão ao servidor seguro do IronTrack e ao provedor escolhido.', Cloud)}
+      {a.accountMode
+        ? opt('remote', 'IA real pela conta', 'Os dados que você autorizar vão ao servidor do IronTrack (sua conta) e ao provedor escolhido.', Cloud)
+        : opt('remote', 'Remoto via gateway', 'Os dados que você autorizar vão ao servidor seguro do IronTrack e ao provedor escolhido.', Cloud)}
     </fieldset>
   );
 }
@@ -406,8 +408,104 @@ function AdvancedGateway({ a, open, onToggle, locked }: { a: AssistantState; ope
   );
 }
 
+/** P21: provedores que o servidor da conta habilitou (só esses aparecem). */
+function AccountProviderPicker({ a, locked }: { a: AssistantState; locked: boolean }) {
+  const offered = a.gateway.providers;
+  if (!offered.length) return <p className="text-sm text-warn" data-testid="account-no-providers">Nenhum provedor de IA está habilitado no servidor no momento.</p>;
+  return (
+    <fieldset className="space-y-1.5" disabled={locked}>
+      <legend className="text-sm font-semibold">Provedor</legend>
+      <div className="grid gap-1.5 sm:grid-cols-3">
+        {offered.map((p) => (
+          <label
+            key={p.id}
+            className={cn(
+              'flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border p-2.5 text-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring',
+              a.wantedProvider === p.id ? 'border-primary bg-primary/10 font-semibold' : 'hover:bg-accent/50',
+              !p.available && 'opacity-60',
+            )}
+          >
+            <input type="radio" name="ai-provider-account" value={p.id} checked={a.wantedProvider === p.id} onChange={() => a.chooseProvider(p.id)} className="h-4 w-4 accent-[hsl(var(--primary))]" data-testid={`provider-${p.id}`} />
+            <span>
+              {p.displayName}
+              {!p.available && <span className="block text-xs font-normal text-muted-foreground">indisponível no momento</span>}
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
+/** P21: ajuda para quem administra o servidor: links oficiais das chaves e onde elas ficam (variáveis da Railway). */
+function AdminKeysHelp() {
+  return (
+    <details className="rounded-xl border text-xs" data-testid="admin-keys-help">
+      <summary className="flex min-h-11 cursor-pointer select-none items-center gap-2 px-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
+        <Server className="h-4 w-4 shrink-0" aria-hidden /> Administração: chaves dos provedores
+      </summary>
+      <div className="space-y-2 border-t p-3">
+        <p className="text-muted-foreground">
+          As chaves ficam só no servidor (variáveis de ambiente da Railway), nunca neste app. Quem administra o servidor gera a chave na página oficial e a configura na variável
+          indicada. Usuários comuns não precisam de chave.
+        </p>
+        <ul className="space-y-2">
+          {PROVIDER_PRESETS.map((p) => (
+            <li key={p.id} className="flex flex-wrap items-center justify-between gap-2">
+              <span>
+                {p.name}: <code className="break-all">{ADMIN_KEY_ENV[p.id] ?? p.gatewayKeyEnv}</code>
+              </span>
+              <GetKeyLink preset={p} />
+            </li>
+          ))}
+        </ul>
+      </div>
+    </details>
+  );
+}
+
+/** Variáveis das chaves na API da conta (Railway). */
+const ADMIN_KEY_ENV: Record<string, string> = { openai: 'OPENAI_API_KEY', anthropic: 'ANTHROPIC_API_KEY', gemini: 'GEMINI_API_KEY' };
+
+/** P21: modo conta — Conectar com sua conta → Provedor → Modelo → Conversar. Sem token, sem endereço. */
+function AccountConnect({ a, onStart }: { a: AssistantState; onStart: () => void }) {
+  const locked = a.phase === 'running' || a.phase === 'preparing';
+  const connected = a.gateway.status === 'connected';
+  const preset = presetById(a.wantedProvider);
+  const busy = a.gateway.status === 'connecting';
+  return (
+    <Card className="space-y-3 p-3.5" data-testid="account-ai-panel">
+      {!connected && (
+        <div className="space-y-2">
+          <p className="text-sm">
+            Use a IA pela sua conta do IronTrack: as chaves dos provedores ficam no servidor e o consumo é controlado por conta. Nada é enviado sem a prévia e a sua autorização.
+          </p>
+          <Button className="w-full" onClick={() => void a.connectAccount()} disabled={busy || locked} data-testid="connect-account">
+            {busy ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden /> : <Plug aria-hidden />} Conectar com sua conta
+          </Button>
+          <p role="alert" className="text-xs text-destructive" data-testid="gateway-error">
+            {a.gateway.status === 'error' ? (a.gateway.error ?? '') : ''}
+          </p>
+        </div>
+      )}
+      {connected && (
+        <>
+          <AccountProviderPicker a={a} locked={locked} />
+          <ConnectedPanel a={a} preset={preset} onStart={onStart} locked={locked} />
+        </>
+      )}
+      <AdminKeysHelp />
+    </Card>
+  );
+}
+
 /** Modo remoto, ajuste do P20: Provedor → Obter chave ou autenticar → Conectar → Modelo → Conversar. */
 export function RemoteConnect({ a, onStart }: { a: AssistantState; onStart: () => void }) {
+  if (a.accountMode) return <AccountConnect a={a} onStart={onStart} />;
+  return <GatewayConnect a={a} onStart={onStart} />;
+}
+
+function GatewayConnect({ a, onStart }: { a: AssistantState; onStart: () => void }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const locked = a.phase === 'running' || a.phase === 'preparing';
   const preset = presetById(a.wantedProvider);

@@ -16,6 +16,8 @@ import { CATEGORY_LABEL, assistantStatus, friendlyError, purposeFor, validateQue
 import { loadSnapshot, saveSnapshot, sessionComposition, touchAssistantSession } from './assistantSession';
 import { localAnswer, type LocalExercise } from './localAnswers';
 import { resolveGatewayEndpoint, useGatewayEndpoint } from '@/integrations/ai/gatewayEndpoint';
+import { ACCOUNT_GATEWAY_LABEL } from '@/integrations/ai/assistantService';
+import { accountModeActive } from '@/cloud/config';
 
 export interface AssistantDeps {
   composition: AssistantComposition;
@@ -33,6 +35,8 @@ export interface AssistantDeps {
    * Padrão: ligado na tela real; desligado quando o teste fornece a própria composição.
    */
   persist: boolean;
+  /** P21: IA pela conta (sessão do app) em vez de token do gateway. Padrão: modo conta ativo neste aparelho. */
+  accountMode: boolean;
   /** P20: exercícios do catálogo para respostas locais (carregados sob demanda). null = sem respostas locais. */
   localExercises: (() => Promise<readonly LocalExercise[]>) | null;
 }
@@ -76,6 +80,7 @@ export function defaultAssistantDeps(persist = true): AssistantDeps {
     previewTtlMs: DEFAULT_CONSENT_TTL_MS,
     timeoutMs: ASSISTANT_TIMEOUT_MS,
     remoteTimeoutMs: REMOTE_TIMEOUT_MS,
+    accountMode: accountModeActive(),
   };
 }
 
@@ -103,6 +108,9 @@ export const NO_GATEWAY_MESSAGE = 'Para conectar uma IA real, é necessário con
 /** Mostrado quando o gateway recusa o token no meio do uso: o token é esquecido nesta página. */
 export const TOKEN_REJECTED_MESSAGE = 'O gateway recusou o token (errado, revogado ou expirado) e ele foi esquecido nesta página. Conecte de novo com um token válido.';
 
+/** P21: o servidor recusou o acesso pela conta (sessão expirada ou e-mail ainda não confirmado). */
+export const ACCOUNT_REJECTED_MESSAGE = 'O servidor recusou o acesso pela sua conta: a sessão expirou ou o e-mail ainda não foi confirmado. Entre de novo ou confirme o e-mail em Minha conta.';
+
 export interface GatewayState {
   status: 'disconnected' | 'connecting' | 'connected' | 'error';
   origin?: string;
@@ -117,12 +125,12 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
     const persist = overrides.persist ?? !overrides.composition;
     return { ...defaultAssistantDeps(persist && !overrides.composition), ...overrides, persist };
   });
-  const { composition } = deps;
+  const { composition, accountMode } = deps;
   const simulated = composition.providers[0];
   // P20: retoma a sessão da memória do app (navegação interna), se houver e ainda for da mesma composição.
   const [snap] = useState(() => (deps.persist ? loadSnapshot() : null));
   // Ajuste P20: só retoma a conexão se o endereço resolvido ainda for o mesmo (trocar o servidor exige conectar de novo).
-  const restoredGateway = snap && snap.gateway.status === 'connected' && snap.gateway.origin === resolveGatewayEndpoint()?.origin && composition.service.listProviders().some((p) => snap.gateway.providers.some((g) => g.id === p.id)) ? (snap.gateway as GatewayState) : null;
+  const restoredGateway = snap && snap.gateway.status === 'connected' && snap.gateway.origin === (accountMode ? ACCOUNT_GATEWAY_LABEL : resolveGatewayEndpoint()?.origin) && composition.service.listProviders().some((p) => snap.gateway.providers.some((g) => g.id === p.id)) ? (snap.gateway as GatewayState) : null;
 
   const [messages, setMessages] = useState<ChatMessage[]>(() => snap?.messages ?? []);
   const [draft, setDraftState] = useState('');
@@ -341,6 +349,35 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
     [composition, invalidate],
   );
 
+  /** P21: conecta pela conta (sem token e sem endereço). Busca só o catálogo de provedores habilitados no servidor. */
+  const connectAccount = useCallback(async (): Promise<boolean> => {
+    connectRef.current?.abort();
+    const ctrl = new AbortController();
+    connectRef.current = ctrl;
+    invalidate();
+    setProviderState('');
+    setModelState('');
+    setGateway({ status: 'connecting', providers: [] });
+    try {
+      const conn = await composition.connectAccount(ctrl.signal);
+      if (!mountedRef.current || connectRef.current !== ctrl) return false;
+      setGateway({ status: 'connected', origin: conn.origin, providers: conn.providers });
+      const wanted = conn.providers.find((p) => p.id === wantedRef.current) ?? conn.providers.find((p) => p.available);
+      if (wanted) {
+        setWantedProvider(wanted.id);
+        setProviderState(wanted.id);
+      }
+      return true;
+    } catch (e) {
+      if (!mountedRef.current || connectRef.current !== ctrl) return false;
+      const fe = friendlyError(e);
+      setGateway({ status: 'error', providers: [], error: fe.message, errorCode: fe.code });
+      return false;
+    } finally {
+      if (connectRef.current === ctrl) connectRef.current = null;
+    }
+  }, [composition, invalidate]);
+
   /** Cancela uma conexão em andamento (nada é guardado; o token digitado continua só no campo). */
   const cancelConnect = useCallback(() => {
     if (!connectRef.current) return;
@@ -379,12 +416,12 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
       setTesting('fail');
       if (fe.code === 'access_denied') {
         composition.disconnectGateway();
-        setGateway({ status: 'error', providers: [], error: TOKEN_REJECTED_MESSAGE, errorCode: 'access_denied' });
+        setGateway({ status: 'error', providers: [], error: accountMode ? ACCOUNT_REJECTED_MESSAGE : TOKEN_REJECTED_MESSAGE, errorCode: 'access_denied' });
         setProviderState('');
         setModelState('');
       } else setLastRunError(fe.code);
     }
-  }, [composition, gateway.status]);
+  }, [composition, gateway.status, accountMode]);
 
   /** P20: limpa a conversa desta sessão (só memória). */
   const clearConversation = useCallback(() => {
@@ -548,7 +585,7 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
         connectRef.current?.abort();
         connectRef.current = null;
         composition.disconnectGateway();
-        setGateway({ status: 'error', providers: [], error: TOKEN_REJECTED_MESSAGE, errorCode: 'access_denied' });
+        setGateway({ status: 'error', providers: [], error: accountMode ? ACCOUNT_REJECTED_MESSAGE : TOKEN_REJECTED_MESSAGE, errorCode: 'access_denied' });
         setProviderState('');
         setModelState('');
       }
@@ -590,7 +627,7 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
     [invalidate],
   );
 
-  const status = assistantStatus({ mode, hasEndpoint: !!endpoint, gatewayStatus: gateway.status, gatewayErrorCode: gateway.errorCode, providerAvailable: remoteInfo ? remoteInfo.available : null, lastRunErrorCode: lastRunError });
+  const status = assistantStatus({ mode, hasEndpoint: accountMode || !!endpoint, gatewayStatus: gateway.status, gatewayErrorCode: gateway.errorCode, providerAvailable: remoteInfo ? remoteInfo.available : null, lastRunErrorCode: lastRunError });
 
   return {
     mode,
@@ -598,6 +635,8 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
     gateway,
     endpoint,
     connectGateway,
+    connectAccount,
+    accountMode,
     cancelConnect,
     disconnectGateway,
     chooseProvider,

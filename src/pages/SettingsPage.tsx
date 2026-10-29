@@ -24,6 +24,7 @@ import { promptInstall } from '@/lib/install';
 import { checkBackupSize, checkLocalIntegrity, exportBackup, parseBackup, previewRestore, type BackupFile, type RestorePreview } from '@/lib/backup';
 import type { IntegrityReport } from '@/lib/integrity';
 import { IssueList, RestorePreviewDialog } from '@/features/backup/RestorePreviewDialog';
+import { AccountSettingsCard } from '@/cloud/ui/AccountSettingsCard';
 
 function Row({ label, hint, children }: { label: string; hint?: React.ReactNode; children: React.ReactNode }) {
   return (
@@ -137,6 +138,7 @@ export default function SettingsPage() {
   return (
     <div className="space-y-4">
       <PageHeader title="Configurações" subtitle="Personalize o IronTrack" />
+      <AccountSettingsCard />
 
       <Section icon={Target} title="Perfil">
         <div className="space-y-1.5 py-3">
