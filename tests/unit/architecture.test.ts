@@ -627,7 +627,7 @@ describe('arquitetura do modo nuvem (P21)', () => {
   });
 
   it('o resto do app só conhece a nuvem por pontos de entrada explícitos', () => {
-    const ALLOWED = new Set(['main.tsx', 'App.tsx', 'components/AppLayout.tsx', 'pages/SettingsPage.tsx', 'features/assistant/useAssistant.ts']);
+    const ALLOWED = new Set(['main.tsx', 'App.tsx', 'components/AppLayout.tsx', 'pages/SettingsPage.tsx', 'pages/HomePage.tsx', 'features/assistant/useAssistant.ts']);
     const outside = edges.filter((e) => e.target && inDir(e.target, CLOUD) && !inDir(e.from, CLOUD) && !ALLOWED.has(e.from));
     expect(outside.map(fmt)).toEqual([]);
     // Os domínios, a persistência e o compartilhado nunca dependem da nuvem.

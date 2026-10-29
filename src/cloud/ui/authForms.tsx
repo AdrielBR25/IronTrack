@@ -324,7 +324,7 @@ export function ResetForm({ onDone }: { onDone: () => void }) {
     }
   };
   return (
-    <form onSubmit={submit} noValidate className="space-y-4" aria-label="Nova senha">
+    <form onSubmit={submit} noValidate className="space-y-4" aria-label="Criar nova senha">
       {err && <FormAlert>{err}</FormAlert>}
       <Field label="Nova senha" hint={<PasswordChecklist password={password} email="" />}>
         {(p) => <PasswordInput {...p} value={password} onChange={setPassword} autoComplete="new-password" />}

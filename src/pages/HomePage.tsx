@@ -1,4 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
+import { accountModeActive } from '@/cloud/config';
 import { motion } from 'framer-motion';
 import { useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CalendarCheck2, CalendarDays, ChevronRight, Clock, Coffee, Dumbbell, FileUp, Flame, Moon, Play, Sparkles, TrendingDown, TrendingUp, Trophy, Weight, BookmarkCheck } from 'lucide-react';
@@ -40,7 +41,7 @@ function Onboarding() {
       <div className="bg-gradient-to-br from-primary/25 via-primary/5 to-transparent p-5">
         <LogoMark className="h-12 w-12" />
         <h2 className="mt-4 font-display text-2xl font-bold">Bem-vindo ao IronTrack</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Comece importando sua ficha de treino. Tudo fica salvo neste aparelho, sem login.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Comece importando sua ficha de treino. {accountModeActive() ? 'Tudo fica salvo neste aparelho e sincronizado com a sua conta.' : 'Tudo fica salvo neste aparelho, sem login.'}</p>
       </div>
       <CardContent className="space-y-4 pt-4">
         <div className="flex gap-2">

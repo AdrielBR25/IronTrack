@@ -5,7 +5,7 @@
 // - conta: banco `irontrack-acct-<conta>` e o motor de sincronização. Abre OFFLINE com os dados da última conta.
 import type { AccountInfo } from '@shared/api/auth.ts';
 import { setDb } from '@/db/db';
-import { AccountDB } from './accountDb';
+import { AccountDB, deleteAccountDb } from './accountDb';
 import { clearAccountPointer, readAccountPointer, setAccountPointer, type AccountPointer } from './accountPointer';
 import { api } from './api';
 import { ACCOUNTS_ENABLED } from './config';
@@ -81,7 +81,6 @@ export async function signOutHere(opts: { removeLocalCopy: boolean }): Promise<v
   clearAccountPointer();
   if (d && opts.removeLocalCopy) {
     d.close();
-    const { deleteAccountDb } = await import('./accountDb');
     await deleteAccountDb(d.accountId);
   }
 }

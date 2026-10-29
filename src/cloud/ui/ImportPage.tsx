@@ -100,8 +100,12 @@ export default function ImportPage() {
 
   const prepareFrom = async (kind: 'local_profile' | 'backup_file', data: LegacyLocalData['data'], profileId: string | null, label: string, photos: LegacyLocalData['data']['photos'] = []) => {
     setErr(null);
-    const p = await prepareImport({ ...data, photos }, dataProfileId, { kind, profileId });
-    setStep({ s: 'prepared', p, label });
+    try {
+      const p = await prepareImport({ ...data, photos }, dataProfileId, { kind, profileId });
+      setStep({ s: 'prepared', p, label });
+    } catch (e) {
+      setErr(`Não foi possível preparar a importação: ${e instanceof Error ? e.message : String(e)}`);
+    }
   };
 
   const onFile = async (f: File) => {
@@ -340,9 +344,14 @@ export default function ImportPage() {
               )}
               {step.photosCopied > 0 && <p className="text-sm">{step.photosCopied} foto(s) copiadas só para este aparelho (não sincronizadas).</p>}
               <p className="text-sm text-muted-foreground">A origem não foi alterada. Os dados aparecem nos seus outros aparelhos na próxima sincronização.</p>
-              <Button asChild>
-                <Link to="/">Ir para o início</Link>
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button asChild>
+                  <Link to="/">Ir para o início</Link>
+                </Button>
+                <Button variant="secondary" onClick={() => setStep({ s: 'choose' })}>
+                  Fazer outra importação
+                </Button>
+              </div>
             </CardContent>
           </Card>
         )}

@@ -6,6 +6,7 @@ import { Toaster } from 'sonner';
 import { Cloud, HardDrive, Loader2 } from 'lucide-react';
 import type { ServerFeatures } from '@shared/api/auth.ts';
 import { LogoMark } from '@/components/Logo';
+import { UpdatePrompt } from '@/components/UpdatePrompt';
 import { Button } from '@/components/ui/button';
 import { api } from '../api';
 import { setLocalMode } from '../accountPointer';
@@ -159,6 +160,8 @@ export default function AuthApp() {
         <Route path="/carregando" element={<Busy />} />
         <Route path="*" element={<Welcome />} />
       </Routes>
+      {/* O PWA se instala já na tela de entrada (para o app abrir offline depois). */}
+      <UpdatePrompt />
       <Toaster position="top-center" richColors closeButton />
     </HashRouter>
   );

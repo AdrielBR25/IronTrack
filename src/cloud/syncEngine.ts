@@ -450,7 +450,7 @@ export class SyncEngine {
     Dexie.on('storagemutated', onMutated);
     this.cleanup.push(() => Dexie.on('storagemutated').unsubscribe(onMutated));
     const onOnline = () => this.schedule(0);
-    const onOffline = () => this.refreshCounts('offline');
+    const onOffline = () => void this.scanOffline();
     const onVisible = () => {
       if (document.visibilityState === 'visible') this.schedule(0);
     };
@@ -516,7 +516,7 @@ export class SyncEngine {
   private async cycle(): Promise<void> {
     if (this.stopped) return;
     if (globalThis.navigator && navigator.onLine === false) {
-      await this.refreshCounts('offline');
+      await this.scanOffline();
       return;
     }
     this.set({ state: 'syncing', error: null });
@@ -537,6 +537,17 @@ export class SyncEngine {
     } finally {
       this.ctrl = null;
     }
+  }
+
+  /** Offline: só a varredura local, para a fila (e o aviso ao sair) contar o que ainda não subiu. */
+  private async scanOffline() {
+    try {
+      await scanLocalChanges(this.db);
+      this.dirty = false;
+    } catch {
+      /* banco fechado (troca de conta): a próxima varredura conta */
+    }
+    await this.refreshCounts('offline');
   }
 
   private async handleError(e: unknown) {

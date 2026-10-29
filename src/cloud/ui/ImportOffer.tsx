@@ -48,7 +48,7 @@ export function ImportOffer() {
       alive = false;
     };
   }, [accountId]);
-  if (!summary || hidden || !accountId || pathname.startsWith('/conta/importar')) return null;
+  if (!summary || hidden || !accountId || dismissed().includes(accountId) || pathname.startsWith('/conta/importar')) return null;
   return (
     <div role="region" aria-label="Dados sem conta encontrados" className="mb-4 flex items-start gap-3 rounded-2xl border border-primary/40 bg-primary/10 p-3" data-testid="import-offer">
       <HardDriveUpload className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden />
