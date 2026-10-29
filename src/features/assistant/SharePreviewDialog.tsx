@@ -107,6 +107,21 @@ function IncludedData({ category, data }: { category: AIContextCategory; data: A
       </ul>
     );
   }
+  if (category === 'training_goals' && data.training_goals) {
+    return (
+      <ul className={`${box} space-y-0.5`}>
+        {data.training_goals.map((g, i) => (
+          <li key={i} className="break-words">
+            {g.title}
+            {g.exercise ? ` (${g.exercise})` : ''}: alvo {n(g.target, 1)} {g.unit ?? ''}
+            {g.current != null ? ` · atual ${n(g.current, 1)}` : ''}
+            {g.progressPct != null ? ` · ${g.progressPct}%` : ''}
+            {g.deadline ? ` · prazo ${g.deadline}` : ''}
+          </li>
+        ))}
+      </ul>
+    );
+  }
   if (category === 'profile_preferences' && data.profile_preferences) {
     const p = data.profile_preferences;
     return (

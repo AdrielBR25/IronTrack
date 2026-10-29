@@ -44,6 +44,7 @@ export function ExerciseDetailDialog({
   usageLines = [],
   hideFavorite = false,
   performance = null,
+  askFrom,
 }: {
   item: LibraryItem | null;
   onOpenChange: (o: boolean) => void;
@@ -66,6 +67,8 @@ export function ExerciseDetailDialog({
    * concluído com a origem; sem ele, mostra o estado vazio (nada é associado automaticamente).
    */
   performance?: { href: string; available: boolean } | null;
+  /** P20: origem do atalho do assistente (do treino, a tela do assistente oferece voltar ao treino). */
+  askFrom?: 'treino';
 }) {
   const it = item;
   const inUse = !!usage && (usage.templates > 0 || usage.sessions > 0);
@@ -170,7 +173,7 @@ export function ExerciseDetailDialog({
             )}
             {it.kind === 'catalog' && <p className="text-xs text-muted-foreground">{GENERAL_NOTICE}</p>}
             <Link
-              to={`/assistente?exercicio=${encodeURIComponent(it.name)}`}
+              to={`/assistente?exercicio=${encodeURIComponent(it.name)}${askFrom ? `&origem=${askFrom}` : ''}`}
               className="inline-flex h-9 items-center gap-1.5 self-start rounded-xl border px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               data-testid="detail-ask-assistant"
             >

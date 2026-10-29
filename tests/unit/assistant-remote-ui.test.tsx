@@ -86,6 +86,9 @@ async function waitFor<T>(fn: () => T | null | undefined | false, timeout = 3000
   }
 }
 
+/** P20: o envio consulta antes o catálogo local (import sob demanda), então o aviso chega um pouco depois. */
+const noticeText = () => waitFor(() => $('ai-notice')?.textContent || null);
+
 async function setValue(el: HTMLElement | null, value: string) {
   if (!el) throw new Error('elemento ausente');
   const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
@@ -158,7 +161,8 @@ describe('assistente remoto: modo e seleção explícita', () => {
     expect($('remote-badge')).not.toBeNull();
     await setValue($('ai-question'), 'Pergunta');
     await click($('ai-send'));
-    expect($('ai-notice')?.textContent).toContain('Conecte um gateway');
+    // P20: antes, a pergunta passa pelo catálogo local (carregado sob demanda); sem correspondência, cai na regra do gateway.
+    expect(await noticeText()).toContain('Conecte um gateway');
     expect($('share-preview')).toBeNull();
     expect(requests).toHaveLength(0);
   });
@@ -177,10 +181,10 @@ describe('assistente remoto: modo e seleção explícita', () => {
 
     await setValue($('ai-question'), 'Pergunta');
     await click($('ai-send'));
-    expect($('ai-notice')?.textContent).toContain('Escolha um provedor');
+    expect(await noticeText()).toContain('Escolha um provedor');
     await setValue($('ai-provider'), 'anthropic');
     await click($('ai-send'));
-    expect($('ai-notice')?.textContent).toContain('Escolha um modelo');
+    expect(await noticeText()).toContain('Escolha um modelo');
     expect($('remote-destination')?.textContent).toContain(`${GW} → Anthropic Claude`);
     expect(generates()).toHaveLength(0);
   });

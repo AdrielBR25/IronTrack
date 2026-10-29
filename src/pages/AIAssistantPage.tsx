@@ -1,8 +1,9 @@
 // Assistente IA (IronTrack 2.0 F01/P05–P06): conversa em memória, seleção de dados, prévia do
 // conteúdo efetivo e autorização por solicitação. Modo simulado (padrão, offline) ou remoto via
 // gateway seguro, com provedor e modelo escolhidos explicitamente. Só leitura dos dados locais.
-import { useRef } from 'react';
-import { ChevronDown, Cloud, FlaskConical, Loader2, Lock, Send, Square } from 'lucide-react';
+import { useEffect, useRef } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { ArrowLeft, ChevronDown, Cloud, FlaskConical, Loader2, Lock, Send, Square } from 'lucide-react';
 import { PageHeader } from '@/components/AppLayout';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -15,7 +16,7 @@ import { CATEGORY_HINT, CATEGORY_LABEL, MAX_QUESTION_CHARS } from '@/features/as
 import { useAssistant, type AssistantDeps } from '@/features/assistant/useAssistant';
 import { Conversation } from '@/features/assistant/Conversation';
 import { SharePreviewDialog } from '@/features/assistant/SharePreviewDialog';
-import { GatewayPanel, ModeSelector } from '@/features/assistant/RemoteSetup';
+import { ConnectionStatus, GatewayPanel, ModeSelector, SetupSteps } from '@/features/assistant/RemoteSetup';
 
 export const DEMO_TITLE = 'Modo de demonstração — respostas simuladas';
 export const REMOTE_TITLE = 'Modo remoto — compartilhamento externo';
@@ -79,6 +80,18 @@ export default function AIAssistantPage({ deps }: { deps?: Partial<AssistantDeps
   const preparing = a.phase === 'preparing';
   const over = a.draft.trim().length > MAX_QUESTION_CHARS;
   const remote = a.mode === 'remote';
+  // P20: atalhos do treino e dos detalhes do exercício chegam com o exercício na URL; a pergunta vem preenchida (nada é
+  // enviado sozinho) e, se for sobre um exercício do catálogo, é respondida no aparelho.
+  const [params] = useSearchParams();
+  const exercise = params.get('exercicio');
+  const fromWorkout = params.get('origem') === 'treino';
+  const prefilled = useRef(false);
+  useEffect(() => {
+    if (exercise && !prefilled.current) {
+      prefilled.current = true;
+      a.setDraft(`Como executar ${exercise.slice(0, 80)} corretamente?`);
+    }
+  }, [exercise, a]);
 
   return (
     <div className="space-y-4">
@@ -97,6 +110,12 @@ export default function AIAssistantPage({ deps }: { deps?: Partial<AssistantDeps
           )
         }
       />
+
+      {fromWorkout && (
+        <Link to="/treino" className="inline-flex h-10 items-center gap-1.5 rounded-xl border px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" data-testid="ai-back-workout">
+          <ArrowLeft className="h-4 w-4" aria-hidden /> Voltar ao treino (continua salvo)
+        </Link>
+      )}
 
       {remote ? (
         <Card className="flex gap-3 border-destructive/40 bg-destructive/10 p-3.5" role="note" data-testid="remote-banner">
@@ -124,14 +143,27 @@ export default function AIAssistantPage({ deps }: { deps?: Partial<AssistantDeps
       )}
 
       <Card className="space-y-3 p-3.5">
+        <ConnectionStatus a={a} />
         <ModeSelector a={a} />
       </Card>
+      {remote && <SetupSteps a={a} onStart={() => inputRef.current?.focus()} />}
       {remote && <GatewayPanel a={a} />}
 
-      <Conversation messages={a.messages} running={running} runningLabel={remote ? `Aguardando a resposta de ${a.provider?.displayName ?? 'provedor remoto'}…` : undefined} onRetry={a.retry} onSuggestion={(t) => {
-        a.setDraft(t);
-        inputRef.current?.focus();
-      }} />
+      <Conversation
+        messages={a.messages}
+        running={running}
+        runningLabel={remote ? `Aguardando a resposta de ${a.provider?.displayName ?? 'provedor remoto'}…` : undefined}
+        onRetry={a.retry}
+        onSuggestion={(t) => {
+          a.setDraft(t);
+          inputRef.current?.focus();
+        }}
+        onClear={a.clearConversation}
+        onAskAI={(q) => {
+          a.askAIAnyway(q);
+          inputRef.current?.focus();
+        }}
+      />
 
       <form
         className="space-y-3"

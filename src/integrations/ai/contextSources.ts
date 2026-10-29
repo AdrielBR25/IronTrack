@@ -7,11 +7,13 @@ import { liveQuery } from 'dexie';
 import { getSettings } from '@/db/db';
 import { completedSessionsSince, recentCompletedSessions } from '@/db/repo';
 import { listBodyEntries, recentBodyEntries } from '@/db/body';
+import { listGoals } from '@/db/goals';
 import { GOAL_LABEL } from '@/lib/defaults';
 import { addDays, fromISODate, todayISO } from '@/lib/dates';
 import type { BodyEntry, WorkoutSession } from '@/lib/types';
 import { consistency, sessionVolume, setsByMuscle, validSetCount } from '@/modules/training';
 import { metricChanges } from '@/modules/body';
+import { GOAL_TYPE_LABEL, computeGoalProgress } from '@/modules/goals';
 import {
   BODY_CONTEXT_FIELDS,
   DEFAULT_CONTEXT_LIMITS,
@@ -23,7 +25,7 @@ import {
 } from '@/modules/ai';
 
 /** Categorias que o assistente oferece. Fotos de progresso ficam fora (bloqueadas no módulo de IA). */
-export const ASSISTANT_CATEGORIES = ['training_summary', 'training_history', 'body_measurements', 'body_evolution', 'profile_preferences'] as const satisfies readonly AIContextCategory[];
+export const ASSISTANT_CATEGORIES = ['training_summary', 'training_history', 'training_goals', 'body_measurements', 'body_evolution', 'profile_preferences'] as const satisfies readonly AIContextCategory[];
 export type AssistantCategory = (typeof ASSISTANT_CATEGORIES)[number];
 
 /** Janela do resumo de treinos, em dias (inclui hoje). */
@@ -92,6 +94,17 @@ export async function loadContextSources(categories: readonly AIContextCategory[
     const changes = metricChanges(await listBodyEntries());
     if (changes.length)
       out.bodyEvolution = changes.map((c) => ({ metric: { key: c.metric.key, label: c.metric.label, unit: c.metric.unit }, first: c.first, last: c.last, delta: c.delta, verdict: c.verdict }));
+  }
+  // P20: metas ativas e pausadas, medidas pelo motor das metas (as mesmas contas da tela de Metas).
+  if (has(categories, 'training_goals')) {
+    const list = (await listGoals()).filter((g) => g.status === 'active' || g.status === 'paused');
+    if (list.length) {
+      const sessions = await completedSessionsSince(0);
+      out.trainingGoals = list.slice(0, DEFAULT_CONTEXT_LIMITS.maxGoals).map((g) => {
+        const p = computeGoalProgress(g, sessions, today);
+        return { title: g.title, type: GOAL_TYPE_LABEL[g.type], target: g.targetValue, unit: g.unit, current: p.current, fraction: p.fraction, state: p.displayState, deadline: p.deadline, exercise: g.exercise?.name ?? null };
+      });
+    }
   }
   if (has(categories, 'profile_preferences') && settings) {
     out.profilePreferences = { weightUnit: settings.weightUnit, trainingDays: [...settings.trainingDays], goal: GOAL_LABEL[settings.goal] };

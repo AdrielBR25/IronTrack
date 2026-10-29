@@ -1,6 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, Flag, Plus, Trash2, Trophy, Undo2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Flag, HelpCircle, Plus, Trash2, Trophy, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useActiveSession, useCompletedSessions, useNow, useSettings } from '@/hooks/data';
 import { completeSession, discardSession, saveSessionGuarded } from '@/db/repo';
@@ -56,6 +56,7 @@ import { cn } from '@/lib/utils';
 
 // P20: biblioteca completa (catálogo, filtros, 3D) só é baixada quando a pessoa abre a troca ou o "Adicionar exercício".
 const LibraryBrowser = lazy(() => import('@/features/library/LibraryBrowser'));
+const WorkoutHelpSheet = lazy(() => import('@/features/workout/WorkoutHelpSheet'));
 
 /** Chaves da biblioteca já presentes no treino (não aparecem de novo como opção). */
 const keysIn = (s: WorkoutSession) => new Set(s.exercises.flatMap((e): LibraryKey[] => (e.catalogId ? [`catalog:${e.catalogId}`] : e.customExerciseId ? [`custom:${e.customExerciseId}`] : [])));
@@ -186,6 +187,8 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
 
   const currentEx = current ? session.exercises.find((e) => e.id === current.exerciseId) : undefined;
   const currentSet = currentEx?.sets.find((s) => s.id === current?.setId);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const helpEx = currentEx ?? session.exercises.find((e) => e.id === session.focusExerciseId) ?? session.exercises[0] ?? null;
 
   const scrollTo = (exId: string) => {
     requestAnimationFrame(() => document.getElementById(`ex-${exId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
@@ -285,6 +288,9 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
               )}
             </p>
           </div>
+          <Button variant="ghost" size="icon" aria-label="Ajuda do exercício atual" onClick={() => setHelpOpen(true)} disabled={!currentEx && !session.exercises.length} data-testid="workout-help-open">
+            <HelpCircle />
+          </Button>
           <Button size="sm" variant={current ? 'secondary' : 'default'} onClick={() => setFinishOpen(true)} data-testid="open-finish">
             <Flag /> Finalizar
           </Button>
@@ -430,6 +436,12 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
           )}
         </DialogContent>
       </Dialog>
+
+      {helpOpen && (
+        <Suspense fallback={null}>
+          <WorkoutHelpSheet exercise={helpEx} onClose={() => setHelpOpen(false)} />
+        </Suspense>
+      )}
 
       {browser && (
         <Suspense fallback={null}>

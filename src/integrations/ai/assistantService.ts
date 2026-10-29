@@ -56,6 +56,11 @@ export interface AssistantComposition {
   connectGateway(input: { url: string; token: string }, signal?: AbortSignal): Promise<GatewayConnection>;
   /** Esquece o gateway: remove os provedores remotos e descarta o token da memória. */
   disconnectGateway(): void;
+  /**
+   * P20: "Testar conexão" — busca de novo o catálogo com o token já em memória (sem dados pessoais) e atualiza a
+   * disponibilidade de cada provedor. Falha com o mesmo erro tipado da conexão.
+   */
+  testGateway(signal?: AbortSignal): Promise<GatewayConnection>;
 }
 
 export interface AssistantCompositionOptions {
@@ -80,12 +85,35 @@ export function createAssistantService(opts: AssistantCompositionOptions = {}): 
   const service = new AIService({ registry, ...(opts.now ? { now: opts.now } : {}), ...(opts.randomId ? { randomId: opts.randomId } : {}) });
   let remoteIds: string[] = [];
   let generation = 0;
+  let current: { origin: string; transport: GatewayTransport } | null = null;
 
   const disconnectGateway = () => {
     generation++;
     for (const id of remoteIds) registry.unregister(id);
     remoteIds = [];
+    current = null;
   };
+
+  /** Catálogo do gateway com tempo limite e cancelamento. */
+  async function fetchCatalog(transport: GatewayTransport, signal?: AbortSignal) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), CATALOG_TIMEOUT_MS);
+    const onAbort = () => ctrl.abort();
+    signal?.addEventListener('abort', onAbort, { once: true });
+    let res;
+    try {
+      res = await transport({ method: 'GET', path: '/v1/models', signal: ctrl.signal });
+    } catch (e) {
+      if (signal?.aborted) throw new AIError('cancelled');
+      if (ctrl.signal.aborted) throw new AIError('gateway_unreachable');
+      throw e;
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    }
+    if (res.status !== 200) throw new AIError(gatewayErrorCode(res.status, res.body));
+    return parseGatewayCatalog(res.body);
+  }
 
   return {
     service,
@@ -105,23 +133,7 @@ export function createAssistantService(opts: AssistantCompositionOptions = {}): 
       disconnectGateway();
       const mine = generation;
       const transport = opts.transportFactory ? opts.transportFactory(check.origin, tok) : createGatewayTransport({ origin: check.origin, token: tok, ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}) });
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), CATALOG_TIMEOUT_MS);
-      const onAbort = () => ctrl.abort();
-      signal?.addEventListener('abort', onAbort, { once: true });
-      let res;
-      try {
-        res = await transport({ method: 'GET', path: '/v1/models', signal: ctrl.signal });
-      } catch (e) {
-        if (signal?.aborted) throw new AIError('cancelled');
-        if (ctrl.signal.aborted) throw new AIError('gateway_unreachable');
-        throw e;
-      } finally {
-        clearTimeout(timer);
-        signal?.removeEventListener('abort', onAbort);
-      }
-      if (res.status !== 200) throw new AIError(gatewayErrorCode(res.status, res.body));
-      const entries = parseGatewayCatalog(res.body);
+      const entries = await fetchCatalog(transport, signal);
       // Outra conexão (ou desconexão) começou enquanto esta esperava: descarta.
       if (mine !== generation) throw new AIError('cancelled');
       const infos: RemoteProviderInfo[] = [];
@@ -132,7 +144,21 @@ export function createAssistantService(opts: AssistantCompositionOptions = {}): 
         const d = service.listProviders().find((p) => p.id === entry.id)!;
         infos.push({ ...d, available: entry.available });
       }
+      current = { origin: check.origin, transport };
       return { origin: check.origin, providers: infos };
+    },
+    async testGateway(signal) {
+      if (!current) throw new AIError('gateway_unreachable');
+      const mine = generation;
+      const { origin, transport } = current;
+      const entries = await fetchCatalog(transport, signal);
+      if (mine !== generation) throw new AIError('cancelled');
+      const offered = new Map(entries.map((e) => [e.id, e.available]));
+      const providers = remoteIds.flatMap((id) => {
+        const d = service.listProviders().find((p) => p.id === id);
+        return d ? [{ ...d, available: offered.get(id) === true }] : [];
+      });
+      return { origin, providers };
     },
   };
 }

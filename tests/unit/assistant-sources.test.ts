@@ -62,7 +62,8 @@ describe('fontes de contexto do assistente', () => {
     expect(s.bodyEvolution?.find((c) => c.metric.key === 'weightKg')).toMatchObject({ first: 80, last: 79, delta: -1 });
     expect(s.profilePreferences).toEqual({ weightUnit: 'kg', trainingDays: [1, 3, 5], goal: 'Hipertrofia' });
     const ctx = buildAIContext(s, ASSISTANT_CATEGORIES);
-    expect(ctx.included).toEqual(ASSISTANT_CATEGORIES);
+    // Sem metas cadastradas, a categoria fica fora (sem dados); nada é inventado.
+    expect(ctx.included).toEqual(ASSISTANT_CATEGORIES.filter((c) => c !== 'training_goals'));
   });
 
   it('dados ausentes: nada é inventado e a categoria aparece como "sem dados"', async () => {

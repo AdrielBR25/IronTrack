@@ -71,6 +71,9 @@ async function waitFor<T>(fn: () => T | null | undefined | false, timeout = 3000
   }
 }
 
+/** P20: o envio consulta antes o catálogo local (import sob demanda), então o aviso chega um pouco depois. */
+const noticeText = () => waitFor(() => $('ai-notice')?.textContent || null);
+
 async function type(text: string) {
   const el = $('ai-question') as HTMLTextAreaElement;
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
@@ -129,10 +132,10 @@ describe('assistente: página e prévia', () => {
     await mount();
     const prepare = vi.spyOn(comp.service, 'prepare');
     await click($('ai-send'));
-    expect($('ai-notice')?.textContent).toContain('Escreva uma pergunta');
+    expect(await noticeText()).toContain('Escreva uma pergunta');
     await type('a'.repeat(2001));
     await click($('ai-send'));
-    expect($('ai-notice')?.textContent).toContain('2.000');
+    expect(await noticeText()).toContain('2.000');
     expect(prepare).not.toHaveBeenCalled();
     expect($('share-preview')).toBeNull();
   });
@@ -373,7 +376,7 @@ describe('assistente: autorização e execução', () => {
     await type('Pergunta');
     await click($('ai-send'));
     await waitFor(() => $('ai-notice')?.textContent);
-    expect($('ai-notice')?.textContent).toContain('Nenhum dado foi enviado');
+    expect(await noticeText()).toContain('Nenhum dado foi enviado');
     expect($('ai-notice')?.textContent).not.toContain('IDBDatabase');
     expect($('share-preview')).toBeNull();
   });

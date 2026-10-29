@@ -276,7 +276,7 @@ describe('arquitetura do assistente de IA', () => {
   });
 
   it('a integração só usa funções de LEITURA da persistência', () => {
-    const READS = new Set(['getSettings', 'completedSessionsSince', 'recentCompletedSessions', 'listBodyEntries', 'recentBodyEntries']);
+    const READS = new Set(['getSettings', 'completedSessionsSince', 'recentCompletedSessions', 'listBodyEntries', 'recentBodyEntries', 'listGoals']);
     const dbEdges = edges.filter((e) => inDir(e.from, INTEGRATION) && e.target && inDir(e.target, 'db'));
     expect(dbEdges.flatMap((e) => e.names.filter((n) => !READS.has(n)).map((n) => `${fmt(e)} (${n})`))).toEqual([]);
     // Nem o objeto do banco, nem métodos de escrita do Dexie.
@@ -411,9 +411,14 @@ describe('arquitetura das metas de treinamento (P12)', () => {
     expect(goalFiles.filter((f) => FORBIDDEN.test(source(f)))).toEqual([]);
   });
 
-  it('metas não vão para a IA: módulo de IA, integrações e assistente não importam metas nem src/db/goals', () => {
-    const bad = edges.filter((e) => e.target && (inDir(e.target, GO) || e.target === 'db/goals.ts' || e.target === 'hooks/useGoals.ts') && inDir(e.from, 'modules/ai', 'integrations', 'features/assistant', 'pages/AIAssistantPage.tsx'));
+  it('metas só chegam à IA pela fonte de contexto (P20): leitura via listGoals, atrás do consentimento da categoria training_goals', () => {
+    // P12 proibia qualquer caminho; o Prompt 20 pediu metas no contexto. A única porta é integrations/ai/contextSources.ts,
+    // que só lê (listGoals) e calcula o progresso pela API pública; o módulo de IA e a tela continuam sem importar metas.
+    const GATE = 'integrations/ai/contextSources.ts';
+    const bad = edges.filter((e) => e.target && (inDir(e.target, GO) || e.target === 'db/goals.ts' || e.target === 'hooks/useGoals.ts') && inDir(e.from, 'modules/ai', 'integrations', 'features/assistant', 'pages/AIAssistantPage.tsx') && !(e.from === GATE && (e.target === 'db/goals.ts' || e.target === `${GO}/index.ts`)));
     expect(bad.map(fmt)).toEqual([]);
+    const gate = edges.filter((e) => e.from === GATE && e.target === 'db/goals.ts');
+    expect(gate.flatMap((e) => e.names)).toEqual(['listGoals']);
   });
 
   it('só src/db (gravações) e a restauração de backup tocam a tabela de metas', () => {
