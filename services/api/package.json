@@ -1,0 +1,12 @@
+{
+  "name": "irontrack-api",
+  "private": true,
+  "version": "0.1.0",
+  "description": "API do IronTrack (contas, sincronização, importação e IA). Node 22.18+ com TypeScript nativo; dependências no package.json da raiz.",
+  "type": "module",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "start": "node src/main.ts",
+    "migrate": "node scripts/migrate.ts"
+  }
+}

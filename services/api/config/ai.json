@@ -1,0 +1,38 @@
+{
+  "$comment": "Provedores e modelos da IA da API (formato do gateway, SEM segredos; `clients` fica vazio porque o acesso é pela sessão da conta). As chaves vêm só das variáveis do Railway indicadas em apiKeyEnv. Provedor habilitado sem chave aparece como indisponível. Antes de habilitar OpenAI ou Gemini, troque o ID pelo de um modelo atual na documentação oficial. Substitua o arquivo inteiro com AI_CONFIG_JSON (ou AI_CONFIG_PATH) sem editar o código.",
+  "enabled": true,
+  "clients": [],
+  "limits": {
+    "maxBodyBytes": 65536,
+    "maxMessages": 6,
+    "maxInputChars": 24000,
+    "maxOutputTokens": 1024,
+    "requestsPerMinute": 6,
+    "dailyTokenBudget": 20000,
+    "maxConcurrentPerClient": 1,
+    "maxConcurrentTotal": 4,
+    "upstreamTimeoutMs": 30000,
+    "maxUpstreamResponseBytes": 262144
+  },
+  "providers": {
+    "anthropic": {
+      "enabled": true,
+      "displayName": "Anthropic Claude",
+      "apiKeyEnv": "ANTHROPIC_API_KEY",
+      "apiVersion": "2023-06-01",
+      "models": [{ "id": "claude-haiku-5-5", "displayName": "Claude Haiku 5.5", "maxInputChars": 24000, "maxOutputTokens": 1024 }]
+    },
+    "openai": {
+      "enabled": false,
+      "displayName": "OpenAI",
+      "apiKeyEnv": "OPENAI_API_KEY",
+      "models": [{ "id": "SUBSTITUA-pelo-id-do-modelo", "displayName": "OpenAI (modelo escolhido)", "maxInputChars": 24000, "maxOutputTokens": 1024 }]
+    },
+    "gemini": {
+      "enabled": false,
+      "displayName": "Google Gemini",
+      "apiKeyEnv": "GEMINI_API_KEY",
+      "models": [{ "id": "SUBSTITUA-pelo-id-do-modelo", "displayName": "Gemini (modelo escolhido)", "maxInputChars": 24000, "maxOutputTokens": 1024 }]
+    }
+  }
+}

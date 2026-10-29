@@ -14,13 +14,14 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { authenticate, stillValid } from './auth.ts';
-import { isProviderId, validateConfig, type ConfigResult, type GatewayConfig, type ProviderId } from './config.ts';
+import { validateConfig, type ConfigResult, type GatewayConfig, type ProviderId } from './config.ts';
 import { GATEWAY_ERRORS, GatewayError, errorBody, isGatewayError, type GatewayErrorCode } from './errors.ts';
-import { MemoryUsageStore, estimateTokens, utcDay, type UsageStore } from './limits.ts';
+import { runGeneration } from './generation.ts';
+import { MemoryUsageStore, type UsageStore } from './limits.ts';
 import { GatewayMetrics, type LimitKind, type MetricsSnapshot } from './metrics.ts';
-import { PROTOCOL_VERSION, inputChars, parseGenerateRequest, type CatalogResponse, type GenerateResponse } from './protocol.ts';
+import { PROTOCOL_VERSION, parseGenerateRequest, type CatalogResponse, type GenerateResponse } from './protocol.ts';
 import { ADAPTERS } from './providers/index.ts';
-import { splitSystem, type FetchLike, type UpstreamAdapter } from './providers/types.ts';
+import type { FetchLike, UpstreamAdapter } from './providers/types.ts';
 
 /** Evento de log: só metadados. */
 export interface GatewayLogEvent {
@@ -112,25 +113,6 @@ function readBody(req: IncomingMessage, max: number, signal: AbortSignal): Promi
   });
 }
 
-/** Corre `p` mas termina assim que o sinal abortar (mesmo se o adaptador ignorar o sinal). */
-function raceAbort<T>(p: Promise<T>, signal: AbortSignal): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    if (signal.aborted) return reject(signal.reason);
-    const onAbort = () => reject(signal.reason);
-    signal.addEventListener('abort', onAbort, { once: true });
-    p.then(
-      (v) => {
-        signal.removeEventListener('abort', onAbort);
-        resolve(v);
-      },
-      (e) => {
-        signal.removeEventListener('abort', onAbort);
-        reject(e);
-      },
-    );
-  });
-}
-
 const parse = (raw: unknown): ConfigResult => (raw === undefined ? { ok: false, errors: ['(ausente)'] } : validateConfig(raw));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -147,7 +129,7 @@ export function createGateway(opts: GatewayOptions): Gateway {
   /** Requisições /v1/generate em andamento: credencial usada e o controle para interrompê-las. */
   const running = new Map<string, { keyId: string; tokenSha256: string; ctrl: AbortController }>();
   /** Chamadas a provedores em andamento, somando todos os titulares. */
-  let upstreamActive = 0;
+  const upstream = { active: 0 };
   let draining = false;
 
   /** Chaves configuradas: usadas só para chamar o provedor e para garantir que nunca saiam na resposta. */
@@ -177,108 +159,11 @@ export function createGateway(opts: GatewayOptions): Gateway {
       throw new GatewayError('request_invalid');
     }
     const body = parseGenerateRequest(json, L);
-    if (!isProviderId(body.provider) || !c.providers[body.provider]?.enabled) throw new GatewayError('provider_not_allowed');
-    const pid = body.provider;
-    const pcfg = c.providers[pid]!;
-    log.provider = pid;
-    const model = pcfg.models.find((m) => m.id === body.model);
-    if (!model) throw new GatewayError('model_not_allowed');
-    log.model = model.id;
-    const chars = inputChars(body.messages);
-    if (chars > Math.min(L.maxInputChars, model.maxInputChars)) throw new GatewayError('payload_too_large');
-    if (body.maxOutputTokens > Math.min(L.maxOutputTokens, model.maxOutputTokens)) throw new GatewayError('request_invalid');
-    const apiKey = secretOf(c, pid);
-    if (!apiKey) throw new GatewayError('provider_unavailable');
-
-    // Todos os limites são aplicados ANTES de qualquer chamada ao provedor pago.
-    if (!(await store.acquire(clientId, L.maxConcurrentPerClient))) {
-      log.limit = 'concurrency_client';
-      throw new GatewayError('rate_limited');
-    }
-    try {
-      if (upstreamActive >= L.maxConcurrentTotal) {
-        log.limit = 'concurrency_total';
-        throw new GatewayError('rate_limited');
-      }
-      upstreamActive++;
-      try {
-        const client = c.clients.find((x) => x.id === clientId)!;
-        const day = utcDay(now());
-        const reserved = estimateTokens(chars) + body.maxOutputTokens;
-        if (!(await store.reserve(clientId, day, reserved, client.dailyTokenBudget ?? L.dailyTokenBudget))) {
-          log.limit = 'daily_quota';
-          throw new GatewayError('quota_exceeded');
-        }
-        if (signal.aborted) {
-          await store.settle(clientId, day, reserved, 0);
-          throw signal.reason;
-        }
-        // Rastreia se a solicitação chegou a sair e o status devolvido, para acertar a reserva.
-        let dispatched = false;
-        let upstreamStatus: number | undefined;
-        const tracked: FetchLike = async (url, init) => {
-          if (init.signal.aborted) throw init.signal.reason;
-          dispatched = true;
-          const res = await fetchFn(url, init);
-          upstreamStatus = res.status;
-          return res;
-        };
-        const adapter = adapters[pid];
-        try {
-          const result = await raceAbort(
-            adapter.generate(
-              { model: model.id, ...splitSystem(body.messages), maxOutputTokens: body.maxOutputTokens },
-              { apiKey, fetch: tracked, signal, baseUrl: pcfg.baseUrl ?? adapter.defaultBaseUrl, maxResponseBytes: L.maxUpstreamResponseBytes, ...(pcfg.apiVersion ? { apiVersion: pcfg.apiVersion } : {}) },
-            ),
-            signal,
-          );
-          // Conferência final do formato devolvido pelo adaptador.
-          if (!result || typeof result.text !== 'string' || (result.finishReason !== 'stop' && result.finishReason !== 'length')) throw new GatewayError('invalid_response');
-          const maxChars = body.maxOutputTokens * 4;
-          const cut = result.text.length > maxChars;
-          const inTok = result.usage?.inputTokens ?? estimateTokens(chars);
-          const outTok = result.usage?.outputTokens ?? estimateTokens(Math.min(result.text.length, maxChars));
-          await store.settle(clientId, day, reserved, inTok + outTok);
-          log.inputTokens = inTok;
-          log.outputTokens = outTok;
-          log.usageSource = result.usage?.inputTokens !== undefined && result.usage?.outputTokens !== undefined ? 'reported' : 'estimated';
-          return {
-            provider: pid,
-            model: model.id,
-            output: { type: 'text', text: cut ? result.text.slice(0, maxChars) : result.text },
-            finishReason: cut ? 'length' : result.finishReason,
-            ...(result.usage ? { usage: { ...result.usage } } : {}),
-          };
-        } catch (e) {
-          // Acerto da reserva em falhas:
-          //  - a solicitação nem saiu (validação do adaptador, cancelamento antes do envio): devolve tudo;
-          //  - o provedor respondeu 2xx mas recusou/veio inválido e informou uso: cobra o uso informado;
-          //  - o provedor respondeu com erro HTTP (não cobra solicitações recusadas): devolve tudo;
-          //  - tempo limite, cancelamento ou queda de rede DEPOIS do envio: mantém a reserva (o provedor
-          //    pode ter gerado e cobrado a resposta inteira).
-          const usage = isGatewayError(e) ? e.usage : undefined;
-          let actual: number | null = null;
-          if (!dispatched) actual = 0;
-          else if (usage) {
-            actual = (usage.inputTokens ?? estimateTokens(chars)) + (usage.outputTokens ?? 0);
-            log.inputTokens = usage.inputTokens ?? estimateTokens(chars);
-            log.outputTokens = usage.outputTokens ?? 0;
-            log.usageSource = usage.inputTokens !== undefined && usage.outputTokens !== undefined ? 'reported' : 'estimated';
-          } else if (upstreamStatus !== undefined && (upstreamStatus < 200 || upstreamStatus >= 300)) actual = 0;
-          if (actual !== null) await store.settle(clientId, day, reserved, actual);
-          else {
-            log.inputTokens = estimateTokens(chars);
-            log.outputTokens = body.maxOutputTokens;
-            log.usageSource = 'estimated';
-          }
-          throw e;
-        }
-      } finally {
-        upstreamActive--;
-      }
-    } finally {
-      await store.release(clientId);
-    }
+    const client = c.clients.find((x) => x.id === clientId)!;
+    return runGeneration(
+      { store, adapters, fetch: fetchFn, now, upstream },
+      { config: c, body, clientId, dailyBudget: client.dailyTokenBudget ?? L.dailyTokenBudget, maxConcurrent: L.maxConcurrentPerClient, signal, apiKeyFor: (id) => secretOf(c, id), log },
+    );
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
