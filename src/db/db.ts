@@ -33,7 +33,11 @@ export class IronTrackDB extends Dexie {
   /** Gerador do ID do perfil (substituível nos testes para simular falhas). */
   protected newProfileId: () => string = () => generateProfileId();
 
-  constructor(name = 'irontrack') {
+  /**
+   * `extend` (P21): declara versões extras do esquema ANTES dos ganchos de dono abaixo. Declarar uma versão depois
+   * recria as tabelas do Dexie e os ganchos instalados nelas se perdem. Só o banco de conta (src/cloud/accountDb.ts) usa.
+   */
+  constructor(name = 'irontrack', extend?: (db: IronTrackDB) => void) {
     super(name);
     // Versões do esquema IndexedDB. Ao mudar a estrutura, adicione uma nova
     // versão com .upgrade() em vez de alterar as anteriores.
@@ -88,6 +92,7 @@ export class IronTrackDB extends Dexie {
     // opcional dentro da ficha, sem índice). O catálogo padrão é estático no código e não vai para o banco.
     // Detalhes em docs/BIBLIOTECA_EXERCICIOS.md §13.
     this.version(6).stores({ customExercises: 'id, profileId, updatedAt', exerciseFavorites: 'id, profileId, target' });
+    extend?.(this);
 
     // Proprietário dos registros novos e proteção contra troca silenciosa de dono.
     for (const t of [this.routines, this.sessions, this.bodyEntries, this.photos, this.goals, this.planEntries, this.calendarDecisions, this.customExercises, this.exerciseFavorites] as Table<{ profileId?: string }, string>[]) {
