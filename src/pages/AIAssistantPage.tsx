@@ -16,7 +16,7 @@ import { CATEGORY_HINT, CATEGORY_LABEL, MAX_QUESTION_CHARS } from '@/features/as
 import { useAssistant, type AssistantDeps } from '@/features/assistant/useAssistant';
 import { Conversation } from '@/features/assistant/Conversation';
 import { SharePreviewDialog } from '@/features/assistant/SharePreviewDialog';
-import { ConnectionStatus, GatewayPanel, ModeSelector, SetupSteps } from '@/features/assistant/RemoteSetup';
+import { ConnectionStatus, ModeSelector, RemoteConnect } from '@/features/assistant/RemoteSetup';
 
 export const DEMO_TITLE = 'Modo de demonstração — respostas simuladas';
 export const REMOTE_TITLE = 'Modo remoto — compartilhamento externo';
@@ -146,8 +146,7 @@ export default function AIAssistantPage({ deps }: { deps?: Partial<AssistantDeps
         <ConnectionStatus a={a} />
         <ModeSelector a={a} />
       </Card>
-      {remote && <SetupSteps a={a} onStart={() => inputRef.current?.focus()} />}
-      {remote && <GatewayPanel a={a} />}
+      {remote && <RemoteConnect a={a} onStart={() => inputRef.current?.focus()} />}
 
       <Conversation
         messages={a.messages}

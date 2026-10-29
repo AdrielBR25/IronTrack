@@ -4,24 +4,56 @@ Complementa [IA_ARQUITETURA.md](IA_ARQUITETURA.md) (§17–19), [IA_GATEWAY.md](
 [IA_HOMOLOGACAO.md](IA_HOMOLOGACAO.md). As regras de privacidade e consentimento **não mudaram**: cada pergunta remota
 continua passando pela prévia com o conteúdo exato e por uma autorização de uso único.
 
-## 1. Passo a passo de configuração (modo remoto)
+## 1. Conexão simplificada (modo remoto) — ajuste do Prompt 20
 
-Na tela `/assistente`, com **Remoto via gateway**, o cartão "Configurar" mostra os passos e o estado de cada um:
+Na tela `/assistente`, com **Remoto via gateway**, o fluxo é **Provedor → Obter chave ou autenticar → Conectar →
+Modelo → Conversar**, sem digitar endereço:
 
-1. **Modo**: Local (simulado + catálogo) ou Remoto via gateway.
-2. **Provedor** desejado (opcional): OpenAI (Responses API), Anthropic (Messages API) ou Google Gemini. Só os que o
-   gateway suporta. Se o gateway oferecer e houver chave no servidor, ele é escolhido sozinho depois de conectar; se
-   não oferecer, a tela avisa.
-3. **Endereço** do gateway (HTTPS, ou HTTP só em loopback para desenvolvimento).
-4. **Autenticação**: token do gateway (campo de senha, limpo após conectar, guardado só na memória). **Conectar**
-   consulta só o catálogo do gateway (`/v1/catalog`), sem enviar pergunta nem dados.
-5. **Testar conexão**: depois de conectado, refaz a consulta ao catálogo a qualquer momento e mostra o resultado
-   (provedores e modelos atualizados, ou o estado de erro).
-6. **Modelo**: escolhido da lista do catálogo, sem pré-seleção.
-7. **Confirmar**: resumo (provedor, modelo e gateway) e **Começar a conversar**, que leva ao campo de pergunta.
+1. **Provedor** (obrigatório antes de conectar), entre os três que o gateway sabe chamar
+   (`integrations/ai/providerPresets.ts`, mesmos IDs de `services/ai-gateway/src/config.ts`):
+
+   | Provedor | Página oficial de chaves | API oficial (usada só pelo gateway) | Variável no gateway |
+   | --- | --- | --- | --- |
+   | OpenAI | https://platform.openai.com/api-keys | https://api.openai.com/v1 | `OPENAI_API_KEY` |
+   | Anthropic / Claude | https://console.anthropic.com/settings/keys | https://api.anthropic.com | `ANTHROPIC_API_KEY` |
+   | Google Gemini | https://aistudio.google.com/app/apikey | https://generativelanguage.googleapis.com | `GEMINI_API_KEY` |
+
+2. **Obter chave de API**: link fixo para a página oficial (nova aba, `rel="noopener noreferrer"`,
+   `referrerpolicy="no-referrer"`, sem parâmetros; o teste de arquitetura trava a lista de URLs). Instruções curtas
+   explicam como gerar a chave e **onde colocá-la: no servidor seguro (variável acima), nunca no app**.
+3. **Token de acesso ao servidor do IronTrack**: o ÚNICO campo de credencial. Máscara, mostrar/ocultar, colar,
+   explicação do tipo esperado, validação (vazio, formato de 43+ caracteres base64url) e mensagens claras. Uma **chave
+   de provedor** colada aqui (`sk-…`, `sk-ant-…`, `AIza…`, reconhecida pelo formato) é recusada antes de qualquer
+   rede e o campo é limpo: chave de provedor e token do gateway não são intercambiáveis. Conectar pode ser
+   **cancelado**. O token fica só na memória (como antes).
+4. **Conectar** consulta só o catálogo (`GET /v1/models`) no endereço resolvido automaticamente (§1.1).
+5. **Modelo**: só os modelos que o catálogo do gateway lista para o provedor escolhido; nenhum ID é inventado e nada
+   é pré-selecionado. Provedor oferecido sem chave no servidor aparece como indisponível, com o seletor desativado e
+   sem opções; provedor não oferecido pelo servidor tem aviso próprio.
+6. **Começar a conversar** leva ao campo de pergunta. Cada pergunta continua com prévia e autorização de uso único.
+
+**Não existe cadastro de chave pessoal de provedor no app.** O prompt condicionava isso a um mecanismo seguro no
+backend (recebimento com consentimento, sem persistência insegura, sem exposição no frontend); ele **não foi
+implementado** nesta etapa, então o app não pede nem aceita chave de provedor. A chave é configurada pelo operador no
+gateway, como desde o P06.
+
+### 1.1 Endereço automático do servidor seguro (`integrations/ai/gatewayEndpoint.ts`)
+
+Ordem de resolução, sempre validada (`validateGatewayUrl`: HTTPS, ou HTTP só em loopback; só a origem, sem usuário,
+caminho ou parâmetros) e recusando os hosts das APIs dos provedores (o navegador nunca fala com o provedor):
+
+1. **Configurações avançadas** (recolhidas, no fim do cartão): origem salva neste aparelho em
+   `localStorage['irontrack.aiGateway.v1'] = {"v":1,"origin":"https://…"}`. Só a origem pública; nunca token ou chave.
+   "Esquecer endereço" apaga. Trocar o endereço desconecta. Fora do IndexedDB e do backup.
+2. **Configuração pública da publicação**: `VITE_AI_GATEWAY_URL` no build (um endereço, não um segredo). Para ligar,
+   acrescente ao passo "Build" de `.github/workflows/deploy.yml` `VITE_AI_GATEWAY_URL: ${{ vars.AI_GATEWAY_URL }}` e
+   crie a variável de repositório `AI_GATEWAY_URL`. **Hoje não está configurada.**
+3. Nenhum: a tela mostra "Para conectar uma IA real, é necessário configurar o servidor seguro do IronTrack.", o
+   estado **Servidor não configurado** e o botão **Configurar servidor** (abre o avançado). Nenhuma requisição.
 
 O IronTrack nunca recebe nem guarda chave de provedor: as chaves ficam só no gateway (variáveis do servidor). Não há
-`VITE_` com segredo, nada no bundle, nada em localStorage/IndexedDB/backup.
+`VITE_` com segredo, nada no bundle, token nunca em localStorage/IndexedDB/backup/URL/logs, e nada disso vai ao
+ContextBuilder.
 
 ## 2. Estados da conexão
 
@@ -31,16 +63,17 @@ O IronTrack nunca recebe nem guarda chave de provedor: as chaves ficam só no ga
 | --- | --- |
 | Local | Modo simulado/local. Nada sai do aparelho. |
 | Conectado | Gateway conectado e provedor disponível. |
-| Não configurado | Modo remoto sem gateway conectado. |
+| Servidor não configurado | Modo remoto sem endereço de gateway resolvido (ajuste P20). |
+| Não conectado | Endereço resolvido, mas ainda sem conectar. |
 | Falha de autenticação | Gateway recusou o token (`access_denied`); o token é esquecido. |
 | Gateway inacessível | Rede/endereço (`gateway_unreachable`), na conexão ou na última pergunta. |
-| Provedor indisponível | Provedor sem chave no servidor, falha, limite, bloqueio de conteúdo ou modelo não suportado. |
+| Provedor indisponível | Provedor sem chave no servidor, chave recusada, cota/faturamento (429 do provedor), falha, bloqueio de conteúdo ou modelo não suportado. |
 
 ## 3. Conversa
 
 - **Limpar conversa**: apaga as mensagens da memória (nada estava gravado).
 - **Cancelar**: interrompe a pergunta em andamento (o gateway aborta a chamada ao provedor).
-- **Desconectar**: esquece token e provedores remotos e volta ao estado não configurado.
+- **Desconectar**: esquece token e provedores remotos e volta ao formulário (o endereço resolvido continua).
 - **Sessão em memória**: conexão e conversa sobrevivem à navegação dentro do app (ex.: ir ao treino e voltar), para os
   atalhos fazerem sentido. Continua sem persistência: recarregar ou fechar o app apaga tudo, e após **30 min sem uso** o
   token e a conversa são esquecidos sozinhos (`features/assistant/assistantSession.ts`). Mudança em relação ao P06,
@@ -70,5 +103,8 @@ Funciona offline e no modo local.
 ## 7. O que não foi feito
 
 - O gateway **não foi publicado** e nenhuma infraestrutura paga foi criada. Para usar o modo remoto, é preciso rodar o
-  gateway (ver [IA_GATEWAY.md](IA_GATEWAY.md)) com as chaves no servidor.
+  gateway (ver [IA_GATEWAY.md](IA_GATEWAY.md)) com as chaves no servidor e informar o endereço (§1.1). A conexão com
+  provedores reais **não foi testada** (sem gateway publicado e sem chaves); os testes usam um gateway real local com
+  provedor simulado.
+- Sem cadastro de chave pessoal de provedor (§1).
 - Sem streaming, sem imagens, sem histórico multi-turno enviado ao provedor (cada pergunta vai sozinha, como antes).

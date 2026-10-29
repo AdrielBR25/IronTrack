@@ -262,6 +262,19 @@ describe('arquitetura do assistente de IA', () => {
   const UI_ASSISTANT = ['features/assistant', 'pages/AIAssistantPage.tsx'];
   const assistantFiles = files.map(rel).filter((f) => inDir(f, INTEGRATION, ...UI_ASSISTANT));
   const TRANSPORT = 'integrations/ai/gatewayTransport.ts';
+  // Ajuste do P20 (docs/IA_ARQUITETURA.md §ajuste P20): o endereço PÚBLICO do servidor seguro é resolvido sozinho. Só este
+  // arquivo lê a configuração pública da publicação e guarda, no aparelho, a origem escolhida nas configurações avançadas.
+  const ENDPOINT = 'integrations/ai/gatewayEndpoint.ts';
+  // Só este arquivo tem endereços: as páginas oficiais de chaves e as APIs oficiais (informativas) dos três provedores.
+  const PRESETS = 'integrations/ai/providerPresets.ts';
+  const OFFICIAL_URLS = [
+    'https://platform.openai.com/api-keys',
+    'https://api.openai.com/v1',
+    'https://console.anthropic.com/settings/keys',
+    'https://api.anthropic.com',
+    'https://aistudio.google.com/app/apikey',
+    'https://generativelanguage.googleapis.com',
+  ];
   const source = (f: string) => readFileSync(join(ROOT, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 
   it('os arquivos do assistente existem', () => {
@@ -287,7 +300,8 @@ describe('arquitetura do assistente de IA', () => {
   it('sem HTML arbitrário, execução de código, armazenamento do navegador ou rede no assistente', () => {
     const FORBIDDEN = /dangerouslySetInnerHTML|innerHTML|outerHTML|insertAdjacentHTML|\beval\s*\(|new\s+Function\s*\(|\b(localStorage|sessionStorage|indexedDB)\b|fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|document\.cookie|caches\.|console\.(log|info|debug|warn|error)/;
     // P06: a única exceção de rede é o transporte do gateway (verificado no teste seguinte).
-    expect(assistantFiles.filter((f) => f !== TRANSPORT && FORBIDDEN.test(source(f)))).toEqual([]);
+    const BUT_STORAGE = new RegExp(FORBIDDEN.source.replace('|\\b(localStorage|sessionStorage|indexedDB)\\b', ''));
+    expect(assistantFiles.filter((f) => f !== TRANSPORT && (f === ENDPOINT ? BUT_STORAGE : FORBIDDEN).test(source(f)))).toEqual([]);
     const NO_NETWORK = new RegExp(FORBIDDEN.source.replace('fetch\\s*\\(|', ''));
     expect(NO_NETWORK.test(source(TRANSPORT))).toBe(false);
   });
@@ -316,15 +330,30 @@ describe('arquitetura do assistente de IA', () => {
     expect(bad).toEqual([]);
   });
 
-  it('P06: o token de acesso e o endereço do gateway não são persistidos nem registrados', () => {
-    for (const f of assistantFiles) expect(source(f), f).not.toMatch(/\b(localStorage|sessionStorage|indexedDB|document\.cookie)\b|db\.\w+\.(put|add)/);
+  it('P06: o token de acesso não é persistido nem registrado; do gateway, só a ORIGEM pública fica no aparelho', () => {
+    for (const f of assistantFiles.filter((x) => x !== ENDPOINT)) expect(source(f), f).not.toMatch(/\b(localStorage|sessionStorage|indexedDB|document\.cookie)\b|db\.\w+\.(put|add)/);
+    // Ajuste do P20: o arquivo do endereço só usa localStorage, com uma chave fixa, e grava apenas { v, origin } validado.
+    const ep = source(ENDPOINT);
+    expect(ep).not.toMatch(/\b(sessionStorage|indexedDB|document\.cookie)\b|token|apiKey|api_key|Bearer/i);
+    expect(ep.match(/localStorage\?\.(\w+)\(/g)).toEqual(['localStorage?.getItem(', 'localStorage?.setItem(', 'localStorage?.removeItem(']);
+    expect(ep).toMatch(/setItem\(GATEWAY_ENDPOINT_KEY, JSON\.stringify\(\{ v: 1, origin: c\.origin \}\)\)/);
   });
 
   it('sem endpoints, variáveis de ambiente ou credenciais no assistente', () => {
     // O transporte monta o cabeçalho `Bearer ${token}` com o token digitado (nenhum valor fixo).
     const code = (f: string) => (f === TRANSPORT ? source(f).replace('`Bearer ${token}`', '') : source(f));
-    const bad = assistantFiles.filter((f) => /https?:\/\/|import\.meta\.env|VITE_|process\.env|api[_-]?key\s*[:=]|Bearer\s|sk-[A-Za-z0-9]{8,}|AIza[0-9A-Za-z_-]{10,}/i.test(code(f)));
+    // Ajuste do P20: só os endereços oficiais fixos (presets) e só a variável pública do endereço do gateway (endpoint).
+    const allowed = (f: string) => {
+      let c = code(f);
+      if (f === PRESETS) for (const u of OFFICIAL_URLS) c = c.split(`'${u}'`).join("''");
+      if (f === ENDPOINT) c = c.replace('import.meta.env.VITE_AI_GATEWAY_URL', '');
+      return c;
+    };
+    const bad = assistantFiles.filter((f) => /https?:\/\/|import\.meta\.env|VITE_|process\.env|api[_-]?key\s*[:=]|Bearer\s|sk-[A-Za-z0-9]{8,}|AIza[0-9A-Za-z_-]{10,}/i.test(allowed(f)));
     expect(bad).toEqual([]);
+    // Os links oficiais são exatamente os pedidos (sem parâmetros) e nenhum outro.
+    const urls = source(PRESETS).match(/https?:\/\/[^'"\s]+/g) ?? [];
+    expect([...new Set(urls)].sort()).toEqual([...OFFICIAL_URLS].sort());
   });
 
   it('a rota do assistente é carregada sob demanda pela tela, sem substituir outras', () => {

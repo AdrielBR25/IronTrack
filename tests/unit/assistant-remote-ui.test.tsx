@@ -9,6 +9,7 @@ import { MemoryRouter } from 'react-router-dom';
 import AIAssistantPage from '@/pages/AIAssistantPage';
 import { DB_SCHEMA_VERSION, IronTrackDB, db, setDb } from '@/db/db';
 import { createAssistantService, type AssistantComposition } from '@/integrations/ai/assistantService';
+import { forgetGatewayOrigin, saveGatewayOrigin } from '@/integrations/ai/gatewayEndpoint';
 import { addDays, fromISODate, todayISO } from '@/lib/dates';
 import { entry, session, settings } from './fixtures';
 
@@ -106,16 +107,17 @@ async function click(el: HTMLElement | null) {
   });
 }
 
-async function connect() {
+/** Ajuste P20: sem digitar host. Provedor → token → Conectar (o endereço vem das configurações). */
+async function connect(provider = 'anthropic') {
   await click($('mode-remote'));
-  await setValue($('gateway-url'), GW);
+  await click($(`provider-${provider}`));
   await setValue($('gateway-token'), TOKEN);
   await click($('gateway-connect'));
-  await waitFor(() => $('gateway-origin'));
+  await waitFor(() => $('gateway-connected'));
 }
 
 async function chooseRemote(provider = 'anthropic', model = 'modelo-c') {
-  await setValue($('ai-provider'), provider);
+  if (!($(`provider-${provider}`) as HTMLInputElement).checked) await click($(`provider-${provider}`));
   await setValue($('ai-remote-model'), model);
 }
 
@@ -128,6 +130,7 @@ async function openPreview(q = 'Como foi minha semana?') {
 const generates = () => requests.filter((r) => r.url.endsWith('/v1/generate'));
 
 beforeEach(async () => {
+  saveGatewayOrigin(GW);
   setDb(new IronTrackDB(`assistant-remote-${++n}`));
   await db.open();
   requests = [];
@@ -141,6 +144,7 @@ afterEach(async () => {
   container?.remove();
   document.body.innerHTML = '';
   vi.restoreAllMocks();
+  forgetGatewayOrigin();
 });
 
 describe('assistente remoto: modo e seleção explícita', () => {
@@ -167,22 +171,29 @@ describe('assistente remoto: modo e seleção explícita', () => {
     expect(requests).toHaveLength(0);
   });
 
-  it('conectar busca só o catálogo, limpa o token e não escolhe provedor nem modelo', async () => {
+  it('conectar busca só o catálogo, limpa o token, usa o provedor escolhido e não escolhe modelo', async () => {
     await mount();
-    await connect();
+    await click($('mode-remote'));
+    // Sem provedor escolhido, não conecta.
+    expect(($('gateway-connect') as HTMLButtonElement).disabled).toBe(true);
+    await connect('gemini');
     expect(requests).toEqual([{ url: `${GW}/v1/models`, method: 'GET', auth: `Bearer ${TOKEN}` }]);
-    expect(($('gateway-token') as HTMLInputElement | null)?.value ?? '').toBe('');
-    expect(($('ai-provider') as HTMLSelectElement).value).toBe('');
+    expect($('gateway-token')).toBeNull();
     expect(($('ai-remote-model') as HTMLSelectElement).value).toBe('');
-    const gem = [...($('ai-provider') as HTMLSelectElement).options].find((o) => o.value === 'gemini')!;
-    expect(gem.disabled).toBe(true);
-    expect(gem.textContent).toContain('indisponível');
+    // Gemini oferecido, mas sem chave no servidor: modelos não aparecem como opção funcional.
+    expect($('provider-no-key')?.textContent).toContain('ainda não tem chave');
+    expect(($('ai-remote-model') as HTMLSelectElement).disabled).toBe(true);
+    expect(($('ai-remote-model') as HTMLSelectElement).options).toHaveLength(1);
+    // OpenAI não oferecido por este servidor.
+    await click($('provider-openai'));
+    expect($('provider-missing')?.textContent).toContain('não oferece OpenAI');
     expect(document.body.textContent).not.toContain(TOKEN);
 
     await setValue($('ai-question'), 'Pergunta');
     await click($('ai-send'));
     expect(await noticeText()).toContain('Escolha um provedor');
-    await setValue($('ai-provider'), 'anthropic');
+    await click($('provider-anthropic'));
+    expect(($('ai-remote-model') as HTMLSelectElement).disabled).toBe(false);
     await click($('ai-send'));
     expect(await noticeText()).toContain('Escolha um modelo');
     expect($('remote-destination')?.textContent).toContain(`${GW} → Anthropic Claude`);
@@ -301,11 +312,11 @@ describe('assistente remoto: indisponibilidade e privacidade', () => {
     catalogResponse = async () => Promise.reject(new TypeError('Failed to fetch'));
     await mount();
     await click($('mode-remote'));
-    await setValue($('gateway-url'), GW);
+    await click($('provider-anthropic'));
     await setValue($('gateway-token'), TOKEN);
     await click($('gateway-connect'));
     const e = await waitFor(() => $('gateway-error')?.textContent);
-    expect(e).toContain('Não foi possível contatar o gateway');
+    expect(e).toContain('Não foi possível contatar o servidor seguro');
     await click($('mode-simulated'));
     await openPreview();
     await click($('preview-authorize'));
@@ -316,7 +327,7 @@ describe('assistente remoto: indisponibilidade e privacidade', () => {
     catalogResponse = async () => json(401, { error: { code: 'unauthorized', message: 'detalhe interno 42' } });
     await mount();
     await click($('mode-remote'));
-    await setValue($('gateway-url'), GW);
+    await click($('provider-anthropic'));
     await setValue($('gateway-token'), TOKEN);
     await click($('gateway-connect'));
     const e = await waitFor(() => $('gateway-error')?.textContent);
@@ -324,13 +335,16 @@ describe('assistente remoto: indisponibilidade e privacidade', () => {
     expect(document.body.textContent).not.toContain('detalhe interno 42');
   });
 
-  it('endereço HTTP não local é recusado sem nenhuma requisição', async () => {
+  it('endereço HTTP não local (ou da API do provedor) é recusado nas configurações avançadas, sem nenhuma requisição', async () => {
     await mount();
     await click($('mode-remote'));
     await setValue($('gateway-url'), 'http://gateway.exemplo');
-    await setValue($('gateway-token'), TOKEN);
-    await click($('gateway-connect'));
-    await waitFor(() => $('gateway-error')?.textContent);
+    await click($('gateway-url-save'));
+    expect($('gateway-url-message')?.textContent).toContain('HTTPS');
+    await setValue($('gateway-url'), 'https://api.openai.com');
+    await click($('gateway-url-save'));
+    expect($('gateway-url-message')?.textContent).toContain('API do provedor');
+    expect($('gateway-origin')?.textContent).toBe(GW);
     expect(requests).toHaveLength(0);
   });
 
@@ -392,6 +406,7 @@ describe('assistente remoto: credencial revogada e falhas operacionais (P07)', (
     expect(generates()).toHaveLength(1);
     // O gateway foi desconectado: provedores remotos removidos e formulário de conexão de volta.
     await waitFor(() => $('gateway-connect'));
+    expect($('gateway-connected')).toBeNull();
     expect($('gateway-error')?.textContent).toContain('esquecido nesta página');
     expect(comp.service.listProviders().map((p) => p.id)).toEqual(['mock']);
     expect(($('gateway-token') as HTMLInputElement).value).toBe('');
@@ -417,6 +432,6 @@ describe('assistente remoto: credencial revogada e falhas operacionais (P07)', (
     await waitFor(() => document.querySelectorAll('[data-testid="chat-user"][data-status="failed"]').length === 2);
     expect(generates()).toHaveLength(2);
     // Continua conectado: só o token recusado desconecta.
-    expect($('gateway-origin')).not.toBeNull();
+    expect($('gateway-connected')).not.toBeNull();
   });
 });
