@@ -25,7 +25,7 @@ export const AI_ERROR_MESSAGES: Record<AIErrorCode, string> = {
   provider_not_found: 'O provedor de IA escolhido não está disponível neste aparelho.',
   provider_duplicate: 'Já existe um provedor de IA registrado com este identificador.',
   provider_invalid: 'A configuração do provedor de IA é inválida.',
-  provider_unavailable: 'O provedor de IA escolhido não pode ser usado agora.',
+  provider_unavailable: 'O provedor de IA escolhido não pode ser usado agora (sem chave no servidor, chave recusada ou sem permissão).',
   model_unsupported: 'O modelo escolhido não é oferecido por este provedor.',
   capability_unsupported: 'O modelo escolhido não suporta este tipo de solicitação.',
   permission_denied: 'Nenhum dado foi enviado: falta a sua autorização para esta solicitação.',
@@ -35,10 +35,10 @@ export const AI_ERROR_MESSAGES: Record<AIErrorCode, string> = {
   timeout: 'A IA demorou demais para responder e a solicitação foi encerrada.',
   provider_failure: 'O provedor de IA falhou ao responder. Nenhuma nova tentativa foi feita.',
   invalid_response: 'O provedor de IA devolveu uma resposta inválida.',
-  access_denied: 'O gateway de IA recusou o acesso: o token pode estar errado, revogado ou expirado. Confira o endereço e o token de acesso.',
-  rate_limited: 'Muitas solicitações em pouco tempo. Aguarde um minuto e tente de novo.',
+  access_denied: 'O servidor seguro do IronTrack recusou o acesso: o token pode estar errado, revogado ou expirado. Confira o token de acesso.',
+  rate_limited: 'Limite de uso atingido (muitas solicitações, cota ou faturamento da conta no provedor). Aguarde um pouco e tente de novo.',
   quota_exceeded: 'A cota de uso de IA desta credencial acabou por hoje.',
-  gateway_unreachable: 'Não foi possível contatar o gateway de IA. Verifique a conexão e o endereço.',
+  gateway_unreachable: 'Não foi possível contatar o servidor seguro do IronTrack (gateway de IA). Verifique a internet e o endereço.',
   content_blocked: 'O provedor de IA recusou ou bloqueou esta resposta.',
 };
 
