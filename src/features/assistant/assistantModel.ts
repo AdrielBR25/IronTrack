@@ -106,22 +106,24 @@ export interface ChatMessage {
 // ---------------------------------------------------------------- P20: estado da conexão
 
 /** Estados mostrados ao usuário (P20 §IA): cada um com texto próprio, nunca um "erro" genérico. */
-export type AssistantStatus = 'local' | 'connected' | 'unavailable' | 'auth_failure' | 'gateway_unreachable' | 'provider_unavailable';
+export type AssistantStatus = 'local' | 'connected' | 'no_gateway' | 'unavailable' | 'auth_failure' | 'gateway_unreachable' | 'provider_unavailable';
 
 export const STATUS_INFO: Record<AssistantStatus, { label: string; text: string }> = {
   local: { label: 'Local', text: 'Modo local: respostas simuladas e do catálogo, geradas no aparelho. Nada sai do aparelho.' },
-  connected: { label: 'Conectado', text: 'Gateway conectado. Cada pergunta ainda passa pela prévia e pela sua autorização.' },
-  unavailable: { label: 'Não configurado', text: 'Modo remoto sem gateway conectado. Siga os passos abaixo ou volte ao modo local.' },
-  auth_failure: { label: 'Falha de autenticação', text: 'O gateway recusou o token (errado, revogado ou expirado). O token foi esquecido; informe um válido.' },
-  gateway_unreachable: { label: 'Gateway inacessível', text: 'Não foi possível contatar o gateway. Confira a internet e o endereço.' },
-  provider_unavailable: { label: 'Provedor indisponível', text: 'O gateway respondeu, mas o provedor escolhido não pode atender agora (sem chave no servidor, falha, limite ou bloqueio).' },
+  connected: { label: 'Conectado', text: 'Servidor seguro conectado. Cada pergunta ainda passa pela prévia e pela sua autorização.' },
+  no_gateway: { label: 'Servidor não configurado', text: 'O modo remoto precisa do servidor seguro do IronTrack. O modo local continua funcionando.' },
+  unavailable: { label: 'Não conectado', text: 'Escolha o provedor, informe o token de acesso ao servidor seguro do IronTrack e conecte. Ou volte ao modo local.' },
+  auth_failure: { label: 'Falha de autenticação', text: 'O servidor seguro recusou o token (errado, revogado ou expirado). O token foi esquecido; informe um válido.' },
+  gateway_unreachable: { label: 'Servidor inacessível', text: 'Não foi possível contatar o servidor seguro do IronTrack. Confira a internet ou o endereço nas configurações avançadas.' },
+  provider_unavailable: { label: 'Provedor indisponível', text: 'O servidor respondeu, mas o provedor escolhido não pode atender agora (sem chave no servidor, chave recusada, cota, faturamento, limite ou falha).' },
 };
 
 const PROVIDER_CODES: readonly string[] = ['provider_unavailable', 'provider_failure', 'invalid_response', 'content_blocked', 'rate_limited', 'quota_exceeded', 'timeout', 'model_unsupported'];
 
 /** Estado da conexão a partir do modo, do gateway e da última falha de execução. Puro. */
-export function assistantStatus(i: { mode: 'simulated' | 'remote'; gatewayStatus: 'disconnected' | 'connecting' | 'connected' | 'error'; gatewayErrorCode?: string; providerAvailable?: boolean | null; lastRunErrorCode?: string | null }): AssistantStatus {
+export function assistantStatus(i: { mode: 'simulated' | 'remote'; hasEndpoint?: boolean; gatewayStatus: 'disconnected' | 'connecting' | 'connected' | 'error'; gatewayErrorCode?: string; providerAvailable?: boolean | null; lastRunErrorCode?: string | null }): AssistantStatus {
   if (i.mode === 'simulated') return 'local';
+  if (i.gatewayStatus !== 'connected' && (i.hasEndpoint === false || i.gatewayErrorCode === 'no_gateway')) return 'no_gateway';
   if (i.gatewayStatus === 'error') return i.gatewayErrorCode === 'access_denied' ? 'auth_failure' : i.gatewayErrorCode === 'gateway_unreachable' ? 'gateway_unreachable' : 'unavailable';
   if (i.gatewayStatus !== 'connected') return 'unavailable';
   if (i.providerAvailable === false) return 'provider_unavailable';

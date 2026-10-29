@@ -4,8 +4,10 @@
 // Nada é executado antes da autorização. A conversa vive só na memória do componente.
 // A prévia perde a validade quando a pergunta, as categorias, o modelo ou o provedor mudam,
 // quando os registros usados mudam (inclusive em outra aba) ou quando expira.
-// P06: o modo simulado é o padrão. O modo remoto exige conectar um gateway (endereço + token, só na
-// memória) e escolher provedor e modelo explicitamente; nada é selecionado automaticamente.
+// P06: o modo simulado é o padrão. O modo remoto exige conectar um gateway (token só na memória) e escolher provedor
+// e modelo explicitamente; nada é selecionado automaticamente.
+// Ajuste do P20: o endereço do gateway é resolvido sozinho (gatewayEndpoint.ts); a pessoa escolhe o provedor, informa
+// só o token de acesso ao gateway e escolhe um modelo do catálogo dele. Chave de provedor nunca passa pelo app.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_CONSENT_TTL_MS, createConsent, isAIError, type AIContextSources, type PreparedAIRequest } from '@/modules/ai';
 import { ASSISTANT_TIMEOUT_MS, REMOTE_TIMEOUT_MS, createAssistantService, type AssistantComposition, type DemoScenario, type RemoteProviderInfo } from '@/integrations/ai/assistantService';
@@ -13,6 +15,7 @@ import { ASSISTANT_CATEGORIES, contextFingerprint, loadContextSources, watchCont
 import { CATEGORY_LABEL, assistantStatus, friendlyError, purposeFor, validateQuestion, type ChatMessage } from './assistantModel';
 import { loadSnapshot, saveSnapshot, sessionComposition, touchAssistantSession } from './assistantSession';
 import { localAnswer, type LocalExercise } from './localAnswers';
+import { resolveGatewayEndpoint, useGatewayEndpoint } from '@/integrations/ai/gatewayEndpoint';
 
 export interface AssistantDeps {
   composition: AssistantComposition;
@@ -94,6 +97,9 @@ export type AssistantPhase = 'idle' | 'preparing' | 'preview' | 'running';
 /** Simulado: nada sai do aparelho (padrão). Remoto: dados autorizados vão ao gateway e ao provedor. */
 export type AssistantMode = 'simulated' | 'remote';
 
+/** Sem endereço de gateway resolvido (nem nas configurações avançadas nem na publicação). */
+export const NO_GATEWAY_MESSAGE = 'Para conectar uma IA real, é necessário configurar o servidor seguro do IronTrack.';
+
 /** Mostrado quando o gateway recusa o token no meio do uso: o token é esquecido nesta página. */
 export const TOKEN_REJECTED_MESSAGE = 'O gateway recusou o token (errado, revogado ou expirado) e ele foi esquecido nesta página. Conecte de novo com um token válido.';
 
@@ -115,7 +121,8 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
   const simulated = composition.providers[0];
   // P20: retoma a sessão da memória do app (navegação interna), se houver e ainda for da mesma composição.
   const [snap] = useState(() => (deps.persist ? loadSnapshot() : null));
-  const restoredGateway = snap && snap.gateway.status === 'connected' && composition.service.listProviders().some((p) => snap.gateway.providers.some((g) => g.id === p.id)) ? (snap.gateway as GatewayState) : null;
+  // Ajuste P20: só retoma a conexão se o endereço resolvido ainda for o mesmo (trocar o servidor exige conectar de novo).
+  const restoredGateway = snap && snap.gateway.status === 'connected' && snap.gateway.origin === resolveGatewayEndpoint()?.origin && composition.service.listProviders().some((p) => snap.gateway.providers.some((g) => g.id === p.id)) ? (snap.gateway as GatewayState) : null;
 
   const [messages, setMessages] = useState<ChatMessage[]>(() => snap?.messages ?? []);
   const [draft, setDraftState] = useState('');
@@ -126,7 +133,8 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
   const [modelId, setModelState] = useState(() => (snap ? (snap.mode === 'remote' ? (restoredGateway ? snap.modelId : '') : snap.modelId) : (simulated?.models[0]?.id ?? '')));
   const [lastRunError, setLastRunError] = useState<string | null>(null);
   /** P20: provedor escolhido no passo a passo antes de conectar (confirmado depois, se o gateway o oferecer). */
-  const [wantedProvider, setWantedProvider] = useState<string>('');
+  const [wantedProvider, setWantedProvider] = useState<string>(() => (snap?.mode === 'remote' && restoredGateway ? snap.providerId : ''));
+  const endpoint = useGatewayEndpoint();
   const wantedRef = useRef('');
   wantedRef.current = wantedProvider;
   /** "Perguntar à IA mesmo assim": a próxima pergunta não usa a resposta local. */
@@ -277,10 +285,36 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
     [invalidate],
   );
 
-  /** Conecta ao gateway por ação do usuário. Só o token vai junto; nenhum dado pessoal. */
+  /**
+   * Escolha explícita do provedor no passo a passo (antes ou depois de conectar). Conectado, vale se o gateway o
+   * oferecer; o modelo volta a ficar sem escolha.
+   */
+  const chooseProvider = useCallback(
+    (id: string) => {
+      setWantedProvider(id);
+      setProviderState(gateway.status === 'connected' && gateway.providers.some((p) => p.id === id) ? id : '');
+      setModelState('');
+      setNotice(null);
+      setLastRunError(null);
+      invalidate();
+    },
+    [gateway, invalidate],
+  );
+
+  /**
+   * Conecta ao gateway por ação do usuário, no endereço resolvido automaticamente. Só o token vai junto; nenhum dado
+   * pessoal. Sem endereço configurado, não faz nenhuma requisição.
+   */
   const connectGateway = useCallback(
-    async (url: string, token: string): Promise<boolean> => {
+    async (token: string): Promise<boolean> => {
       connectRef.current?.abort();
+      const ep = resolveGatewayEndpoint();
+      if (!ep) {
+        connectRef.current = null;
+        setGateway({ status: 'error', providers: [], error: NO_GATEWAY_MESSAGE, errorCode: 'no_gateway' });
+        return false;
+      }
+      const url = ep.origin;
       const ctrl = new AbortController();
       connectRef.current = ctrl;
       invalidate();
@@ -291,8 +325,8 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
         const conn = await composition.connectGateway({ url, token }, ctrl.signal);
         if (!mountedRef.current || connectRef.current !== ctrl) return false;
         setGateway({ status: 'connected', origin: conn.origin, providers: conn.providers });
-        // A escolha explícita do passo "Provedor" vale se o gateway o oferecer e estiver configurado lá.
-        const wanted = conn.providers.find((p) => p.id === wantedRef.current && p.available);
+        // A escolha explícita do passo "Provedor" vale se o gateway o oferecer (sem chave lá, aparece como indisponível).
+        const wanted = conn.providers.find((p) => p.id === wantedRef.current);
         if (wanted) setProviderState(wanted.id);
         return true;
       } catch (e) {
@@ -306,6 +340,15 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
     },
     [composition, invalidate],
   );
+
+  /** Cancela uma conexão em andamento (nada é guardado; o token digitado continua só no campo). */
+  const cancelConnect = useCallback(() => {
+    if (!connectRef.current) return;
+    connectRef.current.abort();
+    connectRef.current = null;
+    composition.disconnectGateway();
+    setGateway({ status: 'disconnected', providers: [] });
+  }, [composition]);
 
   /** Esquece o gateway e o token. Volta a não haver provedor remoto. */
   const disconnectGateway = useCallback(() => {
@@ -547,14 +590,17 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
     [invalidate],
   );
 
-  const status = assistantStatus({ mode, gatewayStatus: gateway.status, gatewayErrorCode: gateway.errorCode, providerAvailable: remoteInfo ? remoteInfo.available : null, lastRunErrorCode: lastRunError });
+  const status = assistantStatus({ mode, hasEndpoint: !!endpoint, gatewayStatus: gateway.status, gatewayErrorCode: gateway.errorCode, providerAvailable: remoteInfo ? remoteInfo.available : null, lastRunErrorCode: lastRunError });
 
   return {
     mode,
     setMode,
     gateway,
+    endpoint,
     connectGateway,
+    cancelConnect,
     disconnectGateway,
+    chooseProvider,
     provider,
     remoteInfo,
     providerId,
