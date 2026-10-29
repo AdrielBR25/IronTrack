@@ -79,7 +79,13 @@ function loadAiConfig(env: Env): { config: GatewayConfig | null; errors: string[
     return { config: null, errors: [env.AI_CONFIG_JSON ? 'AI_CONFIG_JSON (JSON inválido)' : 'AI_CONFIG_PATH (arquivo ausente ou JSON inválido)'] };
   }
   const r = validateConfig(raw);
-  return r.ok ? { config: r.config, errors: [] } : { config: null, errors: r.errors };
+  if (!r.ok) return { config: null, errors: r.errors };
+  // Em produção, provedor só por HTTPS (um endereço http só serve para o provedor simulado dos testes, em loopback).
+  if (env.NODE_ENV === 'production') {
+    const insecure = Object.entries(r.config.providers).filter(([, p]) => p?.baseUrl && !p.baseUrl.startsWith('https://'));
+    if (insecure.length) return { config: null, errors: insecure.map(([id]) => `providers.${id}.baseUrl (produção exige https)`) };
+  }
+  return { config: r.config, errors: [] };
 }
 
 export function loadConfig(env: Env = process.env): ApiConfig {

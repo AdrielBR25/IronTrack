@@ -77,4 +77,10 @@ describe('configuração da API', () => {
     expect(deviceLabel('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1')).toBe('Safari · iOS');
     expect(deviceLabel(undefined)).toBe('Navegador · Outro sistema');
   });
+
+  it('IA: em produção, provedor só por HTTPS (endereço http fica para o simulado dos testes)', () => {
+    const ai = JSON.stringify({ enabled: true, clients: [], providers: { anthropic: { enabled: true, displayName: 'A', apiKeyEnv: 'ANTHROPIC_API_KEY', apiVersion: '2023-06-01', baseUrl: 'http://127.0.0.1:9', models: [{ id: 'm', displayName: 'M', maxInputChars: 100, maxOutputTokens: 10 }] } } });
+    expect(loadConfig({ ...BASE, AI_CONFIG_JSON: ai }).ai.errors).toEqual(['providers.anthropic.baseUrl (produção exige https)']);
+    expect(loadConfig({ ...BASE, NODE_ENV: 'test', API_TEST_MODE: '1', AI_CONFIG_JSON: ai }).ai.errors).toEqual([]);
+  });
 });
