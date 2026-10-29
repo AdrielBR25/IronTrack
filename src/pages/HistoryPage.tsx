@@ -1,11 +1,14 @@
 import { Link } from 'react-router-dom';
 import { useMemo, useState } from 'react';
-import { ChevronRight, Clock, History, Layers, Medal, Weight } from 'lucide-react';
+import { Clock, History, Layers, Medal, Pencil, Play, Weight } from 'lucide-react';
 import { PageHeader } from '@/components/AppLayout';
 import { Card } from '@/components/ui/card';
 import { useCompletedSessions } from '@/hooks/data';
 import { useUnits } from '@/hooks/useUnits';
-import { sessionVolume, validSetCount } from '@/modules/training';
+import { recordedDurationSec, sessionVolume, validSetCount } from '@/modules/training';
+import type { WorkoutSession } from '@/lib/types';
+import { ResumeDialog } from '@/features/workout/ResumeDialog';
+import { Button } from '@/components/ui/button';
 import { cn, fmtDuration } from '@/lib/utils';
 import { fmtTime } from '@/lib/dates';
 
@@ -13,6 +16,7 @@ export default function HistoryPage() {
   const sessions = useCompletedSessions();
   const { fmtVol } = useUnits();
   const [filter, setFilter] = useState<string>('all');
+  const [resuming, setResuming] = useState<WorkoutSession | null>(null);
   const labels = useMemo(() => [...new Set((sessions ?? []).map((s) => s.workoutLabel))].sort(), [sessions]);
   const groups = useMemo(() => {
     const list = [...(sessions ?? [])].reverse().filter((s) => filter === 'all' || s.workoutLabel === filter);
@@ -67,9 +71,9 @@ export default function HistoryPage() {
           {list.map((s) => {
             const d = new Date(s.startedAt);
             return (
-              <Link key={s.id} to={`/historico/${s.id}`} className="block" data-testid="history-item">
-                <Card className="flex items-center gap-3 p-3 transition-colors hover:bg-accent/40">
-                  <div className="flex w-12 shrink-0 flex-col items-center">
+              <Card key={s.id} className="flex items-center gap-1 p-1.5 pl-3 transition-colors hover:bg-accent/40">
+                <Link to={`/historico/${s.id}`} className="flex min-w-0 flex-1 items-center gap-3 py-1.5" data-testid="history-item">
+                  <div className="flex w-10 shrink-0 flex-col items-center">
                     <span className="font-display text-xl font-bold tabular">{d.getDate()}</span>
                     <span className="text-[10px] uppercase text-muted-foreground">{new Intl.DateTimeFormat('pt-BR', { weekday: 'short' }).format(d).replace('.', '')}</span>
                   </div>
@@ -81,7 +85,7 @@ export default function HistoryPage() {
                       <span>{fmtTime(s.startedAt)}</span>
                       <span className="flex items-center gap-1">
                         <Clock className="h-3 w-3" />
-                        {fmtDuration(s.durationSec ?? 0)}
+                        {fmtDuration(recordedDurationSec(s))}
                       </span>
                       <span className="flex items-center gap-1">
                         <Weight className="h-3 w-3" />
@@ -91,15 +95,27 @@ export default function HistoryPage() {
                         <Layers className="h-3 w-3" />
                         {validSetCount(s)} séries
                       </span>
+                      {(s.revisions?.length ?? 0) > 0 && <span data-testid="history-edited">editado</span>}
                     </p>
                   </div>
-                  <ChevronRight className="h-5 w-5 text-muted-foreground" />
-                </Card>
-              </Link>
+                </Link>
+                <Link
+                  to={`/historico/${s.id}/editar`}
+                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label={`Editar treino ${s.workoutLabel} de ${fmtTime(s.startedAt)}`}
+                  data-testid="history-edit"
+                >
+                  <Pencil className="h-4 w-4" />
+                </Link>
+                <Button size="icon" variant="ghost" className="shrink-0" aria-label={`Continuar treino ${s.workoutLabel} de ${fmtTime(s.startedAt)}`} onClick={() => setResuming(s)} data-testid="history-resume">
+                  <Play />
+                </Button>
+              </Card>
             );
           })}
         </section>
       ))}
+      {resuming && <ResumeDialog base={resuming} open onOpenChange={(o) => !o && setResuming(null)} />}
     </div>
   );
 }

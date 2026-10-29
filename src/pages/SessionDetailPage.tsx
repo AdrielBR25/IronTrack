@@ -1,8 +1,10 @@
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, LineChart, Trash2, Trophy } from 'lucide-react';
+import { ArrowLeft, History as HistoryIcon, LineChart, Pencil, Play, RotateCcw, Trash2, Trophy } from 'lucide-react';
 import { toast } from 'sonner';
 import { deleteSession, updateSessionNotes } from '@/db/repo';
+import { conflictMessage, restoreSessionRevision } from '@/db/sessionEdits';
+import { ResumeDialog } from '@/features/workout/ResumeDialog';
 import { useCompletedSessions, useSession } from '@/hooks/data';
 import { useUnits } from '@/hooks/useUnits';
 import { Button } from '@/components/ui/button';
@@ -10,7 +12,7 @@ import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { ConfirmDialog } from '@/components/ui/confirm';
-import { MODALITY_LABEL, SIDE_LABEL, exerciseMeasures, exerciseVolume, fmtDurationSec, isCompletedWorkSet, sessionPRs, sessionVolume, validSetCount } from '@/modules/training';
+import { MODALITY_LABEL, SIDE_LABEL, recordedDurationSec, exerciseMeasures, exerciseVolume, fmtDurationSec, isCompletedWorkSet, sessionPRs, sessionVolume, validSetCount } from '@/modules/training';
 import type { SessionExercise, SessionSet } from '@/lib/types';
 import { distanceUnitOf, fmtDistance, planSummary } from '@/features/workout/modelFormat';
 import { identityPath, primaryKeyOf } from '@/modules/performance';
@@ -45,6 +47,8 @@ export default function SessionDetailPage() {
   const { fmtW, fmtVol } = useUnits();
   const [notes, setNotes] = useState('');
   const [confirm, setConfirm] = useState(false);
+  const [resumeOpen, setResumeOpen] = useState(false);
+  const [restoring, setRestoring] = useState<number | null>(null);
   useEffect(() => setNotes(session?.notes ?? ''), [session?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const prs = useMemo(() => (session && all ? sessionPRs(session, all) : []), [session, all]);
 
@@ -70,13 +74,26 @@ export default function SessionDetailPage() {
           <p className="text-xs text-muted-foreground">
             {fmtDateTime(session.startedAt)}
             {session.finishedAt ? ` – ${fmtTime(session.finishedAt)}` : ''}
+            {(session.timing?.resumes.length ?? 0) > 0 ? ` · retomado ${session.timing!.resumes.length}×` : ''}
           </p>
         </div>
+      </div>
+      <div className="flex gap-2">
+        <Link
+          to={`/historico/${session.id}/editar`}
+          className="inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl border px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid="detail-edit-session"
+        >
+          <Pencil className="h-4 w-4" aria-hidden /> Editar
+        </Link>
+        <Button variant="secondary" className="flex-1" onClick={() => setResumeOpen(true)} data-testid="detail-resume-session">
+          <Play /> Continuar treino
+        </Button>
       </div>
 
       <div className="grid grid-cols-3 gap-2">
         {[
-          ['Duração', fmtDuration(session.durationSec ?? 0)],
+          ['Duração', fmtDuration(recordedDurationSec(session))],
           ['Volume', fmtVol(sessionVolume(session))],
           ['Séries válidas', String(validSetCount(session))],
         ].map(([k, v]) => (
@@ -111,6 +128,9 @@ export default function SessionDetailPage() {
                   {ex.modality ? ` · ${MODALITY_LABEL[ex.modality]}` : ''}
                   {ex.laterality === 'unilateral' ? ' · unilateral' : ''}
                   {ex.substitutedFrom ? ` · substituiu ${ex.substitutedFrom}` : ''}
+                  {ex.replacedBy ? ' · trocado durante o treino' : ''}
+                  {ex.correctedFrom ? ` · corrigido (era ${ex.correctedFrom.name})` : ''}
+                  {ex.addedAfterFinishAt ? ' · adicionado depois' : ''}
                 </p>
               </div>
               {(exerciseMeasures(ex).weight !== 'none' || volume > 0) && (
@@ -191,9 +211,51 @@ export default function SessionDetailPage() {
         </Button>
       </Card>
 
+      {(session.revisions?.length ?? 0) > 0 && (
+        <Card className="space-y-2 p-4" data-testid="session-revisions">
+          <p className="flex items-center gap-1.5 text-sm font-semibold">
+            <HistoryIcon className="h-4 w-4" aria-hidden /> Alterações deste treino
+          </p>
+          <ul className="space-y-2">
+            {[...(session.revisions ?? [])].reverse().map((r) => (
+              <li key={r.revision} className="rounded-xl bg-secondary/50 p-2 text-sm" data-testid="session-revision">
+                <p className="text-xs text-muted-foreground">
+                  {fmtDateTime(r.at)} · {r.kind === 'edit' ? 'edição' : r.kind === 'resume' ? 'retomada' : 'restauração'}
+                </p>
+                <ul className="list-disc pl-5">
+                  {r.summary.map((t) => (
+                    <li key={t}>{t}</li>
+                  ))}
+                </ul>
+                <Button size="sm" variant="ghost" className="mt-1" onClick={() => setRestoring(r.revision)} data-testid="revision-restore">
+                  <RotateCcw /> Voltar ao estado anterior a esta alteração
+                </Button>
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-muted-foreground">Guardamos as {session.revisions!.length} última(s) alterações (até 10). Restaurar cria uma nova alteração; nada é apagado.</p>
+        </Card>
+      )}
+
       <Button variant="ghost" className="w-full text-destructive" onClick={() => setConfirm(true)}>
         <Trash2 /> Excluir este treino do histórico
       </Button>
+      <ResumeDialog base={session} open={resumeOpen} onOpenChange={setResumeOpen} />
+      <ConfirmDialog
+        open={restoring !== null}
+        onOpenChange={(o) => !o && setRestoring(null)}
+        title="Restaurar a versão anterior?"
+        description="Exercícios, séries, duração e observações voltam ao que eram antes desta alteração. O estado atual também fica guardado."
+        confirmLabel="Restaurar"
+        onConfirm={async () => {
+          if (restoring === null) return;
+          const r = await restoreSessionRevision(session, restoring);
+          setRestoring(null);
+          if (r.status === 'saved') toast.success('Versão anterior restaurada.');
+          else if (r.status === 'invalid') toast.error(r.issues.map((i) => i.message).join(' '));
+          else if (r.status === 'conflict') toast.error(conflictMessage(r.reason));
+        }}
+      />
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}

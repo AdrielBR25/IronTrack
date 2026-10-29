@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, Flag, Trash2, Trophy, Undo2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Flag, Plus, Trash2, Trophy, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useActiveSession, useCompletedSessions, useNow, useSettings } from '@/hooks/data';
-import { completeSession, discardSession, getRoutine, saveSessionGuarded } from '@/db/repo';
+import { completeSession, discardSession, saveSessionGuarded } from '@/db/repo';
 import {
   addSet,
   carryForwardWeight,
@@ -16,8 +16,6 @@ import {
   setLabel,
   skipExercise,
   skipSet,
-  substituteExercise,
-  substituteOptions,
   undoSet,
   updateSet,
   type SetRef,
@@ -32,9 +30,17 @@ import {
   shouldAdvance,
   setCompletionErrors,
   type SetTimerTarget,
+  appendExercise,
+  applySwap,
+  effectiveDurationSec,
+  swapPreview,
+  type SwapPreview,
 } from '@/modules/training';
 import { audioAvailable, closeRestNotifications, notificationState, unlockAudio, vibrationAvailable } from '@/lib/alerts';
-import type { SessionSet, WorkoutSession } from '@/lib/types';
+import type { SessionExercise, SessionSet, WorkoutSession } from '@/lib/types';
+import type { LibraryItem, LibraryKey } from '@/modules/exercises';
+import { SwapPreviewDialog } from '@/features/workout/SwapPreviewDialog';
+import { sessionCandidate } from '@/features/library/sessionCandidate';
 import { ExerciseCard, summarizeSets } from '@/features/workout/ExerciseCard';
 import { SetEditor, SetFields, setTitle } from '@/features/workout/SetEditor';
 import { RestPanel } from '@/features/workout/RestPanel';
@@ -42,11 +48,17 @@ import { SetTimerChip } from '@/features/workout/SetTimerPanel';
 import { setTimerStore, useSetTimer } from '@/features/workout/setTimerStore';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input, Textarea } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/input';
 import { ConfirmDialog } from '@/components/ui/confirm';
 import { useUnits } from '@/hooks/useUnits';
-import { fmtClock, fmtDuration } from '@/lib/utils';
+import { fmtClock, fmtDuration, uid } from '@/lib/utils';
 import { cn } from '@/lib/utils';
+
+// P20: biblioteca completa (catálogo, filtros, 3D) só é baixada quando a pessoa abre a troca ou o "Adicionar exercício".
+const LibraryBrowser = lazy(() => import('@/features/library/LibraryBrowser'));
+
+/** Chaves da biblioteca já presentes no treino (não aparecem de novo como opção). */
+const keysIn = (s: WorkoutSession) => new Set(s.exercises.flatMap((e): LibraryKey[] => (e.catalogId ? [`catalog:${e.catalogId}`] : e.customExerciseId ? [`custom:${e.customExerciseId}`] : [])));
 
 function useWakeLock(enabled: boolean) {
   useEffect(() => {
@@ -91,7 +103,8 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
   const [focusSet, setFocusSet] = useState<SetRef | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<{ exId: string; setId: string } | null>(null);
-  const [substituting, setSubstituting] = useState<string | null>(null);
+  const [browser, setBrowser] = useState<{ mode: 'swap'; exId: string } | { mode: 'add' } | null>(null);
+  const [swap, setSwap] = useState<{ preview: SwapPreview; candidate: SessionExercise; exId: string } | null>(null);
   const [finishOpen, setFinishOpen] = useState(false);
   const [discardOpen, setDiscardOpen] = useState(false);
   const [highlight, setHighlight] = useState(false);
@@ -259,7 +272,7 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
               <span className="text-primary">Treino {session.workoutLabel}</span> · {session.workoutName}
             </p>
             <p className="text-xs text-muted-foreground tabular">
-              {fmtClock((now - session.startedAt) / 1000)} · {prog.done}/{prog.total} séries · {fmtVol(sessionVolume(session))}
+              <span data-testid="workout-clock">{fmtClock(effectiveDurationSec(session, now))}</span> · {prog.done}/{prog.total} séries · {fmtVol(sessionVolume(session))}
               {' · '}
               {saveState === 'error' ? (
                 <button type="button" className="font-semibold text-destructive underline" onClick={() => void flush()} data-testid="save-status">
@@ -311,11 +324,15 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
                 commit(next);
                 toast.success(`Carga ajustada para ${fmtW(kg)}`);
               }}
-              onSubstitute={() => setSubstituting(ex.id)}
+              onSubstitute={() => setBrowser({ mode: 'swap', exId: ex.id })}
               onSkipExercise={() => commit(skipExercise(sessionRef.current, ex.id))}
             />
           );
         })}
+
+        <Button variant="outline" className="w-full" onClick={() => setBrowser({ mode: 'add' })} data-testid="add-exercise">
+          <Plus /> Adicionar exercício
+        </Button>
 
         {!current && (
           <div className="rounded-3xl border border-primary/40 bg-primary/10 p-5 text-center">
@@ -414,15 +431,57 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
         </DialogContent>
       </Dialog>
 
-      <SubstituteDialog
-        session={session}
-        exId={substituting}
-        onClose={() => setSubstituting(null)}
-        onPick={(name) => {
-          if (!substituting) return;
-          commit(substituteExercise(sessionRef.current, substituting, name, completed ?? []));
-          setSubstituting(null);
-          toast.success(`Substituído por ${name}`);
+      {browser && (
+        <Suspense fallback={null}>
+          <LibraryBrowser
+            open
+            onOpenChange={(o) => !o && setBrowser(null)}
+            title={browser.mode === 'swap' ? `Trocar ${session.exercises.find((e) => e.id === browser.exId)?.name ?? 'exercício'}` : 'Adicionar exercício'}
+            description={browser.mode === 'swap' ? 'Escolha o novo exercício. Você vê a prévia antes de confirmar; a ficha não muda.' : 'Entra no fim deste treino, só nesta sessão. A ficha não muda.'}
+            chooseLabel={browser.mode === 'swap' ? 'Usar no lugar' : 'Adicionar ao treino'}
+            exclude={keysIn(session)}
+            onPick={(item: LibraryItem) => {
+              const candidate = sessionCandidate(item, settings, completed ?? []);
+              if (browser.mode === 'add') {
+                commit(appendExercise(sessionRef.current, candidate));
+                setBrowser(null);
+                setExpanded((m) => ({ ...m, [candidate.id]: true }));
+                scrollTo(candidate.id);
+                toast.success(`${item.name} adicionado ao treino`);
+                return;
+              }
+              const preview = swapPreview(sessionRef.current, browser.exId, candidate);
+              if (!preview) {
+                toast.error('Este exercício não está mais no treino.');
+                setBrowser(null);
+                return;
+              }
+              setSwap({ preview, candidate, exId: browser.exId });
+              setBrowser(null);
+            }}
+          />
+        </Suspense>
+      )}
+
+      <SwapPreviewDialog
+        preview={swap?.preview ?? null}
+        setTimerOnThis={!!swap && !!timerState && timerState.sessionId === session.id && timerState.exerciseId === swap.exId}
+        onCancel={() => setSwap(null)}
+        onConfirm={() => {
+          if (!swap) return;
+          const r = applySwap(sessionRef.current, swap.exId, swap.candidate, uid);
+          setSwap(null);
+          if (!r) {
+            toast.error('Este exercício não está mais no treino. Nada foi trocado.');
+            return;
+          }
+          // O cronômetro de execução de uma série que saiu do treino não tem mais a que se referir.
+          setTimerStore.discardWhere((t) => t.sessionId === r.session.id && !r.session.exercises.some((e) => e.id === t.exerciseId && e.sets.some((x) => x.id === t.setId && x.status === 'pending')));
+          setFocusSet(null);
+          commit(r.session);
+          setExpanded((m) => ({ ...m, [r.nextId]: true }));
+          scrollTo(r.nextId);
+          toast.success(`Trocado por ${swap.candidate.name}`);
         }}
       />
 
@@ -468,52 +527,6 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
   );
 }
 
-function SubstituteDialog({ session, exId, onClose, onPick }: { session: WorkoutSession; exId: string | null; onClose: () => void; onPick: (name: string) => void }) {
-  const [name, setName] = useState('');
-  const [options, setOptions] = useState<string[]>([]);
-  const ex = session.exercises.find((e) => e.id === exId);
-  useEffect(() => {
-    if (!ex) return;
-    setName('');
-    void (async () => {
-      setOptions(substituteOptions(await getRoutine(session.routineId), ex));
-    })();
-  }, [ex?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-  return (
-    <Dialog open={!!ex} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Substituir exercício</DialogTitle>
-          <DialogDescription>
-            Substitui <strong>{ex?.name}</strong> só neste treino. As séries já concluídas são mantidas.
-          </DialogDescription>
-        </DialogHeader>
-        {options.length > 0 && (
-          <div className="grid gap-2">
-            {options.map((o) => (
-              <Button key={o} variant="secondary" className="justify-start" onClick={() => onPick(o)}>
-                {o}
-              </Button>
-            ))}
-          </div>
-        )}
-        <form
-          className="flex gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (name.trim()) onPick(name.trim());
-          }}
-        >
-          <Input placeholder="Outro exercício…" value={name} onChange={(e) => setName(e.target.value)} />
-          <Button type="submit" disabled={!name.trim()}>
-            Usar
-          </Button>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 function FinishDialog({
   open,
   onOpenChange,
@@ -533,7 +546,8 @@ function FinishDialog({
   const { fmtVol } = useUnits();
   const [notes, setNotes] = useState(session.notes ?? '');
   const [busy, setBusy] = useState(false);
-  const dur = (Date.now() - session.startedAt) / 1000;
+  const dur = effectiveDurationSec(session, Date.now());
+  const resumed = (session.timing?.resumes.length ?? 0) > 0;
   const prs = useMemo(() => (open ? sessionPRs(session, previous) : []), [open, session, previous]);
   const pending = sessionProgress(session);
   const willAdvance = shouldAdvance(session, settings.rotationPolicy, settings.rotationThreshold);
@@ -566,8 +580,10 @@ function FinishDialog({
             </p>
           </div>
         )}
-        <p className={cn('text-xs', willAdvance ? 'text-muted-foreground' : 'text-warn')}>
-          {willAdvance
+        <p className={cn('text-xs', willAdvance || resumed ? 'text-muted-foreground' : 'text-warn')}>
+          {resumed
+            ? 'Treino retomado: a rotação não avança de novo ao concluir.'
+            : willAdvance
             ? 'Ao concluir, a rotação avança para o próximo treino.'
             : settings.rotationPolicy === 'threshold'
               ? `Concluído ${completionPct(session)}% (mínimo ${settings.rotationThreshold}%): a rotação não vai avançar.`
