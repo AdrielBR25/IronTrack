@@ -94,6 +94,9 @@ export const MOVEMENT_LABEL: Record<MovementPattern, string> = {
   corpo_inteiro: 'Corpo inteiro',
 };
 
+/** Padrões de movimento na ordem dos filtros (P20). */
+export const MOVEMENT_PATTERNS = Object.keys(MOVEMENT_LABEL) as MovementPattern[];
+
 export const MECHANICS_LABEL: Record<Mechanics, string> = { compound: 'Composto (multiarticular)', isolation: 'Isolador (monoarticular)' };
 
 export const DIFFICULTY_LABEL: Record<Difficulty, string> = { iniciante: 'Iniciante', intermediario: 'Intermediário', avancado: 'Avançado' };

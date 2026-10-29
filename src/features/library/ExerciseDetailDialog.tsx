@@ -1,9 +1,13 @@
+import { Suspense, lazy } from 'react';
 import { Link } from 'react-router-dom';
-import { Archive, ArchiveRestore, Copy, LineChart, ListOrdered, Pencil, Plus, Star, Trash2, Trophy } from 'lucide-react';
+import { Archive, ArchiveRestore, Copy, LineChart, ListOrdered, MessageCircle, Pencil, Plus, Star, Trash2, Trophy } from 'lucide-react';
 import { LATERALITY_LABEL, LOAD_MODE_LABEL, MODALITY_LABEL } from '@/modules/training';
 import { DIFFICULTY_LABEL, EQUIPMENT_NAME, MECHANICS_LABEL, MOVEMENT_LABEL, MUSCLE_NAME, type LibraryItem } from '@/modules/exercises';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+
+// P20: humanoide 3D e mapa muscular, carregados só quando o detalhe abre (three.js fica fora do pacote principal).
+const ExerciseVisual = lazy(() => import('@/features/anatomy/ExerciseVisual'));
 
 export const GENERAL_NOTICE = 'Orientações gerais e conservadoras. Não substituem a avaliação de um profissional nem são prescrição individual.';
 
@@ -40,6 +44,7 @@ export function ExerciseDetailDialog({
   usageLines = [],
   hideFavorite = false,
   performance = null,
+  askFrom,
 }: {
   item: LibraryItem | null;
   onOpenChange: (o: boolean) => void;
@@ -62,6 +67,8 @@ export function ExerciseDetailDialog({
    * concluído com a origem; sem ele, mostra o estado vazio (nada é associado automaticamente).
    */
   performance?: { href: string; available: boolean } | null;
+  /** P20: origem do atalho do assistente (do treino, a tela do assistente oferece voltar ao treino). */
+  askFrom?: 'treino';
 }) {
   const it = item;
   const inUse = !!usage && (usage.templates > 0 || usage.sessions > 0);
@@ -152,6 +159,9 @@ export function ExerciseDetailDialog({
                 )}
               </section>
             )}
+            <Suspense fallback={<div className="h-40 animate-pulse rounded-2xl bg-secondary/50" aria-label="Carregando visualização" />}>
+              <ExerciseVisual item={it} instructions={it.instructions} />
+            </Suspense>
             <Section title="Como executar" items={it.instructions} />
             <Section title="Erros comuns" items={it.commonMistakes} />
             <Section title="Cuidados" items={it.safetyNotes} />
@@ -162,6 +172,13 @@ export function ExerciseDetailDialog({
               </section>
             )}
             {it.kind === 'catalog' && <p className="text-xs text-muted-foreground">{GENERAL_NOTICE}</p>}
+            <Link
+              to={`/assistente?exercicio=${encodeURIComponent(it.name)}${askFrom ? `&origem=${askFrom}` : ''}`}
+              className="inline-flex h-9 items-center gap-1.5 self-start rounded-xl border px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              data-testid="detail-ask-assistant"
+            >
+              <MessageCircle className="h-4 w-4" aria-hidden /> Perguntar ao assistente
+            </Link>
             {it.kind === 'custom' && inUse && (
               <p className="text-xs text-muted-foreground">
                 Usado em {usage!.templates} ficha(s) e {usage!.sessions} treino(s). Não pode ser excluído; arquive para tirá-lo da lista sem perder nada.

@@ -39,6 +39,7 @@
     "recharts": "^2.15.4",
     "sonner": "^1.7.4",
     "tailwind-merge": "^2.6.1",
+    "three": "0.180.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
@@ -46,6 +47,7 @@
     "@types/node": "^22.20.5",
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",
+    "@types/three": "0.180.0",
     "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.6.2",
     "fake-indexeddb": "^6.2.6",

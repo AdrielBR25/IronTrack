@@ -131,7 +131,7 @@ test('planejamento: planejar, iniciar, concluir, meta, exceção, semanas, backu
   const file = info.outputPath('backup-planejamento.json');
   await download.saveAs(file);
   const backup = JSON.parse(readFileSync(file, 'utf8'));
-  expect(backup.schemaVersion).toBe(7); // P17: v7 (biblioteca de exercícios)
+  expect(backup.schemaVersion).toBe(8); // P17: v7 (biblioteca de exercícios)
   expect(backup.data.planEntries).toHaveLength(2);
   expect(JSON.stringify(backup.data.planEntries)).toContain('"kind":"rest"');
 

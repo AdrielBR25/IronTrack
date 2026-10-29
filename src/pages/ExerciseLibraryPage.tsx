@@ -16,6 +16,8 @@ import {
   LIBRARY_EQUIPMENT,
   MODALITY_FILTER_LABEL,
   MUSCLE_NAME,
+  MOVEMENT_LABEL,
+  MOVEMENT_PATTERNS,
   SUGGESTION_REASON_LABEL,
   USAGE_LABEL,
   activeFilterCount,
@@ -29,6 +31,7 @@ import {
   type LibraryFilters,
   type LibraryItem,
   type LibraryKey,
+  type MovementPattern,
 } from '@/modules/exercises';
 import { ExerciseDetailDialog } from '@/features/library/ExerciseDetailDialog';
 import { identityKey, identityPath } from '@/modules/performance';
@@ -42,36 +45,12 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Segmented } from '@/components/ui/segmented';
 import { ConfirmDialog } from '@/components/ui/confirm';
+import { ChipGroup, toggle } from '@/features/library/ChipGroup';
+import { ExerciseThumb, VisualBadge } from '@/features/anatomy/ExerciseThumb';
 
 type Tab = 'todos' | 'favoritos' | 'meus';
 const PAGE = 60;
 
-function ChipGroup<T extends string>({ legend, options, value, onToggle, label }: { legend: string; options: readonly T[]; value: readonly T[]; onToggle: (v: T) => void; label: (v: T) => string }) {
-  return (
-    <fieldset className="space-y-1.5">
-      <legend className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">{legend}</legend>
-      <div className="flex flex-wrap gap-1.5">
-        {options.map((o) => {
-          const on = value.includes(o);
-          return (
-            <button
-              key={o}
-              type="button"
-              aria-pressed={on}
-              onClick={() => onToggle(o)}
-              className={cn('min-h-9 rounded-full border px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', on ? 'border-primary bg-primary/10 font-medium text-foreground' : 'text-muted-foreground')}
-            >
-              {on ? '✓ ' : ''}
-              {label(o)}
-            </button>
-          );
-        })}
-      </div>
-    </fieldset>
-  );
-}
-
-const toggle = <T,>(list: readonly T[], v: T): T[] => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
 
 /**
  * Biblioteca de exercícios (IronTrack 2.0 F01/P17, docs/BIBLIOTECA_EXERCICIOS.md). Funciona offline: catálogo estático
@@ -157,7 +136,8 @@ export default function ExerciseLibraryPage() {
     const fav = !!data?.favorites.has(item.key);
     const inWorkout = !!destWorkout?.exercises.some((e) => libraryKeyOf(e) === item.key);
     return (
-      <Card key={item.key} className="flex items-center gap-2 p-2 pl-3" data-testid="library-item">
+      <Card key={item.key} className="flex items-center gap-2 p-2 pl-2" data-testid="library-item">
+        <ExerciseThumb item={item} />
         <button className="min-w-0 flex-1 py-1 text-left" onClick={() => setDetailKey(item.key)}>
           <span className="block truncate font-semibold">{item.name}</span>
           <span className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
@@ -166,6 +146,7 @@ export default function ExerciseLibraryPage() {
             {MODALITY_FILTER_LABEL[item.modality] !== EQUIPMENT_NAME[item.equipment[0]] && <span>· {MODALITY_FILTER_LABEL[item.modality]}</span>}
             {item.laterality === 'unilateral' && item.modality !== 'cardio' && <Badge variant="outline">unilateral</Badge>}
             {item.kind === 'custom' && <Badge variant="outline">meu</Badge>}
+            <VisualBadge item={item} />
             {item.archived && <Badge variant="warn">arquivado</Badge>}
             {inWorkout && <Badge variant="outline">já na ficha</Badge>}
           </span>
@@ -209,6 +190,7 @@ export default function ExerciseLibraryPage() {
       <ChipGroup legend="Grupo muscular" options={FILTER_MUSCLES} value={filters.muscles} onToggle={(m: LibraryMuscle) => setFilters({ ...filters, muscles: toggle(filters.muscles, m) })} label={(m) => MUSCLE_NAME[m]} />
       <ChipGroup legend="Equipamento" options={LIBRARY_EQUIPMENT} value={filters.equipment} onToggle={(e: LibraryEquipment) => setFilters({ ...filters, equipment: toggle(filters.equipment, e) })} label={(e) => EQUIPMENT_NAME[e]} />
       <ChipGroup legend="Modalidade" options={MODALITIES} value={filters.modalities} onToggle={(m: TrainingModality) => setFilters({ ...filters, modalities: toggle(filters.modalities, m) })} label={(m) => MODALITY_FILTER_LABEL[m]} />
+      <ChipGroup legend="Padrão de movimento" options={MOVEMENT_PATTERNS} value={filters.movements ?? []} onToggle={(m: MovementPattern) => setFilters({ ...filters, movements: toggle(filters.movements ?? [], m) })} label={(m) => MOVEMENT_LABEL[m]} />
       <ChipGroup
         legend="Execução e listas"
         options={['bilateral', 'unilateral', 'favoritos', 'personalizados'] as const}

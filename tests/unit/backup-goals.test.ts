@@ -59,8 +59,8 @@ describe('exportação', () => {
     const { a } = await seed();
     await setGoalStatus('g-freq', 'pause', '2026-03-10');
     const b = await exportBackup();
-    expect(BACKUP_SCHEMA_VERSION).toBe(7);
-    expect(b.schemaVersion).toBe(7);
+    expect(BACKUP_SCHEMA_VERSION).toBe(8);
+    expect(b.schemaVersion).toBe(8);
     expect(b.data.goals).toHaveLength(2);
     expect(b.data.goals.find((g) => g.id === 'g-load')).toEqual(a);
     expect(b.data.goals.find((g) => g.id === 'g-freq')).toMatchObject({ status: 'paused', revision: 2 });

@@ -71,7 +71,7 @@ const parse = (o: unknown): BackupFile => {
 describe('persistência', () => {
   it('não há esquema novo: Dexie v6 e backup v7 (a origem já é campo opcional da instância)', () => {
     expect(DB_SCHEMA_VERSION).toBe(6);
-    expect(BACKUP_SCHEMA_VERSION).toBe(7);
+    expect(BACKUP_SCHEMA_VERSION).toBe(8);
   });
 });
 
@@ -302,7 +302,7 @@ describe('backup e restauração', () => {
     await seed();
     const before = await readSnapshot();
     const b = parse(JSON.parse(JSON.stringify(await exportBackup())));
-    expect(b.schemaVersion).toBe(7);
+    expect(b.schemaVersion).toBe(8);
     const exs = b.data.routines[0].workouts.flatMap((w) => w.exercises);
     expect(exs.find((e) => e.id === 'r1-A-e1')).toMatchObject(LEG);
     expect(exs.find((e) => e.id === 'r1-A-e2')!.catalogId).toBeUndefined();

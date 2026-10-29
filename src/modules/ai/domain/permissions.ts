@@ -8,6 +8,8 @@ export const AI_CONTEXT_CATEGORIES = [
   'body_measurements',
   'body_evolution',
   'profile_preferences',
+  /** P20: metas de treino (título, tipo, alvo, progresso calculado e prazo). */
+  'training_goals',
   'progress_photos',
 ] as const;
 export type AIContextCategory = (typeof AI_CONTEXT_CATEGORIES)[number];

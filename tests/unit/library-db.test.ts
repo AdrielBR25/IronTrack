@@ -307,7 +307,7 @@ describe('backup v7', () => {
     await open();
     await seedLibrary();
     const b = await roundTrip();
-    expect(b.schemaVersion).toBe(7);
+    expect(b.schemaVersion).toBe(8);
     expect(b.data.customExercises.map((c) => c.id)).toEqual([CX]);
     expect(b.data.exerciseFavorites.map((f) => f.target).sort()).toEqual(['catalog:leg-press', `custom:${CX}`]);
     expect(b.data.routines[0].workouts[0].exercises.find((e) => e.id === 'lp')).toMatchObject({ catalogId: 'leg-press', catalogVersion: 1 });
@@ -340,7 +340,7 @@ describe('backup v7', () => {
     delete data.customExercises;
     delete data.exerciseFavorites;
     const b = parse({ app: 'irontrack', kind: 'backup', schemaVersion: 6, exportedAt: '2026-10-01T12:00:00.000Z', profile: { id: db.currentProfileId, displayName: 'Perfil' }, data });
-    expect(b.schemaVersion).toBe(7);
+    expect(b.schemaVersion).toBe(8);
     expect(b.data.customExercises).toEqual([]);
     expect(b.data.exerciseFavorites).toEqual([]);
     const p = await previewRestore(b);

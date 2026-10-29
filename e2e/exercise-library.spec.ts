@@ -160,7 +160,7 @@ test('biblioteca: buscar, filtrar, favoritar, criar, montar a ficha, substituir,
   const file = info.outputPath('backup-biblioteca.json');
   await download.saveAs(file);
   const backup = JSON.parse(readFileSync(file, 'utf8'));
-  expect(backup.schemaVersion).toBe(7);
+  expect(backup.schemaVersion).toBe(8);
   expect(backup.data.customExercises.map((c: { name: string }) => c.name)).toEqual([CUSTOM]);
   expect(backup.data.exerciseFavorites.map((f: { target: string }) => f.target)).toEqual(['catalog:leg-press']);
   const exA = backup.data.routines[0].workouts[0].exercises;

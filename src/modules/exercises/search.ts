@@ -7,7 +7,7 @@
 import { MODALITY_LABEL } from '@/modules/training';
 import type { ExerciseLaterality, TrainingModality } from '@/modules/training';
 import { EQUIPMENT_NAME, MODALITY_FILTER_LABEL, MUSCLE_NAME } from './vocab';
-import type { LibraryEquipment, LibraryItem, LibraryKey, LibraryMuscle } from './types';
+import type { LibraryEquipment, LibraryItem, LibraryKey, LibraryMuscle, MovementPattern } from './types';
 
 /** Minúsculas, sem acentos, só letras/números e espaços simples. */
 export function foldText(raw: string): string {
@@ -56,17 +56,19 @@ export interface LibraryFilters {
   equipment: LibraryEquipment[];
   modalities: TrainingModality[];
   laterality: ExerciseLaterality | null;
+  /** P20: padrão de movimento (opcional; filtros antigos sem o campo continuam válidos). */
+  movements?: MovementPattern[];
   favoritesOnly: boolean;
   customOnly: boolean;
   /** Arquivados aparecem só quando pedidos (lista "Arquivados" de Meus exercícios). */
   archived: 'hide' | 'only';
 }
 
-export const EMPTY_FILTERS: LibraryFilters = { muscles: [], equipment: [], modalities: [], laterality: null, favoritesOnly: false, customOnly: false, archived: 'hide' };
+export const EMPTY_FILTERS: LibraryFilters = { muscles: [], equipment: [], modalities: [], laterality: null, movements: [], favoritesOnly: false, customOnly: false, archived: 'hide' };
 
 /** Quantos filtros estão ligados (para o botão "Limpar filtros"; o estado de arquivados não conta). */
 export function activeFilterCount(f: LibraryFilters): number {
-  return f.muscles.length + f.equipment.length + f.modalities.length + (f.laterality ? 1 : 0) + (f.favoritesOnly ? 1 : 0) + (f.customOnly ? 1 : 0);
+  return f.muscles.length + f.equipment.length + f.modalities.length + (f.movements?.length ?? 0) + (f.laterality ? 1 : 0) + (f.favoritesOnly ? 1 : 0) + (f.customOnly ? 1 : 0);
 }
 
 /**
@@ -80,6 +82,7 @@ export function matchesFilters(item: LibraryItem, f: LibraryFilters, favorites: 
   if (f.equipment.length && !item.equipment.some((e) => f.equipment.includes(e))) return false;
   if (f.modalities.length && !f.modalities.includes(item.modality)) return false;
   if (f.laterality && item.laterality !== f.laterality) return false;
+  if (f.movements?.length && (!item.movementPattern || !f.movements.includes(item.movementPattern))) return false;
   if (f.favoritesOnly && !favorites.has(item.key)) return false;
   if (f.customOnly && item.kind !== 'custom') return false;
   return true;

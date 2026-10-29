@@ -86,7 +86,7 @@ describe('migração: o modelo v3 não exige upgrade físico do IndexedDB', () =
     // P12/P13/P16: o esquema físico subiu (3: `goals`; 4: `planEntries`; 5: `calendarDecisions`), não por causa do
     // modelo de exercícios.
     expect(DB_SCHEMA_VERSION).toBe(6);
-    expect(BACKUP_SCHEMA_VERSION).toBe(7);
+    expect(BACKUP_SCHEMA_VERSION).toBe(8);
     const cur = new IronTrackDB(name());
     await cur.open();
     const schema = Object.fromEntries(cur.tables.map((t) => [t.name, [t.schema.primKey.src, ...t.schema.indexes.map((i) => i.src)].join(', ')]));
@@ -282,7 +282,7 @@ describe('backup v3 (lido como v5 desde o P13)', () => {
     await seeded(modelSnapshot());
     const before = await readSnapshot();
     const file = await exportBackup();
-    expect(file.schemaVersion).toBe(7);
+    expect(file.schemaVersion).toBe(8);
     const text = JSON.stringify(file);
     for (const k of ['"modality":"timed"', '"durationSec":45', '"distance":5000', '"side":"direito"', '"assistanceKg":25', '"loadMode":"adicional"', '"secondaryMuscles":["Glúteos"]', '"distanceUnit":"km"'])
       expect(text).toContain(k);
@@ -301,7 +301,7 @@ describe('backup v3 (lido como v5 desde o P13)', () => {
     const v5 = parse({ ...backupOf(assignOwner(d, P1.id)), schemaVersion: 5, profile: { id: P1.id, displayName: 'P' } });
     const v6 = parse({ ...backupOf(assignOwner(d, P1.id)), schemaVersion: 6, profile: { id: P1.id, displayName: 'P' } });
     for (const b of [v0, v1, v2, v3, v4, v5, v6]) {
-      expect(b.schemaVersion).toBe(7);
+      expect(b.schemaVersion).toBe(8);
       expect(b.data.planEntries).toEqual([]);
       expect(b.data.calendarDecisions).toEqual([]);
       expect(b.data.customExercises).toEqual([]);
@@ -314,7 +314,7 @@ describe('backup v3 (lido como v5 desde o P13)', () => {
   });
 
   it('versão incompatível (futura) e arquivo malformado são recusados sem gravar', async () => {
-    const future = parseBackup(JSON.stringify({ ...backupOf(modelSnapshot()), schemaVersion: 8, profile: null }));
+    const future = parseBackup(JSON.stringify({ ...backupOf(modelSnapshot()), schemaVersion: 9, profile: null }));
     expect(!future.ok && future.errors[0]).toMatch(/versão mais nova/);
     const malformed = parseBackup('{"app":"irontrack","kind":"backup","schemaVersion":3,"exportedAt":"x","profile":null,"data":{"sessions":"oops"}}');
     expect(malformed.ok).toBe(false);

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { freshStart, loadSample, setValue } from './helpers';
+import { freshStart, loadSample, setValue, storedActiveSession } from './helpers';
 import { readFileSync } from 'node:fs';
 
 test('fluxo completo: ficha → treino → descanso → histórico → backup', async ({ page }, info) => {
@@ -43,7 +43,9 @@ test('fluxo completo: ficha → treino → descanso → histórico → backup', 
   await page.getByTestId('complete-set').click();
   await page.getByTestId('rest-skip').click();
 
-  // Fechar e reabrir: sessão recuperada
+  // Fechar e reabrir: sessão recuperada. Espera a gravação terminar (3 séries feitas, sem descanso) antes de recarregar;
+  // recarregar no meio da escrita do IndexedDB é que fazia o teste falhar às vezes no CI.
+  await expect.poll(() => storedActiveSession(page)).toEqual({ doneSets: 3, rest: false });
   await page.reload();
   await expect(page.getByTestId('set-editor')).toContainText('Série 3 de 3');
   await expect(page.getByTestId('set-row-done')).toHaveCount(3);

@@ -274,8 +274,8 @@ describe('persistência, backup e privacidade', () => {
     expect(db.tables.map((t) => t.name).sort()).toEqual(['calendarDecisions', 'customExercises', 'exerciseFavorites', 'goals', 'overrides', 'photos', 'planEntries', 'profiles', 'rotations', 'routines', 'sessions', 'settings', 'bodyEntries'].sort());
     expect(OWNED_COLLECTIONS).not.toContain('performance');
     const backup = await exportBackup();
-    expect(BACKUP_SCHEMA_VERSION).toBe(7);
-    expect(backup.schemaVersion).toBe(7);
+    expect(BACKUP_SCHEMA_VERSION).toBe(8);
+    expect(backup.schemaVersion).toBe(8);
     expect(Object.keys(backup.data).sort()).toEqual(Object.keys(await readSnapshot()).sort());
     const before = buildPerformanceIndex((await readSnapshot()).sessions, { profileId: db.currentProfileId });
     await db.sessions.clear();

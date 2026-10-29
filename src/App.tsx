@@ -8,12 +8,14 @@ import { SetTimerWatcher } from '@/features/workout/SetTimerWatcher';
 import { CompatGuard } from '@/features/compat/CompatGuard';
 import HomePage from '@/pages/HomePage';
 import ActiveWorkoutPage from '@/pages/ActiveWorkoutPage';
-import { lazy } from 'react';
+import { Suspense, lazy } from 'react';
 
 const WorkoutsPage = lazy(() => import('@/pages/WorkoutsPage'));
 const WorkoutEditorPage = lazy(() => import('@/pages/WorkoutEditorPage'));
 const HistoryPage = lazy(() => import('@/pages/HistoryPage'));
 const SessionDetailPage = lazy(() => import('@/pages/SessionDetailPage'));
+// P20: edição de treino finalizado (relógio parado), fora do layout com navegação, como a tela do treino.
+const SessionEditPage = lazy(() => import('@/pages/SessionEditPage'));
 const ProgressPage = lazy(() => import('@/pages/ProgressPage'));
 const TrainingAnalyticsPage = lazy(() => import('@/pages/TrainingAnalyticsPage'));
 const TrainingGoalsPage = lazy(() => import('@/pages/TrainingGoalsPage'));
@@ -40,6 +42,14 @@ export default function App() {
       <SetTimerWatcher />
       <Routes>
         <Route path="/treino" element={<ActiveWorkoutPage />} />
+        <Route
+          path="/historico/:id/editar"
+          element={
+            <Suspense fallback={null}>
+              <SessionEditPage />
+            </Suspense>
+          }
+        />
         <Route element={<AppLayout />}>
           <Route path="/" element={<HomePage />} />
           <Route path="/treinos" element={<WorkoutsPage />} />

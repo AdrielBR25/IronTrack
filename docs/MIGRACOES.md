@@ -31,6 +31,11 @@ O Prompt 17 criou a versão 6 (`DB_SCHEMA_VERSION = 6`) só para a biblioteca de
 favoritos); mesmas garantias. As fichas ganharam campos opcionais (`catalogId`, `catalogVersion`, `customExerciseId`)
 dentro dos registros, sem índice e sem transformação: fichas antigas não são reescritas nem associadas ao catálogo por
 nome. App do P16 abrindo o banco v6 e migração v5 → v6 testados em `tests/unit/library-db.test.ts`.
+O Prompt 20 (edição e retomada de treinos, biblioteca visual, assistente) **não** criou versão nova: os campos de tempo
+com pausas e de revisões (`timing`, `revision`, `revisions`) e as marcas de troca/correção nos exercícios ficam dentro
+dos registros de sessão, opcionais, sem índice e sem transformação. Registros antigos não são reescritos. Um app
+anterior abre o banco normalmente; um treino retomado lido por ele mostra a duração gravada e ignora os campos novos.
+Só o backup mudou (v8, ver [BACKUP_RESTAURACAO.md](BACKUP_RESTAURACAO.md)).
 
 ## Migração v1 → v2 (perfil local)
 

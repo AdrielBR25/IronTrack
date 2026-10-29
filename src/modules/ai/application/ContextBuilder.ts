@@ -64,6 +64,20 @@ export interface ProfilePreferencesSource {
   goal?: string;
 }
 
+/** P20: meta de treino já medida pelo motor das metas (o módulo de IA não recalcula nada). */
+export interface TrainingGoalSource {
+  title: string;
+  type: string;
+  target: number;
+  unit: string;
+  current?: number | null;
+  /** 0–1. */
+  fraction?: number;
+  state?: string;
+  deadline?: string | null;
+  exercise?: string | null;
+}
+
 /** Dados que quem chama escolheu oferecer. Nada aqui é buscado automaticamente. */
 export interface AIContextSources {
   trainingSummary?: TrainingSummarySource;
@@ -71,6 +85,7 @@ export interface AIContextSources {
   bodyEntries?: readonly BodyEntrySource[];
   bodyEvolution?: readonly BodyEvolutionSource[];
   profilePreferences?: ProfilePreferencesSource;
+  trainingGoals?: readonly TrainingGoalSource[];
 }
 
 // ----- Saída
@@ -108,12 +123,25 @@ export interface ProfilePreferencesContext {
   goal?: string;
 }
 
+export interface TrainingGoalContext {
+  title: string;
+  type?: string;
+  target: number;
+  unit?: string;
+  current?: number;
+  progressPct?: number;
+  state?: string;
+  deadline?: string;
+  exercise?: string;
+}
+
 export interface AIContextData {
   training_summary?: TrainingSummaryContext;
   training_history?: TrainingSessionContext[];
   body_measurements?: BodyMeasurementContext[];
   body_evolution?: BodyEvolutionContext[];
   profile_preferences?: ProfilePreferencesContext;
+  training_goals?: TrainingGoalContext[];
 }
 
 export type ContextExclusionReason = 'not_selected' | 'blocked' | 'no_data';
@@ -130,6 +158,7 @@ export interface AIContext {
 }
 
 export interface ContextLimits {
+  maxGoals: number;
   maxSessions: number;
   maxExercisesPerSession: number;
   maxSetsPerExercise: number;
@@ -141,6 +170,7 @@ export interface ContextLimits {
 }
 
 export const DEFAULT_CONTEXT_LIMITS: ContextLimits = {
+  maxGoals: 10,
   maxSessions: 12,
   maxExercisesPerSession: 15,
   maxSetsPerExercise: 8,
@@ -250,12 +280,35 @@ function preferences(p: ProfilePreferencesSource, lim: ContextLimits): ProfilePr
   return Object.keys(out).length ? out : undefined;
 }
 
+function goals(list: readonly TrainingGoalSource[], lim: ContextLimits): TrainingGoalContext[] {
+  return list.slice(0, lim.maxGoals).flatMap((g) => {
+    const title = text(g.title, lim.maxTextLength);
+    const target = num(g.target);
+    if (!title || target === undefined) return [];
+    const fraction = num(g.fraction);
+    return [
+      compact<TrainingGoalContext>({
+        title,
+        type: text(g.type, lim.maxTextLength),
+        target,
+        unit: text(g.unit, 16),
+        current: num(g.current),
+        progressPct: fraction !== undefined ? Math.round(Math.max(0, Math.min(1, fraction)) * 100) : undefined,
+        state: text(g.state, 24),
+        deadline: typeof g.deadline === 'string' && ISO_DATE.test(g.deadline) ? g.deadline : undefined,
+        exercise: text(g.exercise, lim.maxTextLength),
+      }),
+    ];
+  });
+}
+
 const SOURCE_OF: Record<Exclude<AIContextCategory, 'progress_photos'>, keyof AIContextSources> = {
   training_summary: 'trainingSummary',
   training_history: 'trainingSessions',
   body_measurements: 'bodyEntries',
   body_evolution: 'bodyEvolution',
   profile_preferences: 'profilePreferences',
+  training_goals: 'trainingGoals',
 };
 
 /** Normaliza a seleção: rejeita categoria desconhecida (falha segura), remove repetidas, ordena. */
@@ -291,6 +344,7 @@ export function buildAIContext(sources: AIContextSources = {}, selected: readonl
     if (category === 'body_measurements') data.body_measurements = sources.bodyEntries && bodyEntries(sources.bodyEntries, lim);
     if (category === 'body_evolution') data.body_evolution = sources.bodyEvolution && evolution(sources.bodyEvolution, lim);
     if (category === 'profile_preferences') data.profile_preferences = sources.profilePreferences && preferences(sources.profilePreferences, lim);
+    if (category === 'training_goals') data.training_goals = sources.trainingGoals && goals(sources.trainingGoals, lim);
     const value = data[category];
     if (value === undefined || (Array.isArray(value) && value.length === 0)) {
       delete data[category];

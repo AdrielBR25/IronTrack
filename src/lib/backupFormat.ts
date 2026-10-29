@@ -20,8 +20,11 @@ export const BACKUP_APP = 'irontrack';
 // com `calendarDecisions: []` ·
 // v7 (P17): + coleções `customExercises` (exercícios personalizados) e `exerciseFavorites` (favoritos da biblioteca),
 // ambas com `profileId`; + origem opcional na biblioteca nos exercícios das fichas e sessões (`catalogId`,
-// `catalogVersion`, `customExerciseId`). Backups v0–v6 viram v7 com as duas coleções vazias; nada mais muda.
-export const BACKUP_SCHEMA_VERSION = 7;
+// `catalogVersion`, `customExerciseId`). Backups v0–v6 viram v7 com as duas coleções vazias; nada mais muda ·
+// v8 (P20): + campos opcionais nas sessões para edição e retomada de treinos finalizados (`timing`, `revision`,
+// `revisions`) e nos exercícios da sessão (`catalogVersion`, `replacedBy`, `replacesExerciseId`, `addedAfterFinishAt`,
+// `correctedFrom`). Estrutura igual à v7; nada é preenchido na migração (ausente = treino nunca editado/retomado).
+export const BACKUP_SCHEMA_VERSION = 8;
 
 export type BackupData = DataSnapshot;
 
@@ -165,6 +168,10 @@ const MIGRATIONS: Record<number, Migration> = {
     const data = (raw.data ?? {}) as Record<string, unknown>;
     return { ...raw, schemaVersion: 7, data: { ...data, customExercises: data.customExercises ?? [], exerciseFavorites: data.exerciseFavorites ?? [] } };
   },
+  // v7 → v8: nenhum registro muda. Os campos de edição/retomada são opcionais e ausentes em v7. A versão nova faz um app
+  // anterior recusar o arquivo (com orientação para atualizar) em vez de restaurar um treino retomado sem entender o tempo
+  // com pausas nem as revisões.
+  7: (raw) => ({ ...raw, schemaVersion: 8 }),
 };
 
 export function migrateBackup(raw: unknown): ParseResult<Record<string, unknown>> {

@@ -9,6 +9,7 @@ import { Card } from '@/components/ui/card';
 import { Input, NativeSelect } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import type { AssistantState } from './useAssistant';
+import { STATUS_INFO, type AssistantStatus } from './assistantModel';
 
 export function ModeSelector({ a }: { a: AssistantState }) {
   const locked = a.phase === 'running' || a.phase === 'preparing';
@@ -137,6 +138,110 @@ export function GatewayPanel({ a }: { a: AssistantState }) {
               Destino: {remote.destination}. Escolher um modelo não envia nada: cada pergunta ainda passa pela prévia e pela sua autorização.
             </p>
           )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------- P20: estado e passo a passo
+
+/** Provedores que o gateway do IronTrack sabe chamar (services/ai-gateway, PROVIDER_IDS). Nenhum outro é oferecido. */
+export const SUPPORTED_PROVIDERS = [
+  { id: 'openai', label: 'OpenAI', api: 'Responses API' },
+  { id: 'anthropic', label: 'Anthropic Claude', api: 'Messages API' },
+  { id: 'gemini', label: 'Google Gemini', api: 'generateContent' },
+] as const;
+
+const STATUS_TONE: Record<AssistantStatus, string> = {
+  local: 'border-primary/30 bg-primary/5',
+  connected: 'border-primary/40 bg-primary/10',
+  unavailable: 'border-border',
+  auth_failure: 'border-destructive/50 bg-destructive/10',
+  gateway_unreachable: 'border-destructive/50 bg-destructive/10',
+  provider_unavailable: 'border-warn/50 bg-warn/10',
+};
+
+export function ConnectionStatus({ a }: { a: AssistantState }) {
+  const info = STATUS_INFO[a.status];
+  return (
+    <div className={cn('flex items-start gap-2 rounded-xl border p-2.5 text-sm', STATUS_TONE[a.status])} role="status" data-testid="ai-status" data-status={a.status}>
+      <span className={cn('mt-1 h-2.5 w-2.5 shrink-0 rounded-full', a.status === 'connected' || a.status === 'local' ? 'bg-primary' : a.status === 'provider_unavailable' ? 'bg-warn' : a.status === 'unavailable' ? 'bg-muted-foreground' : 'bg-destructive')} aria-hidden />
+      <span className="min-w-0">
+        <span className="block font-semibold">{info.label}</span>
+        <span className="block text-xs text-muted-foreground">{info.text}</span>
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Passo a passo do modo remoto (P20): modo → provedor → endereço → token → testar → modelo → confirmar → conversar.
+ * O provedor é escolhido antes (entre os três que o gateway sabe chamar) e confirmado depois de conectar, quando o
+ * gateway diz se ele está configurado lá. Nada é enviado antes da prévia de cada pergunta.
+ */
+export function SetupSteps({ a, onStart }: { a: AssistantState; onStart: () => void }) {
+  const g = a.gateway;
+  const connected = g.status === 'connected';
+  const steps: { label: string; done: boolean }[] = [
+    { label: 'Modo remoto', done: a.mode === 'remote' },
+    { label: 'Provedor', done: !!a.providerId || !!a.wantedProvider },
+    { label: 'Endereço do gateway', done: connected },
+    { label: 'Token de acesso', done: connected },
+    { label: 'Testar conexão', done: connected && a.testing !== 'fail' },
+    { label: 'Modelo', done: !!a.modelId && !!a.remoteInfo },
+    { label: 'Confirmar', done: !!a.modelId && !!a.remoteInfo?.available },
+  ];
+  const ready = steps.every((s) => s.done);
+  const wanted = SUPPORTED_PROVIDERS.find((p) => p.id === a.wantedProvider);
+  return (
+    <Card className="space-y-3 p-3.5" data-testid="setup-steps">
+      <ol className="flex flex-wrap gap-1.5 text-xs" aria-label="Passos da configuração">
+        {steps.map((s, i) => (
+          <li key={s.label} className={cn('rounded-full border px-2 py-0.5', s.done ? 'border-primary/50 bg-primary/10 text-foreground' : 'text-muted-foreground')} data-done={s.done}>
+            {s.done ? '✓' : i + 1} {s.label}
+          </li>
+        ))}
+      </ol>
+      {!connected && (
+        <fieldset className="space-y-1.5">
+          <legend className="text-sm font-semibold">Qual provedor você vai usar?</legend>
+          <p className="text-xs text-muted-foreground">Só os provedores que o gateway do IronTrack sabe chamar. A chave do provedor fica no gateway, nunca no app.</p>
+          <div className="grid gap-1.5 sm:grid-cols-3">
+            {SUPPORTED_PROVIDERS.map((p) => (
+              <label key={p.id} className={cn('flex cursor-pointer items-center gap-2 rounded-xl border p-2 text-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring', a.wantedProvider === p.id && 'border-primary bg-primary/10')}>
+                <input type="radio" name="wanted-provider" value={p.id} checked={a.wantedProvider === p.id} onChange={() => a.setWantedProvider(p.id)} className="accent-[hsl(var(--primary))]" data-testid={`wanted-${p.id}`} />
+                <span>
+                  {p.label} <span className="block text-[11px] text-muted-foreground">{p.api}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      )}
+      {connected && wanted && !g.providers.some((p) => p.id === wanted.id) && (
+        <p className="text-xs text-warn" data-testid="wanted-missing">
+          Este gateway não oferece {wanted.label}. Escolha um dos provedores que ele oferece abaixo.
+        </p>
+      )}
+      {connected && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => void a.testConnection()} disabled={a.testing === 'testing'} data-testid="gateway-test">
+            {a.testing === 'testing' ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden /> : <Plug aria-hidden />} Testar conexão
+          </Button>
+          <span className="text-xs text-muted-foreground" role="status" data-testid="gateway-test-result">
+            {a.testing === 'ok' ? 'Conexão ok: o gateway respondeu e a lista de provedores foi atualizada.' : a.testing === 'fail' ? 'O teste falhou. Veja o estado acima.' : ''}
+          </span>
+        </div>
+      )}
+      {ready && (
+        <div className="space-y-2 rounded-xl bg-secondary/60 p-2.5 text-sm" data-testid="setup-confirm">
+          <p>
+            Pronto: perguntas vão a <strong>{a.remoteInfo?.displayName}</strong> ({a.modelId}) pelo gateway <span className="break-all">{g.origin}</span>, sempre depois da prévia e da sua autorização.
+          </p>
+          <Button size="sm" onClick={onStart} data-testid="setup-start-chat">
+            Começar a conversar
+          </Button>
         </div>
       )}
     </Card>

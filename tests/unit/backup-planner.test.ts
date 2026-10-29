@@ -58,8 +58,8 @@ describe('exportação', () => {
   it('backup atual (v6; planejamento desde a v5) contém o planejamento do perfil, com IDs, vigências e versões', async () => {
     await seed();
     const b = await exportBackup();
-    expect(BACKUP_SCHEMA_VERSION).toBe(7);
-    expect(b.schemaVersion).toBe(7);
+    expect(BACKUP_SCHEMA_VERSION).toBe(8);
+    expect(b.schemaVersion).toBe(8);
     expect(b.data.planEntries.map((e) => e.id).sort()).toEqual(['desc', 'seg-a', 'sex']);
     expect(b.data.planEntries.find((e) => e.id === 'seg-a')).toMatchObject({ scope: 'weekly', weekday: 1, validFrom: WED, revision: 1, profileId: db.currentProfileId });
     expect(checkBackupIntegrity(b).ok).toBe(true);
@@ -81,7 +81,7 @@ describe('importação de versões anteriores', () => {
     }
     if (v === 0) delete raw.schemaVersion;
     const b = parse(raw);
-    expect(b.schemaVersion).toBe(7);
+    expect(b.schemaVersion).toBe(8);
     expect(b.data.planEntries).toEqual([]);
     expect(b.data.calendarDecisions).toEqual([]);
     expect((await previewRestore(b)).blocked).toBe(false);
@@ -99,7 +99,7 @@ describe('importação de versões anteriores', () => {
   });
 
   it('versão futura (v7) é recusada sem gravar', () => {
-    const r = parseBackup(JSON.stringify({ app: 'irontrack', kind: 'backup', schemaVersion: 8, exportedAt: 'x', profile: null, data: {} }));
+    const r = parseBackup(JSON.stringify({ app: 'irontrack', kind: 'backup', schemaVersion: 9, exportedAt: 'x', profile: null, data: {} }));
     expect(!r.ok && r.errors[0]).toMatch(/versão mais nova/);
   });
 });

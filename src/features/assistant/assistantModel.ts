@@ -22,6 +22,7 @@ export const CATEGORY_LABEL: Record<AIContextCategory, string> = {
   body_measurements: 'Medidas corporais',
   body_evolution: 'Evolução corporal',
   profile_preferences: 'Preferências do perfil',
+  training_goals: 'Metas de treino',
   progress_photos: 'Fotos de progresso',
 };
 
@@ -31,6 +32,7 @@ export const CATEGORY_HINT: Record<AIContextCategory, string> = {
   body_measurements: 'Até 12 avaliações: data e medidas numéricas (sem dobras avulsas nem observações).',
   body_evolution: 'Variação de cada medida da primeira à última avaliação.',
   profile_preferences: 'Unidade de peso, dias de treino por semana e objetivo.',
+  training_goals: 'Até 10 metas ativas ou pausadas: título, tipo, alvo, progresso calculado e prazo (sem observações).',
   progress_photos: 'Indisponível: fotos nunca são compartilhadas com a IA.',
 };
 
@@ -41,6 +43,7 @@ export const NO_DATA_TEXT: Record<AIContextCategory, string> = {
   body_measurements: 'Nenhuma avaliação corporal registrada ainda.',
   body_evolution: 'É preciso ter ao menos duas avaliações com a mesma medida para mostrar evolução.',
   profile_preferences: 'Nenhuma preferência disponível.',
+  training_goals: 'Nenhuma meta ativa ou pausada.',
   progress_photos: 'Fotos nunca são compartilhadas.',
 };
 
@@ -56,7 +59,7 @@ export const PURPOSE_LABEL: Record<AIPurpose, string> = {
   general_question: 'Pergunta geral',
 };
 
-const TRAINING: readonly AIContextCategory[] = ['training_summary', 'training_history'];
+const TRAINING: readonly AIContextCategory[] = ['training_summary', 'training_history', 'training_goals'];
 const BODY: readonly AIContextCategory[] = ['body_measurements', 'body_evolution'];
 
 /** Finalidade declarada, derivada das categorias: só treino → treino; só corpo → corpo; resto → geral. */
@@ -96,4 +99,33 @@ export interface ChatMessage {
   /** Resposta de provedor remoto: nome do provedor e modelo. */
   providerLabel?: string;
   modelId?: string;
+  /** P20: resposta do catálogo local (nada foi enviado a nenhuma IA). */
+  local?: boolean;
+}
+
+// ---------------------------------------------------------------- P20: estado da conexão
+
+/** Estados mostrados ao usuário (P20 §IA): cada um com texto próprio, nunca um "erro" genérico. */
+export type AssistantStatus = 'local' | 'connected' | 'unavailable' | 'auth_failure' | 'gateway_unreachable' | 'provider_unavailable';
+
+export const STATUS_INFO: Record<AssistantStatus, { label: string; text: string }> = {
+  local: { label: 'Local', text: 'Modo local: respostas simuladas e do catálogo, geradas no aparelho. Nada sai do aparelho.' },
+  connected: { label: 'Conectado', text: 'Gateway conectado. Cada pergunta ainda passa pela prévia e pela sua autorização.' },
+  unavailable: { label: 'Não configurado', text: 'Modo remoto sem gateway conectado. Siga os passos abaixo ou volte ao modo local.' },
+  auth_failure: { label: 'Falha de autenticação', text: 'O gateway recusou o token (errado, revogado ou expirado). O token foi esquecido; informe um válido.' },
+  gateway_unreachable: { label: 'Gateway inacessível', text: 'Não foi possível contatar o gateway. Confira a internet e o endereço.' },
+  provider_unavailable: { label: 'Provedor indisponível', text: 'O gateway respondeu, mas o provedor escolhido não pode atender agora (sem chave no servidor, falha, limite ou bloqueio).' },
+};
+
+const PROVIDER_CODES: readonly string[] = ['provider_unavailable', 'provider_failure', 'invalid_response', 'content_blocked', 'rate_limited', 'quota_exceeded', 'timeout', 'model_unsupported'];
+
+/** Estado da conexão a partir do modo, do gateway e da última falha de execução. Puro. */
+export function assistantStatus(i: { mode: 'simulated' | 'remote'; gatewayStatus: 'disconnected' | 'connecting' | 'connected' | 'error'; gatewayErrorCode?: string; providerAvailable?: boolean | null; lastRunErrorCode?: string | null }): AssistantStatus {
+  if (i.mode === 'simulated') return 'local';
+  if (i.gatewayStatus === 'error') return i.gatewayErrorCode === 'access_denied' ? 'auth_failure' : i.gatewayErrorCode === 'gateway_unreachable' ? 'gateway_unreachable' : 'unavailable';
+  if (i.gatewayStatus !== 'connected') return 'unavailable';
+  if (i.providerAvailable === false) return 'provider_unavailable';
+  if (i.lastRunErrorCode === 'gateway_unreachable') return 'gateway_unreachable';
+  if (i.lastRunErrorCode && PROVIDER_CODES.includes(i.lastRunErrorCode)) return 'provider_unavailable';
+  return 'connected';
 }

@@ -10,7 +10,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_CONSENT_TTL_MS, createConsent, isAIError, type AIContextSources, type PreparedAIRequest } from '@/modules/ai';
 import { ASSISTANT_TIMEOUT_MS, REMOTE_TIMEOUT_MS, createAssistantService, type AssistantComposition, type DemoScenario, type RemoteProviderInfo } from '@/integrations/ai/assistantService';
 import { ASSISTANT_CATEGORIES, contextFingerprint, loadContextSources, watchContextSources, type AssistantCategory } from '@/integrations/ai/contextSources';
-import { CATEGORY_LABEL, friendlyError, purposeFor, validateQuestion, type ChatMessage } from './assistantModel';
+import { CATEGORY_LABEL, assistantStatus, friendlyError, purposeFor, validateQuestion, type ChatMessage } from './assistantModel';
+import { loadSnapshot, saveSnapshot, sessionComposition, touchAssistantSession } from './assistantSession';
+import { localAnswer, type LocalExercise } from './localAnswers';
 
 export interface AssistantDeps {
   composition: AssistantComposition;
@@ -23,14 +25,47 @@ export interface AssistantDeps {
   timeoutMs: number;
   /** Tempo limite das execuções remotas (gateway). */
   remoteTimeoutMs: number;
+  /**
+   * P20: guarda conexão e conversa na memória do app ao sair da tela (navegação interna), nunca em armazenamento.
+   * Padrão: ligado na tela real; desligado quando o teste fornece a própria composição.
+   */
+  persist: boolean;
+  /** P20: exercícios do catálogo para respostas locais (carregados sob demanda). null = sem respostas locais. */
+  localExercises: (() => Promise<readonly LocalExercise[]>) | null;
+}
+
+/** Catálogo do IronTrack no formato das respostas locais (pedaço separado, baixado só quando há pergunta). */
+let catalogCache: Promise<readonly LocalExercise[]> | null = null;
+/** Catálogo resumido para respostas locais; carregado uma vez, sob demanda (fica fora do pacote principal). */
+function catalogForAnswers(): Promise<readonly LocalExercise[]> {
+  catalogCache ??= loadCatalogForAnswers().catch((e) => {
+    catalogCache = null;
+    throw e;
+  });
+  return catalogCache;
+}
+async function loadCatalogForAnswers(): Promise<readonly LocalExercise[]> {
+  const [{ getCatalog }, { MUSCLE_NAME, EQUIPMENT_NAME }] = await Promise.all([import('@/modules/exercises/catalog'), import('@/modules/exercises')]);
+  return getCatalog().map((c) => ({
+    name: c.name,
+    aliases: c.aliases,
+    primary: c.primaryMuscles.map((m) => MUSCLE_NAME[m]),
+    secondary: c.secondaryMuscles.map((m) => MUSCLE_NAME[m]),
+    equipment: c.equipment.map((e) => EQUIPMENT_NAME[e]),
+    instructions: c.instructions,
+    commonMistakes: c.commonMistakes,
+    safetyNotes: c.safetyNotes,
+  }));
 }
 
 let seq = 0;
 const tempId = () => `tmp-${Date.now().toString(36)}-${(++seq).toString(36)}`;
 
-export function defaultAssistantDeps(): AssistantDeps {
+export function defaultAssistantDeps(persist = true): AssistantDeps {
   return {
-    composition: createAssistantService(),
+    composition: persist ? sessionComposition() : createAssistantService(),
+    persist,
+    localExercises: catalogForAnswers,
     loadSources: (c) => loadContextSources(c),
     watchSources: watchContextSources,
     now: Date.now,
@@ -67,20 +102,35 @@ export interface GatewayState {
   origin?: string;
   providers: RemoteProviderInfo[];
   error?: string;
+  /** P20: código do erro (estado mostrado: falha de autenticação × gateway inacessível). */
+  errorCode?: string;
 }
 
 export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
-  const [deps] = useState<AssistantDeps>(() => ({ ...defaultAssistantDeps(), ...overrides }));
+  const [deps] = useState<AssistantDeps>(() => {
+    const persist = overrides.persist ?? !overrides.composition;
+    return { ...defaultAssistantDeps(persist && !overrides.composition), ...overrides, persist };
+  });
   const { composition } = deps;
   const simulated = composition.providers[0];
+  // P20: retoma a sessão da memória do app (navegação interna), se houver e ainda for da mesma composição.
+  const [snap] = useState(() => (deps.persist ? loadSnapshot() : null));
+  const restoredGateway = snap && snap.gateway.status === 'connected' && composition.service.listProviders().some((p) => snap.gateway.providers.some((g) => g.id === p.id)) ? (snap.gateway as GatewayState) : null;
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => snap?.messages ?? []);
   const [draft, setDraftState] = useState('');
-  const [categories, setCategories] = useState<AssistantCategory[]>([]);
-  const [mode, setModeState] = useState<AssistantMode>('simulated');
-  const [gateway, setGateway] = useState<GatewayState>({ status: 'disconnected', providers: [] });
-  const [providerId, setProviderState] = useState(simulated?.id ?? '');
-  const [modelId, setModelState] = useState(simulated?.models[0]?.id ?? '');
+  const [categories, setCategories] = useState<AssistantCategory[]>(() => snap?.categories ?? []);
+  const [mode, setModeState] = useState<AssistantMode>(() => (snap?.mode === 'remote' ? 'remote' : 'simulated'));
+  const [gateway, setGateway] = useState<GatewayState>(() => restoredGateway ?? (snap?.gateway.status === 'error' ? (snap.gateway as GatewayState) : { status: 'disconnected', providers: [] }));
+  const [providerId, setProviderState] = useState(() => (snap ? (snap.mode === 'remote' ? (restoredGateway ? snap.providerId : '') : snap.providerId) : (simulated?.id ?? '')));
+  const [modelId, setModelState] = useState(() => (snap ? (snap.mode === 'remote' ? (restoredGateway ? snap.modelId : '') : snap.modelId) : (simulated?.models[0]?.id ?? '')));
+  const [lastRunError, setLastRunError] = useState<string | null>(null);
+  /** P20: provedor escolhido no passo a passo antes de conectar (confirmado depois, se o gateway o oferecer). */
+  const [wantedProvider, setWantedProvider] = useState<string>('');
+  const wantedRef = useRef('');
+  wantedRef.current = wantedProvider;
+  /** "Perguntar à IA mesmo assim": a próxima pergunta não usa a resposta local. */
+  const skipLocalRef = useRef(false);
   const provider = mode === 'simulated' ? simulated : gateway.providers.find((p) => p.id === providerId);
   const remoteInfo = mode === 'remote' ? gateway.providers.find((p) => p.id === providerId) : undefined;
   const [scenario, setScenarioState] = useState<DemoScenario>('echo');
@@ -132,6 +182,13 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
     if (previewRef.current) closePreview();
   }, [closePreview]);
 
+  // Estado atual para guardar ao sair (P20). Uma pergunta em andamento é cancelada ao sair e fica marcada assim.
+  const liveRef = useRef({ messages, categories, mode, providerId, modelId, gateway });
+  liveRef.current = { messages, categories, mode, providerId, modelId, gateway };
+  useEffect(() => {
+    if (deps.persist) touchAssistantSession();
+  }, [deps.persist, messages, gateway, mode]);
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -139,12 +196,23 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
       mountedRef.current = false;
       abortRef.current?.abort();
       connectRef.current?.abort();
-      // O token do gateway some junto com a tela.
-      composition.disconnectGateway();
       unwatchRef.current?.();
       if (expiryRef.current) clearTimeout(expiryRef.current);
+      if (deps.persist) {
+        // P20: conexão e conversa ficam na memória do app (nunca em armazenamento) até recarregar ou inatividade.
+        const l = liveRef.current;
+        const cancelled = 'Você saiu da tela do assistente e a solicitação foi cancelada.';
+        saveSnapshot({
+          ...l,
+          messages: l.messages.map((m) => (m.status === 'sending' ? { ...m, status: 'cancelled' as const, error: cancelled } : m)),
+          gateway: l.gateway.status === 'connecting' ? { status: 'disconnected', providers: [] } : l.gateway,
+        });
+      } else {
+        // O token do gateway some junto com a tela.
+        composition.disconnectGateway();
+      }
     };
-  }, [composition]);
+  }, [composition, deps.persist]);
 
   const setDraft = useCallback(
     (t: string) => {
@@ -223,10 +291,14 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
         const conn = await composition.connectGateway({ url, token }, ctrl.signal);
         if (!mountedRef.current || connectRef.current !== ctrl) return false;
         setGateway({ status: 'connected', origin: conn.origin, providers: conn.providers });
+        // A escolha explícita do passo "Provedor" vale se o gateway o oferecer e estiver configurado lá.
+        const wanted = conn.providers.find((p) => p.id === wantedRef.current && p.available);
+        if (wanted) setProviderState(wanted.id);
         return true;
       } catch (e) {
         if (!mountedRef.current || connectRef.current !== ctrl) return false;
-        setGateway({ status: 'error', providers: [], error: friendlyError(e).message });
+        const fe = friendlyError(e);
+        setGateway({ status: 'error', providers: [], error: fe.message, errorCode: fe.code });
         return false;
       } finally {
         if (connectRef.current === ctrl) connectRef.current = null;
@@ -243,8 +315,40 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
     setGateway({ status: 'disconnected', providers: [] });
     setProviderState('');
     setModelState('');
+    setLastRunError(null);
     invalidate();
   }, [composition, invalidate]);
+
+  /** P20: "Testar conexão" — confere de novo o gateway e a disponibilidade dos provedores (sem dados pessoais). */
+  const [testing, setTesting] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
+  const testConnection = useCallback(async () => {
+    if (gateway.status !== 'connected') return;
+    setTesting('testing');
+    try {
+      const conn = await composition.testGateway();
+      if (!mountedRef.current) return;
+      setGateway((g) => ({ ...g, status: 'connected', providers: conn.providers }));
+      setLastRunError(null);
+      setTesting('ok');
+    } catch (e) {
+      if (!mountedRef.current) return;
+      const fe = friendlyError(e);
+      setTesting('fail');
+      if (fe.code === 'access_denied') {
+        composition.disconnectGateway();
+        setGateway({ status: 'error', providers: [], error: TOKEN_REJECTED_MESSAGE, errorCode: 'access_denied' });
+        setProviderState('');
+        setModelState('');
+      } else setLastRunError(fe.code);
+    }
+  }, [composition, gateway.status]);
+
+  /** P20: limpa a conversa desta sessão (só memória). */
+  const clearConversation = useCallback(() => {
+    abortRef.current?.abort();
+    setMessages([]);
+    setLastRunError(null);
+  }, []);
 
   const setScenario = useCallback(
     (s: DemoScenario) => {
@@ -262,6 +366,29 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
       setNotice(check.error);
       return;
     }
+    // P20: pergunta sobre um exercício do catálogo → resposta local, no aparelho, sem prévia (nada é enviado).
+    if (!skipLocalRef.current && deps.localExercises) {
+      let local: ReturnType<typeof localAnswer> = null;
+      try {
+        local = localAnswer(check.text, await deps.localExercises());
+      } catch {
+        local = null;
+      }
+      if (local && mountedRef.current) {
+        stopWatching();
+        setPreview(null);
+        setNotice(null);
+        setMessages((m) => [
+          ...m,
+          { id: tempId(), role: 'user', text: check.text, status: 'sent', local: true },
+          { id: tempId(), role: 'assistant', text: local.text, status: 'done', local: true },
+        ]);
+        setDraftState('');
+        draftVersion.current++;
+        return;
+      }
+    }
+    skipLocalRef.current = false;
     if (mode === 'remote' && gateway.status !== 'connected') {
       setNotice('Conecte um gateway de IA ou volte ao modo simulado.');
       return;
@@ -365,18 +492,20 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
         ...(isRemote ? { providerLabel: target.displayName, modelId: res.modelId } : {}),
       };
       setMessages((m) => [...m.map((x) => (x.id === userMsg.id ? { ...x, status: 'sent' as const } : x)), reply]);
+      setLastRunError(null);
     } catch (e) {
       if (!mountedRef.current) return;
       const cancelled = isAIError(e) && e.code === 'cancelled';
       const error = cancelled ? 'Você cancelou. Nenhuma resposta foi gerada.' : friendlyError(e).message;
       setMessages((m) => m.map((x) => (x.id === userMsg.id ? { ...x, status: cancelled ? 'cancelled' : 'failed', error } : x)));
+      if (isRemote && isAIError(e) && !cancelled) setLastRunError(e.code);
       // P07: token recusado durante o uso (revogado, expirado ou trocado no servidor): esquece o token
       // desta página na hora, em vez de continuar tentando com uma credencial que não vale mais.
       if (isRemote && isAIError(e) && e.code === 'access_denied') {
         connectRef.current?.abort();
         connectRef.current = null;
         composition.disconnectGateway();
-        setGateway({ status: 'error', providers: [], error: TOKEN_REJECTED_MESSAGE });
+        setGateway({ status: 'error', providers: [], error: TOKEN_REJECTED_MESSAGE, errorCode: 'access_denied' });
         setProviderState('');
         setModelState('');
       }
@@ -406,6 +535,19 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
   );
 
   const models = useMemo(() => provider?.models ?? [], [provider]);
+
+  /** P20: "Perguntar à IA mesmo assim" depois de uma resposta local. */
+  const askAIAnyway = useCallback(
+    (question: string) => {
+      skipLocalRef.current = true;
+      setDraftState(question);
+      setNotice(null);
+      invalidate();
+    },
+    [invalidate],
+  );
+
+  const status = assistantStatus({ mode, gatewayStatus: gateway.status, gatewayErrorCode: gateway.errorCode, providerAvailable: remoteInfo ? remoteInfo.available : null, lastRunErrorCode: lastRunError });
 
   return {
     mode,
@@ -437,6 +579,13 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
     closePreview,
     cancelRun,
     retry,
+    status,
+    wantedProvider,
+    setWantedProvider,
+    testing,
+    testConnection,
+    clearConversation,
+    askAIAnyway,
   };
 }
 
