@@ -49,6 +49,9 @@ recusa registros acima de 512 KB e o caractere nulo.
    entidade, o aparelho mantém a sua (o envio resolve); se o registro local mudou depois da última varredura, não toca;
    senão aplica. Cursor à frente do servidor (banco restaurado) → `reset` e baixa de novo do zero, sem apagar nada local.
 
+Sem conexão, o ciclo faz só a varredura local: a fila (e o aviso ao sair da conta) conta o que ainda não subiu, e o
+estado fica "Offline" com o número de pendências; nunca "Sincronizado".
+
 Disparos: alteração local (aguarda 1,5 s para agrupar), voltar a ficar online, aba visível, a cada 60 s, "Sincronizar
 agora". Falhas: nova tentativa com espera crescente (2 s → 5 min, com variação). Várias abas: um ciclo por vez
 (Web Locks). No servidor, `users.sync_seq` é incrementado com trava da linha da conta: o cursor não tem buracos.

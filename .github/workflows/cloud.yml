@@ -1,0 +1,48 @@
+name: Nuvem (API e E2E com PostgreSQL)
+
+# P21: testes da API e do modo conta com um PostgreSQL descartável do próprio CI. Não publica nada.
+on:
+  pull_request:
+  push:
+    branches-ignore: [main, gh-pages]
+    paths: ['services/**', 'shared/**', 'src/**', 'e2e-cloud/**', 'playwright.cloud.config.ts', 'package*.json', '.github/workflows/cloud.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  api-e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # banco de TESTE do próprio job (descartável); nunca o de produção
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.18.0
+          cache: npm
+      - run: npm ci
+      - run: npx tsc -b
+      - name: Testes da API (PostgreSQL real)
+        run: npm run test:api
+      - name: Instalar Chromium do Playwright
+        run: npx playwright install --with-deps chromium
+      - name: E2E da nuvem (dois navegadores)
+        run: npx playwright test -c playwright.cloud.config.ts
+        env:
+          CI: 'true'
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report-cloud
+          path: playwright-report-cloud
+          retention-days: 7
