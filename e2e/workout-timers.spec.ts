@@ -151,6 +151,10 @@ test('cronômetro, cardio, unilateral e peso corporal: treino → recarga → hi
   await page.getByTestId('set-timer-resume').click();
   await page.waitForTimeout(1_200);
   await page.getByTestId('set-timer-stop').click();
+  // O campo de duração reflete a medida um render depois do clique: ler logo após o clique às vezes ainda
+  // pegava a meta (30) no CI, embora a série já estivesse gravada com a medida.
+  await expect(page.getByTestId('set-timer-status')).toHaveText('Registrado na série');
+  await expect(page.getByTestId('input-duration')).not.toHaveValue('30');
   const measured = Number(await page.getByTestId('input-duration').inputValue());
   expect(measured).toBeGreaterThanOrEqual(paused + 1);
   expect(measured).toBeLessThan(paused + 4);
