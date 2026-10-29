@@ -254,7 +254,7 @@ test('reconhecimento: sugerir, associar, lote, desfazer, mais utilizados, adicio
 
   // 18. Backup v7: as referências gravadas viajam; a sessão antiga continua sem origem.
   const backup = await exportBackup(page, info.outputPath('backup-reconhecimento.json'));
-  expect(backup.schemaVersion).toBe(7);
+  expect(backup.schemaVersion).toBe(8);
   const exA = backup.data.routines[0].workouts[0].exercises as { name: string; catalogId?: string; catalogVersion?: number }[];
   expect(exA.find((e) => e.name === 'Tríceps na polia (corda)')).toMatchObject({ catalogId: 'triceps-corda', catalogVersion: 1 });
   expect(exA.find((e) => e.name === 'Supino máquina')).toMatchObject({ catalogId: 'supino-maquina' });

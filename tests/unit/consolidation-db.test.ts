@@ -250,8 +250,8 @@ describe('backup', () => {
     await seed();
     await importNow();
     const b = await exportBackup();
-    expect(BACKUP_SCHEMA_VERSION).toBe(7);
-    expect(b.schemaVersion).toBe(7);
+    expect(BACKUP_SCHEMA_VERSION).toBe(8);
+    expect(b.schemaVersion).toBe(8);
     expect(b.data.planEntries).toHaveLength(5);
     expect(JSON.stringify(b)).not.toContain(IMPORT_RECORD_PREFIX);
     expect(b.data.settings!.id).toBe('settings');

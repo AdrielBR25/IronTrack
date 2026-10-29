@@ -126,7 +126,29 @@ export interface SessionExercise extends ExerciseModelFields {
   /** P17: origem na biblioteca copiada da ficha no início do treino (só referência; ver ExerciseTemplate). */
   catalogId?: string;
   customExerciseId?: string;
+  // P20 (docs/EDICAO_HISTORICO.md). Todos opcionais: ausentes nos registros antigos, que continuam válidos sem reescrita.
+  /** Versão da entrada do catálogo quando o exercício veio da biblioteca durante o treino ou na edição. */
+  catalogVersion?: number;
+  /** Substituição com séries já feitas: este exercício foi encerrado e seguiu em outro (ID do novo exercício). */
+  replacedBy?: string;
+  /** Este exercício continuou outro que foi substituído com séries já feitas (ID do exercício anterior). */
+  replacesExerciseId?: string;
+  /** Exercício acrescentado depois da finalização (edição do histórico), em ms. */
+  addedAfterFinishAt?: number;
+  /** Identidade corrigida na edição do histórico: o que estava registrado antes da correção (auditoria). */
+  correctedFrom?: ExerciseCorrection;
   sets: SessionSet[];
+}
+
+/** Identidade anterior de um exercício corrigido no histórico (P20). Só auditoria: nada é recalculado a partir dela. */
+export interface ExerciseCorrection {
+  name: string;
+  exerciseKey: string;
+  templateId?: string;
+  catalogId?: string;
+  customExerciseId?: string;
+  /** Quando a correção foi gravada (ms). */
+  at: number;
 }
 
 export interface RestState {
@@ -145,6 +167,49 @@ export interface RestState {
 
 export type SessionStatus = 'active' | 'completed' | 'discarded';
 
+/** Trecho em que o treino esteve ativo (ms). Auditoria; a duração efetiva vem de `accumulatedSec`. */
+export interface ActiveSegment {
+  start: number;
+  end: number;
+}
+
+/**
+ * Modelo de tempo com pausas (P20, docs/RETOMADA_TREINOS.md). Ausente nos treinos que nunca foram retomados: neles a
+ * duração continua sendo `durationSec` (concluído) ou relógio desde `startedAt` (em andamento), como antes.
+ */
+export interface SessionTiming {
+  /** Segundos efetivos dos segmentos ativos já encerrados (o tempo em que o treino ficou finalizado não entra). */
+  accumulatedSec: number;
+  /** Início (ms) do segmento ativo atual; null enquanto o treino está concluído. */
+  activeSince: number | null;
+  /** Segmentos ativos encerrados, para auditoria (no máximo MAX_TIMING_ENTRIES, os mais recentes). */
+  segments: ActiveSegment[];
+  /** Horários (ms) das finalizações anteriores à atual, para auditoria. */
+  finishes: number[];
+  /** Horários (ms) em que o treino finalizado foi retomado. */
+  resumes: number[];
+}
+
+export type SessionRevisionKind = 'edit' | 'resume' | 'restore';
+
+/** Estado de um treino antes de uma alteração no histórico (P20). Só o que a edição pode mudar. */
+export interface SessionRevisionSnapshot {
+  exercises: SessionExercise[];
+  durationSec?: number;
+  notes?: string;
+}
+
+/** Revisão auditável de um treino concluído (P20). Limitada a MAX_SESSION_REVISIONS por treino; vai no backup. */
+export interface SessionRevision {
+  /** Número da revisão que esta alteração criou (`WorkoutSession.revision` depois dela). */
+  revision: number;
+  kind: SessionRevisionKind;
+  at: number;
+  /** Resumo legível do que mudou (pt-BR). */
+  summary: string[];
+  /** Estado anterior (permite restaurar). */
+  before: SessionRevisionSnapshot;
+}
 export interface WorkoutSession {
   id: string;
   /** Perfil proprietário, explícito: o treino continua com dono mesmo se a rotina for excluída. */
@@ -165,6 +230,12 @@ export interface WorkoutSession {
   /** Se este treino avançou a rotação ao ser concluído. */
   advancedRotation?: boolean;
   updatedAt: number;
+  /** P20: tempo com pausas (só existe depois de uma retomada). */
+  timing?: SessionTiming;
+  /** P20: número de alterações gravadas no histórico (edição, retomada, restauração). Ausente = 0. */
+  revision?: number;
+  /** P20: revisões mais recentes (auditoria e desfazer). */
+  revisions?: SessionRevision[];
 }
 
 export interface RotationState {

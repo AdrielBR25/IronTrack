@@ -277,7 +277,7 @@ describe('Treinos: agenda unificada', () => {
 describe('persistência', () => {
   it('o calendário não cria tabela própria (P16: só a de decisões lembradas; P17 acrescenta a biblioteca: Dexie v6, backup v7)', () => {
     expect(DB_SCHEMA_VERSION).toBe(6);
-    expect(BACKUP_SCHEMA_VERSION).toBe(7);
+    expect(BACKUP_SCHEMA_VERSION).toBe(8);
     expect(db.tables.map((t) => t.name).sort()).toEqual(['bodyEntries', 'calendarDecisions', 'customExercises', 'exerciseFavorites', 'goals', 'overrides', 'photos', 'planEntries', 'profiles', 'rotations', 'routines', 'sessions', 'settings']);
   });
 });

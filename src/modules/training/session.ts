@@ -2,6 +2,7 @@ import type { ExerciseModelFields, ExerciseTemplate, RestDefaults, Routine, Sess
 import { exerciseKey, uid } from '@/lib/utils';
 import { fmtRepRange } from './routineSchema';
 import { exerciseMeasures, pickModelFields, type ExerciseMeasures } from './exerciseModel';
+import { closeTiming } from './timing';
 
 // Lógica pura da sessão de treino. Cada operação devolve uma nova sessão,
 // que é persistida no IndexedDB a cada alteração (recuperação de sessão).
@@ -102,6 +103,46 @@ function pickLibraryRef(t: Pick<ExerciseTemplate, 'catalogId' | 'customExerciseI
   if (typeof t.catalogId === 'string' && t.catalogId) return { catalogId: t.catalogId };
   if (typeof t.customExerciseId === 'string' && t.customExerciseId) return { customExerciseId: t.customExerciseId };
   return {};
+}
+
+export interface SessionExerciseOptions {
+  /** ID do exercício na sessão (novo, gerado uma única vez). */
+  id?: string;
+  /** Guarda o ID da instância da ficha (`templateId`). Falso para exercícios vindos da biblioteca durante o treino. */
+  withTemplateId?: boolean;
+  /**
+   * Séries anteriores usadas para pré-preencher (histórico do mesmo exercício). `null` = sem pré-preenchimento: cargas
+   * e repetições ficam vazias (P20: exercício acrescentado no histórico nunca recebe carga automática).
+   */
+  last?: SessionSet[] | null;
+}
+
+/** Cópia de um exercício da ficha para a sessão, com as séries planejadas. */
+export function sessionExerciseFromTemplate(t: ExerciseTemplate, history: WorkoutSession[], o: SessionExerciseOptions = {}): SessionExercise {
+  const key = exerciseKey(t.name);
+  const last = o.last === null ? undefined : (o.last ?? historyFor(key, history, 1)[0]?.sets);
+  const plan = o.last === null ? { ...t, targetWeight: undefined } : t;
+  const out: SessionExercise = {
+    id: o.id ?? uid(),
+    exerciseKey: key,
+    templateId: t.id,
+    name: t.name,
+    muscleGroup: t.muscleGroup,
+    category: t.category,
+    equipment: t.equipment,
+    repMin: t.repMin,
+    repMax: t.repMax,
+    restSec: t.restSec,
+    plannedSets: t.sets,
+    notes: t.notes,
+    ...pickModelFields(t),
+    ...pickLibraryRef(t),
+    sets: buildSets(plan, last),
+  };
+  if (o.withTemplateId === false) delete out.templateId;
+  if (out.notes === undefined) delete out.notes;
+  if (typeof t.catalogId === 'string' && t.catalogId && typeof t.catalogVersion === 'number' && o.withTemplateId === false) out.catalogVersion = t.catalogVersion;
+  return out;
 }
 
 export function buildSession(routine: Routine, workout: Workout, history: WorkoutSession[], now = Date.now()): WorkoutSession {
@@ -316,6 +357,11 @@ export function sessionProgress(session: WorkoutSession): { done: number; total:
 }
 
 export function finishSession(session: WorkoutSession, now = Date.now(), notes?: string): WorkoutSession {
+  // P20: treino retomado soma só os segmentos ativos (o intervalo em que ficou finalizado não conta).
+  if (session.timing) {
+    const { timing, durationSec } = closeTiming(session.timing, now);
+    return { ...session, status: 'completed', finishedAt: now, durationSec, timing, notes: notes ?? session.notes, rest: null, updatedAt: now };
+  }
   return {
     ...session,
     status: 'completed',

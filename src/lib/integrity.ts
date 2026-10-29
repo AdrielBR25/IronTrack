@@ -1,6 +1,6 @@
 import { OWNED_COLLECTIONS, type CollectionName, type DataSnapshot } from './types';
 import { isValidProfileId } from './profile';
-import { exerciseModelIssues, setModelIssues, type ModelIssue } from '@/modules/training';
+import { exerciseModelIssues, revisionIssues, setModelIssues, timingIssues, type ModelIssue } from '@/modules/training';
 import { goalIssues } from '@/modules/goals';
 import { calendarDecisionIssues, planEntryIssues } from '@/modules/planner';
 import { customExerciseIssues, favoriteIssues, isCustomId, CATALOG_ID_RE } from '@/modules/exercises';
@@ -57,6 +57,8 @@ export type IssueCode =
   | 'PLAN_WORKOUT_MISSING'
   | 'PLAN_DAY_CONFLICT'
   | 'INVALID_CALENDAR_DECISION'
+  | 'INVALID_SESSION_TIMING'
+  | 'INVALID_SESSION_REVISION'
   // P17: biblioteca de exercícios (docs/BIBLIOTECA_EXERCICIOS.md §13–14).
   | 'INVALID_CUSTOM_EXERCISE'
   | 'INVALID_FAVORITE'
@@ -278,6 +280,14 @@ export function checkIntegrity(d: DataSnapshot, ownership?: OwnershipContext): I
     }
     if (s.durationSec !== undefined && (!isFiniteNum(s.durationSec) || s.durationSec < 0))
       add('warning', 'INVALID_NUMBER', 'sessions', s.id, 'Treino com duração inválida.', 'O treino é preservado; a duração pode aparecer incorreta.');
+    // P20: tempo com pausas e revisões do histórico. Malformados não impedem a restauração (o treino e as séries são
+    // preservados); a duração ou o histórico de revisões podem aparecer incompletos.
+    const tIssues = timingIssues((s as { timing?: unknown }).timing);
+    if (tIssues.length)
+      add('warning', 'INVALID_SESSION_TIMING', 'sessions', s.id, `Tempo do treino retomado inválido: ${tIssues.slice(0, 3).join('; ')}.`, 'O treino é preservado; a duração exibida é a registrada na finalização.');
+    const rIssues = revisionIssues((s as { revisions?: unknown }).revisions);
+    if (rIssues.length || ((s as { revision?: unknown }).revision !== undefined && !(isFiniteNum((s as { revision?: unknown }).revision) && ((s as { revision: number }).revision) >= 0)))
+      add('warning', 'INVALID_SESSION_REVISION', 'sessions', s.id, `Revisões do treino inválidas: ${(rIssues.length ? rIssues : ['número de revisão inválido']).join('; ')}.`, 'O treino é preservado; restaurar uma versão anterior pode não estar disponível.');
     let badNumbers = 0;
     const model: ModelIssue[] = [];
     for (const ex of s.exercises) {

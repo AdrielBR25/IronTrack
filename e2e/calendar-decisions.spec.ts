@@ -202,7 +202,7 @@ test('decisões lembradas: lembrar, recarregar, invalidar, rever, desfazer parci
   const file = info.outputPath('backup-decisoes.json');
   await download.saveAs(file);
   const backup = JSON.parse(readFileSync(file, 'utf8'));
-  expect(backup.schemaVersion).toBe(7); // P17: v7 (biblioteca de exercícios)
+  expect(backup.schemaVersion).toBe(8); // P17: v7 (biblioteca de exercícios)
   expect(backup.data.calendarDecisions).toHaveLength(1);
   expect(backup.data.calendarDecisions[0]).toMatchObject({ decision: 'keep_plan', date: today, scope: 'conflict_day' });
   expect(JSON.stringify(backup)).not.toMatch(/planImport|calendarPrefs/);

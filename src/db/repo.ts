@@ -151,6 +151,14 @@ export async function completeSession(s: WorkoutSession, notes?: string, now = D
     if (existing && existing.status !== 'active') return existing;
     const settings = await getSettings();
     let done = finishSession(s, now, notes);
+    // P20: um treino retomado já teve a rotação decidida na primeira finalização; finalizar de novo nunca a avança outra
+    // vez (o registro mantém o que aconteceu na primeira vez). Correções manuais continuam em Treinos.
+    const resumed = !!(existing ?? s).timing?.resumes.length;
+    if (resumed) {
+      done = { ...done, advancedRotation: !!(existing ?? s).advancedRotation };
+      await db.sessions.put(done);
+      return done;
+    }
     const advance = shouldAdvance(done, settings.rotationPolicy, settings.rotationThreshold);
     const routine = await db.routines.get(s.routineId);
     if (advance && routine) {

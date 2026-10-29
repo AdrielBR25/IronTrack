@@ -16,3 +16,5 @@ export * from './restTimer';
 export * from './setTimer';
 export * from './sessionMerge';
 export * from './modelCompat';
+export * from './timing';
+export * from './sessionEdit';

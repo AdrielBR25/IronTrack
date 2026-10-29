@@ -172,7 +172,7 @@ test('modalidades: editor → treino → histórico → Desempenho → backup v3
   const file = info.outputPath('backup.json');
   await download.saveAs(file);
   const backup = JSON.parse(readFileSync(file, 'utf8'));
-  expect(backup.schemaVersion).toBe(7); // P12: v4 (metas); P13: v5 (planejamento); P16: v6 (decisões); P17: v7 (biblioteca); os campos do modelo v3 continuam iguais
+  expect(backup.schemaVersion).toBe(8); // P12: v4 (metas); P13: v5 (planejamento); P16: v6 (decisões); P17: v7 (biblioteca); os campos do modelo v3 continuam iguais
   const sets = backup.data.sessions[0].exercises.flatMap((e: { sets: unknown[] }) => e.sets);
   expect(sets).toEqual(
     expect.arrayContaining([

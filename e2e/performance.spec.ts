@@ -251,7 +251,7 @@ test('desempenho: outra aba conclui treino, backup e restauração, offline', as
 
   // 24–26. Exportar, substituir pelo backup e conferir o desempenho restaurado.
   const backup = await exportBackup(page, info.outputPath('backup.json'));
-  expect(backup.schemaVersion).toBe(7);
+  expect(backup.schemaVersion).toBe(8);
   await page.goto('./#/desempenho?periodo=all');
   await expect(page.getByTestId('perf-stat-sessions')).toContainText('7');
   await chooseBackup(page, backup);

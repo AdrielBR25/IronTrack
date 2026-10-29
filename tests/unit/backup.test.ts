@@ -62,7 +62,7 @@ describe('exportação', () => {
   it('exporta todas as tabelas em formato v6 legível e reimportável, com o perfil proprietário', async () => {
     await seedDb(snapshot());
     const b = await exportBackup();
-    expect(b).toMatchObject({ app: 'irontrack', kind: 'backup', schemaVersion: 7, profile: { id: db.currentProfileId, displayName: 'Meu perfil' } });
+    expect(b).toMatchObject({ app: 'irontrack', kind: 'backup', schemaVersion: 8, profile: { id: db.currentProfileId, displayName: 'Meu perfil' } });
     expect(sorted(b.data)).toEqual(sorted(own(snapshot())));
     expect(parseBackup(JSON.stringify(b, null, 2)).ok).toBe(true);
   });
@@ -95,7 +95,7 @@ describe('leitura e validação do arquivo', () => {
     const r = parseBackup(JSON.stringify({ app: 'irontrack', exportedAt: '2025-01-01T00:00:00.000Z', ...d }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.value.schemaVersion).toBe(7);
+    expect(r.value.schemaVersion).toBe(8);
     expect(r.value.profile).toBeNull();
     expect(r.value.data.goals).toEqual([]);
     expect(r.value.data.planEntries).toEqual([]);
@@ -112,7 +112,7 @@ describe('leitura e validação do arquivo', () => {
   });
 
   it('rejeita versão futura', () => {
-    const r = parseBackup(JSON.stringify({ ...backupOf(snapshot()), schemaVersion: 8 }));
+    const r = parseBackup(JSON.stringify({ ...backupOf(snapshot()), schemaVersion: 9 }));
     expect(!r.ok && r.errors[0]).toMatch(/versão mais nova/);
   });
 
