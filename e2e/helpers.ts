@@ -20,9 +20,10 @@ export async function setValue(page: Page, testId: string, value: string) {
 /**
  * Estado auxiliar documentado em localStorage (P11, docs/CRONOMETROS_E_CONCORRENCIA.md): marca de capacidade,
  * fotografia dos campos de modalidade e cronômetro de execução. P15 (docs/CONSOLIDACAO_AGENDAS.md): preferências de
- * exibição do calendário. Não guarda conversas, credenciais nem dados de treino.
+ * exibição do calendário. Ajuste do P20 (docs/IA_ASSISTENTE.md): origem pública do servidor seguro de IA escolhida nas
+ * configurações avançadas. Não guarda conversas, credenciais (token, chaves) nem dados de treino.
  */
-export const AUX_STORAGE_KEYS = ['irontrack.capabilities.v1', 'irontrack.modelSnapshot.v1', 'irontrack.setTimer.v1', 'irontrack.calendarPrefs.v1'];
+export const AUX_STORAGE_KEYS = ['irontrack.capabilities.v1', 'irontrack.modelSnapshot.v1', 'irontrack.setTimer.v1', 'irontrack.calendarPrefs.v1', 'irontrack.aiGateway.v1'];
 
 /** Chaves do localStorage fora do aviso de instalação e do estado auxiliar documentado; e o texto do auxiliar. */
 export async function storageOutsideAux(page: Page): Promise<{ other: string[]; auxText: string }> {

@@ -513,3 +513,20 @@ de conversas ou tokens. Dexie continua v2 e backups v0/v1/v2 não mudaram.
 Passo a passo de configuração, testar conexão, estados da conexão, limpar conversa, sessão em memória com esquecimento
 por inatividade, metas no contexto (`training_goals`), respostas locais do catálogo e atalhos do treino e dos detalhes
 do exercício. Consentimento, prévia, assinatura e gateway inalterados. Detalhes em [IA_ASSISTENTE.md](IA_ASSISTENTE.md).
+
+## 21. Conexão simplificada (ajuste do Prompt 20)
+
+Detalhes de uso em [IA_ASSISTENTE.md](IA_ASSISTENTE.md) §1. Exceções estreitas às regras do §17–18, travadas em
+`tests/unit/architecture.test.ts`:
+
+- `integrations/ai/providerPresets.ts` é o único arquivo do assistente com URLs, e só as seis oficiais (páginas de
+  chaves e APIs). As APIs são informativas: nenhuma rede sai para elas do navegador.
+- `integrations/ai/gatewayEndpoint.ts` é o único que lê `import.meta.env` (apenas `VITE_AI_GATEWAY_URL`, um endereço
+  público) e o único que usa `localStorage`: uma chave fixa (`irontrack.aiGateway.v1`) com `{ v: 1, origin }`
+  validado. O arquivo não menciona token nem chave. Até o P20 o endereço vivia só na memória; agora a ORIGEM pode ficar
+  no aparelho para a pessoa não digitar host a cada conexão. O token continua só na memória.
+- A validação pura (`validateGatewayUrl`, `isAccessTokenFormat`) saiu para `integrations/ai/gatewayValidation.ts`; o
+  transporte reexporta, e continua sendo usado só pela raiz de composição.
+- A rede de IA continua só em `gatewayTransport.ts`. O botão "Obter chave de API" é um link (`<a target="_blank">`),
+  navegação do usuário, sem `fetch`, sem dados do usuário e sem Referer.
+

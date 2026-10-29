@@ -97,8 +97,10 @@ configurado, o IronTrack funciona igual e o modo simulado continua offline**.
   revogada. Ver [IA_HOMOLOGACAO.md](IA_HOMOLOGACAO.md), seções 2–4.
 - O IronTrack não ganhou login: o token só é necessário para quem escolhe o modo remoto.
 
-No app, o endereço e o token são digitados na tela do assistente, ficam **só na memória** (nunca em
-IndexedDB, localStorage, backup ou logs) e somem ao recarregar ou sair da página.
+No app, o token é digitado na tela do assistente, fica **só na memória** (nunca em IndexedDB, localStorage,
+backup ou logs) e some ao recarregar. Ajuste do P20: o **endereço** (só a origem pública) é resolvido sozinho — das
+configurações avançadas do aparelho (`localStorage['irontrack.aiGateway.v1']`) ou de `VITE_AI_GATEWAY_URL` no build —
+ver [IA_ASSISTENTE.md](IA_ASSISTENTE.md) §1.1.
 
 ## 3. Gestão de credenciais
 
@@ -273,8 +275,8 @@ npm run gateway:dev                          # ouve em http://127.0.0.1:8787
 npm run dev                                  # app em http://localhost:5173/IronTrack/
 ```
 
-No app: **Assistente IA › Remoto via gateway**, endereço `http://127.0.0.1:8787`, token, **Conectar**,
-escolha provedor e modelo, selecione dados, **Revisar e enviar**, confira a prévia e **Autorizar e enviar**.
+No app: **Assistente IA › Remoto via gateway**, escolha o provedor, em **Configurações avançadas** salve o endereço
+`http://127.0.0.1:8787` (uma vez por aparelho), cole o token, **Conectar**, escolha o modelo, selecione dados, **Revisar e enviar**, confira a prévia e **Autorizar e enviar**.
 Sem arquivo, com arquivo inválido ou `enabled: false`, o gateway sobe **bloqueado** (503 em tudo).
 Fora do loopback ele só escuta com `exposeBeyondLoopback: true`.
 
