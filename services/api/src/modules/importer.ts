@@ -7,7 +7,7 @@
 import { z } from 'zod';
 import { canonicalJson, recordHash } from '../../../../shared/canonical.ts';
 import { MAX_ENTITY_ID, SYNC_COLLECTIONS, type SyncCollection } from '../../../../shared/sync/collections.ts';
-import { withTx, type Pool } from '../db/pool.ts';
+import { pgCode, withTx, type Pool } from '../db/pool.ts';
 import { ApiError, readJson, type Router } from '../http/core.ts';
 import { uuid } from '../lib/crypto.ts';
 import { LIMITS, type RateLimiter } from '../lib/rateLimit.ts';
@@ -100,6 +100,16 @@ export async function previewJob(pool: Pool, userId: string, jobId: string): Pro
 
 /** Efetiva a importação numa única transação. Qualquer falha desfaz tudo. */
 export async function commitJob(pool: Pool, userId: string, jobId: string, policy: 'merge' | 'replace'): Promise<ImportReport> {
+  try {
+    return await commitTx(pool, userId, jobId, policy);
+  } catch (e) {
+    // Dado recusado pelo banco no meio: a transação já desfez tudo; responde como importação inválida.
+    if (pgCode(e)?.startsWith('22') || pgCode(e)?.startsWith('23')) throw new ApiError('import_invalid');
+    throw e;
+  }
+}
+
+async function commitTx(pool: Pool, userId: string, jobId: string, policy: 'merge' | 'replace'): Promise<ImportReport> {
   return withTx(pool, async (c) => {
     const j = await c.query<Job>('SELECT id, status, expected_items, policy, report FROM import_jobs WHERE id = $1 AND user_id = $2 FOR UPDATE', [jobId, userId]);
     const job = j.rows[0];

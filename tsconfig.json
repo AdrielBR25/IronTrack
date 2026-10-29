@@ -9,6 +9,9 @@
     },
     {
       "path": "./services/ai-gateway"
+    },
+    {
+      "path": "./services/api"
     }
   ]
 }
