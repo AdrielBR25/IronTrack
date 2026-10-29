@@ -242,3 +242,76 @@ test('assistente remoto: token revogado no gateway em execução é recusado, es
   expect(stored).not.toContain(token);
   expect(await noHorizontalScroll(page)).toBe(true);
 });
+
+test('assistente (P20): passo a passo, estados da conexão, testar, metas no contexto, sessão mantida ao navegar', async ({ page }, info) => {
+  await freshStart(page);
+  await loadSample(page);
+  await openAssistant(page);
+  await expect(page.getByTestId('ai-status')).toHaveAttribute('data-status', 'local');
+
+  // Modo remoto sem gateway: não configurado; passo a passo visível; provedor desejado escolhido antes.
+  await page.getByTestId('mode-remote').check();
+  await expect(page.getByTestId('ai-status')).toHaveAttribute('data-status', 'unavailable');
+  await expect(page.getByTestId('setup-steps')).toBeVisible();
+  await page.getByTestId('wanted-anthropic').check();
+
+  // Token errado → falha de autenticação; gateway fechado → inacessível.
+  await page.getByTestId('gateway-url').fill(gatewayUrl);
+  await page.getByTestId('gateway-token').fill(randomBytes(32).toString('base64url'));
+  await page.getByTestId('gateway-connect').click();
+  await expect(page.getByTestId('ai-status')).toHaveAttribute('data-status', 'auth_failure');
+  const closed = createServer();
+  const closedUrl = await listen(closed);
+  await new Promise((r) => closed.close(r));
+  await page.getByTestId('gateway-url').fill(closedUrl);
+  await page.getByTestId('gateway-token').fill(token);
+  await page.getByTestId('gateway-connect').click();
+  await expect(page.getByTestId('ai-status')).toHaveAttribute('data-status', 'gateway_unreachable');
+
+  // Certo: conectado, o provedor desejado vem escolhido; testar conexão só lê o catálogo.
+  await page.getByTestId('gateway-url').fill(gatewayUrl);
+  await page.getByTestId('gateway-token').fill(token);
+  await page.getByTestId('gateway-connect').click();
+  await expect(page.getByTestId('ai-status')).toHaveAttribute('data-status', 'connected');
+  await expect(page.getByTestId('ai-provider')).toHaveValue('anthropic');
+  await page.getByTestId('gateway-test').click();
+  await expect(page.getByTestId('gateway-test-result')).toContainText('Conexão ok');
+  await page.getByTestId('ai-remote-model').selectOption('modelo-e2e');
+  await expect(page.getByTestId('setup-confirm')).toContainText('Anthropic Claude');
+  await page.getByTestId('setup-start-chat').click();
+  await expect(page.getByLabel('Sua pergunta')).toBeFocused();
+  expect(upstreamBodies).toHaveLength(0);
+  expect(await noHorizontalScroll(page)).toBe(true);
+  await page.screenshot({ path: info.outputPath('assistente-passo-a-passo.png'), fullPage: true });
+
+  // Metas na lista de dados (sem metas cadastradas: sem dados, nada inventado).
+  const selector = page.getByTestId('data-selector');
+  await selector.locator('summary').click();
+  await expect(page.getByTestId('cat-training_goals')).toBeVisible();
+
+  // Pergunta sobre exercício do catálogo: resposta local, nada vai ao gateway.
+  await page.getByLabel('Sua pergunta').fill('Quais músculos o Leg press trabalha?');
+  await page.getByTestId('ai-send').click();
+  await expect(page.getByTestId('chat-local-badge')).toBeVisible();
+  expect(upstreamBodies).toHaveLength(0);
+  // "Perguntar à IA mesmo assim" segue o fluxo normal: prévia e autorização.
+  await page.getByTestId('chat-ask-ai').click();
+  await page.getByTestId('ai-send').click();
+  await expect(page.getByTestId('share-preview')).toBeVisible();
+  await page.getByTestId('preview-authorize').click();
+  await expect(page.getByTestId('chat-remote-badge')).toBeVisible();
+  expect(upstreamBodies).toHaveLength(1);
+
+  // Navegar e voltar: conexão e conversa continuam (só na memória); recarregar esquece.
+  await page.getByRole('link', { name: 'Início' }).filter({ visible: true }).first().click();
+  await openAssistant(page);
+  await expect(page.getByTestId('ai-status')).toHaveAttribute('data-status', 'connected');
+  await expect(page.getByTestId('chat-remote-badge')).toBeVisible();
+  const stored = await storageOutsideAux(page);
+  expect(stored.other).toEqual([]);
+  expect(stored.auxText).not.toContain(token);
+  await page.getByTestId('ai-clear').click();
+  await expect(page.getByTestId('chat-empty')).toBeVisible();
+  await page.reload();
+  await expect(page.getByTestId('ai-status')).toHaveAttribute('data-status', 'local');
+});

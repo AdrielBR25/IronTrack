@@ -172,6 +172,7 @@ Categorias (`domain/permissions.ts`):
 | `body_measurements` | avaliações (`BodyEntry` serve) | até 12 mais recentes: data e 13 medidas numéricas fixas |
 | `body_evolution` | variações (`MetricChange` serve) | nome da medida, unidade, primeira, última, variação, veredito |
 | `profile_preferences` | preferências (`Settings` serve) | unidade de peso, dias de treino por semana, objetivo |
+| `training_goals` (P20) | metas já calculadas (`TrainingGoalSource`) | até 10: título, tipo, alvo, unidade, atual, progresso %, estado, prazo, exercício |
 | `progress_photos` | — | **bloqueada**: nunca entra |
 
 `buildAIContext(sources, categories, limites)`:
@@ -485,7 +486,8 @@ Interface:
 - Respostas remotas com selo do provedor/modelo e aviso de que podem conter erros; texto puro.
 - Tempo limite remoto de 45 s (o gateway encerra antes, em 30 s); cancelar aborta a requisição, e o gateway
   aborta a chamada ao provedor.
-- Sair ou recarregar a página esquece o gateway e o token e volta ao modo simulado.
+- Sair ou recarregar a página esquece o gateway e o token e volta ao modo simulado. **P20:** sair da tela não esquece
+  mais (sessão em memória por até 30 min sem uso); recarregar continua esquecendo. Ver [IA_ASSISTENTE.md](IA_ASSISTENTE.md).
 
 Compatibilidade: Dexie continua v2, sem tabelas novas; backups v0/v1/v2 inalterados; conversas, token,
 endereço e autorizações não são persistidos; fórmulas de treino e evolução corporal intocadas.
@@ -505,3 +507,9 @@ Inalterado e reconfirmado: simulado como padrão e offline; nenhuma conexão aut
 nunca em URL, storage, backup ou log; destino explícito e assinado; prévia completa; consentimento por
 solicitação; invalidação ao trocar/desconectar o gateway; cancelamento; sem login obrigatório; sem persistência
 de conversas ou tokens. Dexie continua v2 e backups v0/v1/v2 não mudaram.
+
+## 20. Uso real do assistente (Prompt 20)
+
+Passo a passo de configuração, testar conexão, estados da conexão, limpar conversa, sessão em memória com esquecimento
+por inatividade, metas no contexto (`training_goals`), respostas locais do catálogo e atalhos do treino e dos detalhes
+do exercício. Consentimento, prévia, assinatura e gateway inalterados. Detalhes em [IA_ASSISTENTE.md](IA_ASSISTENTE.md).

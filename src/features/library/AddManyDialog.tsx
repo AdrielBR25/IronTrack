@@ -36,9 +36,13 @@ export function AddManyDialog({
   const [busy, setBusy] = useState(false);
   const open = !!items && !!target;
 
+  // Recomeça a lista só quando a seleção muda de verdade (outros itens), não a cada novo array com os mesmos itens:
+  // a biblioteca é observada e re-renderizar a tela (outra aba, gravação) apagava os "Adicionar outra vez" (P20).
+  const selection = items ? items.map((i) => i.key).join('|') : null;
   useEffect(() => {
     if (items) setLines(items.map((item) => ({ item, id: uid() })));
-  }, [items]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selection]);
 
   const inWorkout = useMemo(() => new Set((workout?.exercises ?? []).map(libraryKeyOf).filter(Boolean)), [workout]);
   const exercises = useMemo(() => instancesForAddMany(lines, { muscleGroups: settings.muscleGroups, rest: settings }), [lines, settings]);

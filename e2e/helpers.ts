@@ -34,3 +34,25 @@ export async function storageOutsideAux(page: Page): Promise<{ other: string[]; 
     };
   }, AUX_STORAGE_KEYS);
 }
+
+/**
+ * Sessão ativa como está GRAVADA no IndexedDB (não o que a tela mostra). Usado antes de recarregar: a gravação é
+ * imediata, mas assíncrona, e recarregar no meio dela perdia a última série (flake do workout-flow, P20).
+ */
+export function storedActiveSession(page: Page) {
+  return page.evaluate(
+    () =>
+      new Promise<{ doneSets: number; rest: boolean } | null>((resolve, reject) => {
+        const req = indexedDB.open('irontrack');
+        req.onerror = () => reject(req.error);
+        req.onsuccess = () => {
+          const all = req.result.transaction('sessions', 'readonly').objectStore('sessions').getAll();
+          all.onsuccess = () => {
+            req.result.close();
+            const s = (all.result as { status: string; rest?: unknown; exercises: { sets: { status: string }[] }[] }[]).find((x) => x.status === 'active');
+            resolve(s ? { doneSets: s.exercises.flatMap((e) => e.sets).filter((x) => x.status === 'done').length, rest: !!s.rest } : null);
+          };
+        };
+      }),
+  );
+}

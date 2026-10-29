@@ -8,7 +8,8 @@ Interface em **Configurações › Dados e backup**.
 
 | Formato | Identificação | Situação |
 | ------- | ------------- | -------- |
-| Backup v7 (atual, P17) | igual ao v6 com `"schemaVersion": 7`, `data.customExercises` e `data.exerciseFavorites` (biblioteca de exercícios) | Exportado e importado (ver seção "Biblioteca de exercícios"). |
+| Backup v8 (atual, P20) | igual ao v7 com `"schemaVersion": 8`; sessões podem trazer `timing`, `revision`, `revisions` e, nos exercícios, `replacedBy`, `replacesExerciseId`, `addedAfterFinishAt`, `correctedFrom`, `catalogVersion` (todos opcionais) | Exportado e importado (ver seção "Edição e retomada"). |
+| Backup v7 (P17) | igual ao v6 com `"schemaVersion": 7`, `data.customExercises` e `data.exerciseFavorites` (biblioteca de exercícios) | Exportado e importado (ver seção "Biblioteca de exercícios"). |
 | Backup v6 (P16) | igual ao v5 com `data.calendarDecisions` (decisões lembradas do calendário) | Importado; v6 → v7 acrescenta `customExercises: []` e `exerciseFavorites: []`. |
 | Backup v5 (P13) | igual ao v4 com `data.planEntries` (planejamento semanal) | Importado; v5 → v6 acrescenta `calendarDecisions: []`. |
 | Backup v4 (P12) | igual ao v3 com `data.goals` | Importado; v4 → v5 acrescenta `planEntries: []`. |
@@ -30,6 +31,8 @@ Campos desconhecidos são preservados (`.passthrough()`), para que backups de ve
   (chave = versão de origem) que leve à versão seguinte. Nunca remova migrações antigas.
 - v6 → v7 (P17) acrescenta `data.customExercises: []` e `data.exerciseFavorites: []` (biblioteca de exercícios; ver
   [BIBLIOTECA_EXERCICIOS.md](BIBLIOTECA_EXERCICIOS.md) §14). Um app anterior recusa arquivos v7 com a orientação de atualizar.
+- v7 → v8 (P20) não altera nenhum registro: os campos de edição e retomada são opcionais e ausentes em v7. Um app anterior
+  recusa v8 com a orientação de atualizar (em vez de restaurar um treino retomado sem entender o tempo com pausas).
 - v5 → v6 (P16) acrescenta `data.calendarDecisions: []` (decisões lembradas; ver [DECISOES_CALENDARIO.md](DECISOES_CALENDARIO.md) §9).
   Um app anterior recusa arquivos v6 com a orientação de atualizar.
 - v4 → v5 (P13) acrescenta `data.planEntries: []` (planejamento semanal; ver [PLANEJAMENTO_SEMANAL.md](PLANEJAMENTO_SEMANAL.md) §8).
@@ -240,3 +243,11 @@ mesmo se um treino for concluído durante a exportação. O JSON é indentado (l
 Recordes, gráficos, comparações e observações são derivados das sessões a cada leitura: nada é gravado, então o formato
 do backup **não mudou** (continua v7, Dexie v6) e importação, mesclagem, substituição, rollback e remapeamento de perfil
 seguem iguais. Restaurar um backup reconstrói o mesmo desempenho (teste em `tests/unit/performance-ui.test.tsx`).
+
+## Edição e retomada de treinos (backup v8, P20)
+
+Treinos editados ou retomados levam no backup o modelo de tempo (`timing`), o número da revisão e as últimas 10
+revisões (estado anterior de exercícios, duração e observações), além das marcas de troca, correção e adição nos
+exercícios. Tudo é validado na importação como o resto da sessão; substituir e mesclar seguem as regras de sessões
+(mesmo ID → mesma sessão). Restaurar um backup com o editor aberto em outra aba faz a gravação da edição ser recusada
+(conflito), sem sobrescrever. Ver [EDICAO_HISTORICO.md](EDICAO_HISTORICO.md) e [RETOMADA_TREINOS.md](RETOMADA_TREINOS.md).

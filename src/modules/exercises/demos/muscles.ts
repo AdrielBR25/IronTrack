@@ -94,7 +94,8 @@ export interface PartShape {
 const both = (part: MusclePart, seg: 'upperArm' | 'forearm' | 'thigh' | 'shin', center: Vec3, radii: Vec3, medial = false): PartShape[] =>
   (['L', 'R'] as const).map((s) => {
     const k = s === 'L' ? 1 : -1;
-    // No membro, X local já é espelhado pelo lado; o "medial" (para dentro) é −X no esquerdo e +X no direito.
+    // O X local do membro segue o do corpo nos dois lados (+X = esquerda da pessoa), sem espelhar; por isso o lado
+    // medial (para dentro) é −X no membro esquerdo e +X no direito.
     return { part, segment: `${seg}${s}`, center: [medial ? -k * Math.abs(center[0]) : center[0], center[1], center[2]], radii };
   });
 

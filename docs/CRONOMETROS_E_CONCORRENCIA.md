@@ -226,3 +226,14 @@ classificação da ficha some.
   seguro).
 - A proteção de compatibilidade depende do `localStorage` do mesmo navegador e não impede a regravação no app antigo.
 - Conflitos entre abas são resolvidos a favor de quem gravou primeiro, com aviso; não há trava exclusiva.
+
+## 12. Retomada e edição de treinos finalizados (P20)
+
+- O relógio do treino passou a ser `effectiveDurationSec` (soma de segmentos depois de uma retomada; igual ao anterior
+  para treinos nunca retomados). O intervalo em que o treino ficou finalizado nunca conta. Ver
+  [RETOMADA_TREINOS.md](RETOMADA_TREINOS.md).
+- Retomar não inicia descanso nem cronômetro de execução; continua existindo um único cronômetro de execução entre abas.
+- Retomada simultânea em duas abas: a transação garante uma só; a outra recebe "já está em andamento".
+- Edição do histórico grava com detecção de concorrência (`updatedAt`), ver [EDICAO_HISTORICO.md](EDICAO_HISTORICO.md) §3.
+- Trocar um exercício com cronômetro de execução numa série pendente descarta esse cronômetro (a série deixou de existir);
+  o descanso em curso continua e passa a apontar para o novo exercício.
