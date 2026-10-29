@@ -117,11 +117,17 @@ describe('backup', () => {
     const file = await exportBackup();
     const text = JSON.stringify(file);
 
+    // Outro aparelho/instalação: perfil local diferente. Substituir exige transferência explícita
+    // e mantém o ID do perfil local.
     await freshDb();
+    const localId = db.currentProfileId;
     const parsed = parseBackup(text);
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    const sum = await restoreBackupReplace(parsed.value);
+    await expect(restoreBackupReplace(parsed.value)).rejects.toThrow(/outro perfil/);
+    const sum = await restoreBackupReplace(parsed.value, { acceptProfileTransfer: true });
+    expect(db.currentProfileId).toBe(localId);
+    expect((await db.sessions.toArray()).every((x) => x.profileId === localId)).toBe(true);
     expect(sum).toMatchObject({ routines: 1, sessions: 1, bodyEntries: 1 });
     expect(await db.sessions.count()).toBe(1);
     expect((await getRotation(r.id)).nextIndex).toBe(1);
@@ -161,5 +167,31 @@ describe('propagação de carga', () => {
     expect(sets.find((x) => x.id === n2.id)!.weight).toBe(55);
     expect(sets.find((x) => x.id === n3.id)!.weight).toBe(45);
     expect(sets.find((x) => x.type === 'warmup')!.weight).toBe(25);
+  });
+});
+
+describe('avaliações e fotos', () => {
+  it('excluir uma avaliação remove só as fotos dela, na mesma transação', async () => {
+    const { addPhoto, deleteBodyEntry, saveBodyEntry } = await import('@/db/repo');
+    await saveBodyEntry({ id: 'e1', date: '2026-01-01', weightKg: 80, createdAt: 1 });
+    await saveBodyEntry({ id: 'e2', date: '2026-02-01', weightKg: 79, createdAt: 2 });
+    await addPhoto({ id: 'f1', entryId: 'e1', dataUrl: 'data:image/jpeg;base64,AA==', createdAt: 1 });
+    await addPhoto({ id: 'f2', entryId: 'e2', dataUrl: 'data:image/jpeg;base64,AA==', createdAt: 2 });
+    await deleteBodyEntry('e1');
+    expect(await db.bodyEntries.count()).toBe(1);
+    expect((await db.photos.toArray()).map((p) => p.id)).toEqual(['f2']);
+  });
+});
+
+describe('nova avaliação com fotos', () => {
+  it('grava avaliação e fotos juntas; falha não deixa avaliação sem as fotos', async () => {
+    const { saveBodyEntryWithPhotos } = await import('@/db/repo');
+    const { vi } = await import('vitest');
+    await saveBodyEntryWithPhotos({ id: 'e1', date: '2026-01-01', createdAt: 1 }, ['data:image/jpeg;base64,AA==', 'data:image/jpeg;base64,AB==']);
+    expect((await db.photos.where('entryId').equals('e1').toArray()).length).toBe(2);
+    const spy = vi.spyOn(db.photos, 'bulkAdd').mockRejectedValueOnce(new Error('quota (simulado)'));
+    await expect(saveBodyEntryWithPhotos({ id: 'e2', date: '2026-02-01', createdAt: 2 }, ['data:image/jpeg;base64,AA=='])).rejects.toThrow(/quota/);
+    spy.mockRestore();
+    expect(await db.bodyEntries.get('e2')).toBeUndefined();
   });
 });

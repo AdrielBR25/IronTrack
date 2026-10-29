@@ -1,21 +1,28 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { BarChart3, Dumbbell, History, Home, Play, Settings } from 'lucide-react';
+import { BarChart3, Dumbbell, History, Home, Play, Settings, Sparkles } from 'lucide-react';
 import { cn, fmtClock } from '@/lib/utils';
 import { Logo } from './Logo';
 import { OfflineBadge } from './UpdatePrompt';
 import { useActiveSession, useNow } from '@/hooks/data';
-import { sessionProgress } from '@/lib/session';
-import { remainingMs } from '@/lib/restTimer';
+import { sessionProgress, remainingMs } from '@/modules/training';
 import { Suspense, useEffect } from 'react';
 
-export const NAV = [
+export const NAV: { to: string; label: string; icon: typeof Home; end?: boolean; title?: string; ariaLabel?: string; also?: string[] }[] = [
   { to: '/', label: 'Início', icon: Home, end: true },
-  { to: '/treinos', label: 'Treinos', icon: Dumbbell },
+  // P13: o planejamento semanal (#/planejamento) fica dentro de Treinos, sem novo item na barra.
+  // P17: a biblioteca de exercícios (#/exercicios) também (a barra do celular já tem 6 itens em 360 px).
+  { to: '/treinos', label: 'Treinos', icon: Dumbbell, also: ['/planejamento', '/exercicios'] },
   { to: '/historico', label: 'Histórico', icon: History },
-  { to: '/evolucao', label: 'Evolução', icon: BarChart3 },
+  // P12: as metas (#/metas) ficam dentro de Evolução, sem novo item na barra. P19: o desempenho (#/desempenho) também.
+  { to: '/evolucao', label: 'Evolução', icon: BarChart3, also: ['/metas', '/desempenho'] },
+  // Rótulo curto na barra do celular (6 itens em 360 px); nome completo no computador e para leitores de tela.
+  { to: '/assistente', label: 'IA', icon: Sparkles, title: 'Assistente IA', ariaLabel: 'Assistente IA' },
   { to: '/config', label: 'Ajustes', icon: Settings, title: 'Configurações' },
 ];
+
+/** Rotas que pertencem a um item da navegação sem ser sub-rota dele (ex.: #/metas dentro de Evolução). */
+const inAlso = (pathname: string, also?: string[]) => !!also?.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 
 function ActivePill() {
   const session = useActiveSession();
@@ -60,7 +67,7 @@ export function AppLayout() {
           <Logo />
         </div>
         <nav className="mt-6 flex flex-col gap-1" aria-label="Principal">
-          {NAV.map(({ to, label, icon: Icon, end, title }) => (
+          {NAV.map(({ to, label, icon: Icon, end, title, also }) => (
             <NavLink
               key={to}
               to={to}
@@ -68,7 +75,7 @@ export function AppLayout() {
               className={({ isActive }) =>
                 cn(
                   'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors',
-                  isActive ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                  isActive || inAlso(pathname, also) ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground',
                 )
               }
             >
@@ -103,20 +110,23 @@ export function AppLayout() {
           <ActivePill />
         </div>
         <nav className="border-t border-border/60 bg-background/95 pb-safe backdrop-blur-2xl backdrop-saturate-150" aria-label="Principal">
-          <ul className="grid grid-cols-5">
-            {NAV.map(({ to, label, icon: Icon, end }) => (
+          <ul className="grid grid-cols-6">
+            {NAV.map(({ to, label, icon: Icon, end, ariaLabel, also }) => (
               <li key={to}>
                 <NavLink
                   to={to}
                   end={end}
+                  aria-label={ariaLabel}
                   onClick={() => navigator.vibrate?.(6)}
                   className={({ isActive }) =>
-                    cn('flex h-16 flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors active:opacity-70', isActive ? 'text-primary' : 'text-muted-foreground')
+                    cn('flex h-16 flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors active:opacity-70', isActive || inAlso(pathname, also) ? 'text-primary' : 'text-muted-foreground')
                   }
                 >
-                  {({ isActive }) => (
+                  {({ isActive: exact }) => {
+                    const isActive = exact || inAlso(pathname, also);
+                    return (
                     <>
-                      <span className="relative flex h-8 w-14 items-center justify-center">
+                      <span className="relative flex h-8 w-12 items-center justify-center">
                         {isActive && (
                           <motion.span layoutId="nav-pill" className="absolute inset-0 rounded-full bg-primary/15" transition={{ type: 'spring', stiffness: 500, damping: 38 }} />
                         )}
@@ -124,7 +134,8 @@ export function AppLayout() {
                       </span>
                       {label}
                     </>
-                  )}
+                    );
+                  }}
                 </NavLink>
               </li>
             ))}

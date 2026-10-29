@@ -1,23 +1,26 @@
 import { ArrowDown, ArrowUp, Check, ChevronDown, MoreVertical, Plus, Repeat, SkipForward, TrendingDown, TrendingUp, Minus as MinusIcon, Info } from 'lucide-react';
 import { useState } from 'react';
-import type { SessionExercise, SessionSet, Settings } from '@/lib/types';
-import type { ExerciseHistoryEntry } from '@/lib/session';
-import { suggestProgression } from '@/lib/progression';
-import { fmtRepRange } from '@/lib/routineSchema';
+import type { ExerciseModelFields, SessionExercise, SessionSet, Settings } from '@/lib/types';
+import { type ExerciseHistoryEntry, suggestProgression, EQUIPMENT_LABEL, MODALITY_LABEL, exerciseMeasures } from '@/modules/training';
+import { planSummary, setSummary } from './modelFormat';
 import { cn, fmtClock } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useUnits } from '@/hooks/useUnits';
 import { fmtDateShort } from '@/lib/dates';
-import { EQUIPMENT_LABEL } from '@/lib/units';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
-export function summarizeSets(sets: SessionSet[], fmtW: (n: number | null | undefined, u?: boolean) => string): string {
+/** Séries de trabalho concluídas em texto curto. Séries antigas mantêm o formato "60×8". */
+export function summarizeSets(sets: SessionSet[], fmtW: (n: number | null | undefined, u?: boolean) => string, ex: ExerciseModelFields = {}): string {
   return sets
     .filter((s) => s.type !== 'warmup' && s.status === 'done')
-    .map((s) => `${fmtW(s.weight, false)}×${s.reps ?? 0}`)
+    .map((s) => setSummary(s, fmtW, ex))
     .join(' · ');
 }
+
+/** Exercício ou série com algum dado do modelo v3. */
+const usesModel = (ex: ExerciseModelFields, set: SessionSet) =>
+  !!(ex.modality || ex.laterality || ex.loadMode) || set.durationSec != null || set.distance != null || set.side != null || set.assistanceKg != null;
 
 function SetRow({
   ex,
@@ -35,8 +38,9 @@ function SetRow({
   const { fmtW } = useUnits();
   const done = set.status === 'done';
   const skipped = set.status === 'skipped';
-  const wDelta = done && set.plannedWeight != null && set.weight != null ? set.weight - set.plannedWeight : null;
-  const repsState = done && set.type === 'normal' && set.reps != null ? (set.reps > ex.repMax ? 'above' : set.reps < ex.repMin ? 'below' : 'in') : null;
+  const ms = exerciseMeasures(ex);
+  const wDelta = done && ms.weight !== 'none' && set.plannedWeight != null && set.weight != null ? set.weight - set.plannedWeight : null;
+  const repsState = done && ms.reps && set.type === 'normal' && set.reps != null ? (set.reps > ex.repMax ? 'above' : set.reps < ex.repMin ? 'below' : 'in') : null;
   return (
     <button
       type="button"
@@ -58,7 +62,7 @@ function SetRow({
       </span>
       <span className="flex-1 min-w-0">
         <span className="block font-display text-base font-semibold tabular">
-          {set.weight != null ? fmtW(set.weight) : '— kg'} × {set.reps ?? '—'}
+          {usesModel(ex, set) ? setSummary(set, fmtW, ex) : `${set.weight != null ? fmtW(set.weight) : '— kg'} × ${set.reps ?? '—'}`}
           {set.rir != null && <span className="ml-1.5 text-xs font-normal text-muted-foreground">RIR {set.rir}</span>}
           {set.rpe != null && <span className="ml-1.5 text-xs font-normal text-muted-foreground">RPE {set.rpe}</span>}
         </span>
@@ -113,12 +117,16 @@ export function ExerciseCard({
   const working = ex.sets.filter((s) => s.type !== 'warmup' && s.status !== 'skipped').length;
   const finished = ex.sets.every((s) => s.status !== 'pending');
   const isCurrent = ex.sets.some((s) => s.id === currentSetId);
-  const sugg = suggestProgression(
-    { repMin: ex.repMin, repMax: ex.repMax, plannedSets: ex.plannedSets, equipment: ex.equipment },
-    history[0]?.sets ?? null,
-    settings.progression,
-    history[1]?.sets ?? null,
-  );
+  const ms = exerciseMeasures(ex);
+  // Progressão de carga só para carga externa com repetições (P10: nunca em tempo, cardio ou assistência).
+  const sugg: ReturnType<typeof suggestProgression> = ms.progression
+    ? suggestProgression(
+        { repMin: ex.repMin, repMax: ex.repMax, plannedSets: ex.plannedSets, equipment: ex.equipment },
+        history[0]?.sets ?? null,
+        settings.progression,
+        history[1]?.sets ?? null,
+      )
+    : { kind: 'none', currentWeight: null, suggestedWeight: null, reason: '' };
   const pendingNormal = ex.sets.filter((s) => s.status === 'pending' && s.type === 'normal');
   const alreadyApplied = sugg.suggestedWeight != null && pendingNormal.length > 0 && pendingNormal.every((s) => s.weight === sugg.suggestedWeight);
   let n = 0;
@@ -143,11 +151,10 @@ export function ExerciseCard({
             <span className="block font-display text-base font-bold uppercase leading-tight tracking-tight">{ex.name}</span>
             <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
               <Badge variant="secondary">{ex.muscleGroup}</Badge>
-              <span className="tabular font-semibold text-foreground">
-                {ex.plannedSets} × {fmtRepRange(ex.repMin, ex.repMax)}
-              </span>
+              <span className="tabular font-semibold text-foreground">{planSummary(ex)}</span>
               <span className="tabular">descanso {fmtClock(ex.restSec)}</span>
-              <span>{EQUIPMENT_LABEL[ex.equipment]}</span>
+              <span>{ex.modality ? MODALITY_LABEL[ex.modality] : EQUIPMENT_LABEL[ex.equipment]}</span>
+              {ex.laterality === 'unilateral' && <span>unilateral</span>}
             </span>
             {ex.substitutedFrom && <span className="mt-1 block text-xs text-warn">Substituiu: {ex.substitutedFrom}</span>}
           </span>
@@ -179,7 +186,7 @@ export function ExerciseCard({
                 {history.slice(0, 3).map((h) => (
                   <li key={h.sessionId} className="flex gap-2 tabular">
                     <span className="w-14 shrink-0 text-muted-foreground">{fmtDateShort(h.date)}</span>
-                    <span className="truncate">{summarizeSets(h.sets, fmtW) || '—'}</span>
+                    <span className="truncate">{summarizeSets(h.sets, fmtW, ex) || '—'}</span>
                   </li>
                 ))}
               </ul>

@@ -1,8 +1,12 @@
 import { db, getSettings, saveSettings } from './db';
-import type { BodyEntry, DayOverride, ProgressPhoto, Routine, RotationState, Workout, WorkoutSession } from '@/lib/types';
+import type { DayOverride, Routine, RotationState, Workout, WorkoutSession } from '@/lib/types';
 import { uid } from '@/lib/utils';
-import { buildSession, finishSession } from '@/lib/session';
-import { indexAfter, normIndex, shouldAdvance, skipIndex } from '@/lib/rotation';
+import { buildSession, finishSession, indexAfter, mergeSessionEdits, normIndex, restoreModelFields, shouldAdvance, skipIndex, type RoutineModelLoss } from '@/modules/training';
+import { rememberRoutineModel } from './modelGuard';
+
+// Persistência do domínio de treinamento (rotinas, rotação e sessões). As regras ficam em
+// src/modules/training; aqui só se coordena leitura, regra pura e gravação em transação.
+// As funções de evolução corporal estão em ./body e são reexportadas no fim (compatibilidade).
 
 // ---------- Rotinas ----------
 
@@ -52,6 +56,10 @@ export async function duplicateRoutine(id: string): Promise<Routine | undefined>
 
 export async function setActiveRoutine(id: string) {
   await saveSettings({ activeRoutineId: id });
+}
+
+export async function getRoutine(id: string): Promise<Routine | undefined> {
+  return db.routines.get(id);
 }
 
 // ---------- Rotação ----------
@@ -104,9 +112,43 @@ export async function saveSession(s: WorkoutSession) {
   await db.sessions.put({ ...s, updatedAt: Date.now() });
 }
 
-/** Conclui o treino e avança a rotação conforme a política configurada. */
+export type GuardedSaveResult =
+  | { status: 'saved' | 'merged'; session: WorkoutSession; conflicts: string[] }
+  | { status: 'closed'; session: null; conflicts: [] };
+
+/**
+ * Grava o treino em andamento sem sobrescrever em silêncio o que outra aba (ou o aviso de descanso) gravou
+ * (P11, docs/CRONOMETROS_E_CONCORRENCIA.md §9). `base` é a versão do banco que a tela conhecia; `local`, o que ela
+ * quer gravar. Na mesma transação de escrita (serializada pelo IndexedDB entre abas):
+ * - treino ausente ou não mais ativo (finalizado/descartado em outra aba): nada é gravado (`closed`);
+ * - banco igual à base: grava `local` (`saved`);
+ * - banco mudou: mescla em três vias, prevalecendo o banco nos conflitos (`merged`).
+ */
+export async function saveSessionGuarded(base: WorkoutSession, local: WorkoutSession, now = Date.now()): Promise<GuardedSaveResult> {
+  return db.transaction('rw', db.sessions, async () => {
+    const fresh = await db.sessions.get(local.id);
+    if (!fresh || fresh.status !== 'active') return { status: 'closed', session: null, conflicts: [] };
+    const updatedAt = Math.max(now, fresh.updatedAt + 1, local.updatedAt);
+    if (fresh.updatedAt === base.updatedAt) {
+      const w = { ...local, updatedAt };
+      await db.sessions.put(w);
+      return { status: 'saved', session: w, conflicts: [] };
+    }
+    const { merged, conflicts } = mergeSessionEdits(base, local, fresh);
+    const w = { ...merged, updatedAt };
+    await db.sessions.put(w);
+    return { status: 'merged', session: w, conflicts };
+  });
+}
+
+/**
+ * Conclui o treino e avança a rotação conforme a política configurada. Idempotente (P11): se o treino já foi
+ * finalizado ou descartado (ex.: em outra aba), nada é gravado e a rotação não avança de novo.
+ */
 export async function completeSession(s: WorkoutSession, notes?: string, now = Date.now()): Promise<WorkoutSession> {
   return db.transaction('rw', [db.sessions, db.rotations, db.routines, db.settings], async () => {
+    const existing = await db.sessions.get(s.id);
+    if (existing && existing.status !== 'active') return existing;
     const settings = await getSettings();
     let done = finishSession(s, now, notes);
     const advance = shouldAdvance(done, settings.rotationPolicy, settings.rotationThreshold);
@@ -120,6 +162,37 @@ export async function completeSession(s: WorkoutSession, notes?: string, now = D
     await db.sessions.put(done);
     return done;
   });
+}
+
+/**
+ * Marca como avisado o descanso que termina em `endsAt`. Devolve false (sem gravar) se o
+ * descanso já foi avisado ou mudou; assim o aviso dispara uma única vez, mesmo com várias abas.
+ */
+export async function markRestNotified(sessionId: string, endsAt: number, now = Date.now()): Promise<boolean> {
+  return db.transaction('rw', db.sessions, async () => {
+    const fresh = await db.sessions.get(sessionId);
+    if (!fresh?.rest || fresh.rest.notified || fresh.rest.endsAt !== endsAt) return false;
+    // A versão precisa avançar mesmo no mesmo milissegundo da gravação anterior: com `updatedAt` igual, a gravação
+    // protegida seguinte acharia que nada mudou e desfaria o aviso (P12: corrige teste intermitente do P11).
+    await db.sessions.update(sessionId, { 'rest.notified': true, updatedAt: Math.max(now, fresh.updatedAt + 1) } as never);
+    return true;
+  });
+}
+
+/** Devolve campos de modalidade removidos por um app antigo (só onde continuam ausentes). Confirmado pela pessoa. */
+export async function restoreRoutineModel(loss: RoutineModelLoss): Promise<boolean> {
+  return db.transaction('rw', db.routines, async () => {
+    const r = await db.routines.get(loss.routineId);
+    if (!r || r.updatedAt !== loss.updatedAt) return false;
+    await db.routines.put({ ...restoreModelFields(r, loss), updatedAt: Date.now() });
+    return true;
+  });
+}
+
+/** Aceita o estado atual da rotina (a pessoa preferiu não restaurar): vira a nova referência. */
+export async function acceptRoutineModel(routineId: string): Promise<void> {
+  const r = await db.routines.get(routineId);
+  if (r) rememberRoutineModel(r);
 }
 
 export async function discardSession(id: string) {
@@ -139,25 +212,14 @@ export async function completedSessions(): Promise<WorkoutSession[]> {
   return db.sessions.where('status').equals('completed').sortBy('startedAt');
 }
 
-// ---------- Corpo ----------
-
-export async function saveBodyEntry(e: BodyEntry) {
-  await db.bodyEntries.put(e);
+/** Os `limit` treinos concluídos mais recentes (mais novo primeiro). Só leitura, pelo índice de data. */
+export async function recentCompletedSessions(limit: number): Promise<WorkoutSession[]> {
+  return db.sessions.orderBy('startedAt').reverse().filter((s) => s.status === 'completed').limit(limit).toArray();
 }
 
-export async function deleteBodyEntry(id: string) {
-  await db.transaction('rw', db.bodyEntries, db.photos, async () => {
-    await db.bodyEntries.delete(id);
-    await db.photos.where('entryId').equals(id).delete();
-  });
-}
-
-export async function addPhoto(p: ProgressPhoto) {
-  await db.photos.put(p);
-}
-
-export async function deletePhoto(id: string) {
-  await db.photos.delete(id);
+/** Treinos concluídos iniciados a partir de `fromTs` (ms). Só leitura, pelo índice de data. */
+export async function completedSessionsSince(fromTs: number): Promise<WorkoutSession[]> {
+  return db.sessions.where('startedAt').aboveOrEqual(fromTs).filter((s) => s.status === 'completed').sortBy('startedAt');
 }
 
 export { normIndex };
@@ -175,3 +237,6 @@ export async function saveRoutineKeepPointer(next: Routine) {
     if (idx !== rot.nextIndex) await db.rotations.put({ routineId: next.id, nextIndex: idx, updatedAt: Date.now() });
   });
 }
+
+/** @deprecated Compatibilidade: importe de '@/db/body'. */
+export * from './body';

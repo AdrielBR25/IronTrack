@@ -1,11 +1,11 @@
 import { Link } from 'react-router-dom';
 import { useMemo, useState } from 'react';
-import { ChevronRight, Clock, History, Layers, Weight } from 'lucide-react';
+import { ChevronRight, Clock, History, Layers, Medal, Weight } from 'lucide-react';
 import { PageHeader } from '@/components/AppLayout';
 import { Card } from '@/components/ui/card';
 import { useCompletedSessions } from '@/hooks/data';
 import { useUnits } from '@/hooks/useUnits';
-import { sessionVolume, validSetCount } from '@/lib/volume';
+import { sessionVolume, validSetCount } from '@/modules/training';
 import { cn, fmtDuration } from '@/lib/utils';
 import { fmtTime } from '@/lib/dates';
 
@@ -26,7 +26,21 @@ export default function HistoryPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Histórico" subtitle={sessions ? `${sessions.length} treinos registrados` : ' '} />
+      <PageHeader
+        title="Histórico"
+        subtitle={sessions ? `${sessions.length} treinos registrados` : ' '}
+        action={
+          sessions && sessions.length > 0 ? (
+            <Link
+              to="/desempenho"
+              className="flex h-10 items-center gap-1.5 rounded-xl border px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              data-testid="history-open-performance"
+            >
+              <Medal className="h-4 w-4 text-primary" aria-hidden /> Desempenho
+            </Link>
+          ) : undefined
+        }
+      />
       {labels.length > 1 && (
         <div className="flex gap-2 overflow-x-auto no-scrollbar">
           {['all', ...labels].map((l) => (

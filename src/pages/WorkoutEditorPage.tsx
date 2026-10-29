@@ -1,246 +1,44 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { ArrowLeft, Copy, Pencil, Plus, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowUp, Copy, Eye, Info, Library, Link2, Link2Off, ListChecks, MoreHorizontal, Pencil, Plus, Replace, ScanSearch, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { db, saveSettings } from '@/db/db';
-import { saveRoutineKeepPointer } from '@/db/repo';
-import { useSettings } from '@/hooks/data';
+import { customExerciseById, mutateWorkout, unlinkExercise } from '@/db/library';
+import { useActiveSession, useRoutine } from '@/hooks/data';
 import { useUnits } from '@/hooks/useUnits';
-import type { Equipment, ExerciseCategory, ExerciseTemplate, Routine, Workout } from '@/lib/types';
-import { cn, fmtClock, parseNum, uid } from '@/lib/utils';
-import { fmtRepRange, parseRepRange } from '@/lib/routineSchema';
-import { EQUIPMENT_LABEL } from '@/lib/units';
+import type { ExerciseTemplate } from '@/lib/types';
+import { cn, fmtClock, uid } from '@/lib/utils';
+import { MODALITY_LABEL } from '@/modules/training';
+import { catalogItem, customItem, instanceFingerprint, libraryKeyOf, originLabel, plannedSets, type LibraryItem, type WorkoutOp } from '@/modules/exercises';
+import { planSummary } from '@/features/workout/modelFormat';
+import { ExerciseDialog } from '@/features/routines/ExerciseDialog';
+import { WorkoutPreviewDialog } from '@/features/library/WorkoutPreviewDialog';
+import { ExerciseDetailDialog } from '@/features/library/ExerciseDetailDialog';
+import { useStartWorkout } from '@/features/routines/useStartWorkout';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Input, Label, NativeSelect, Textarea } from '@/components/ui/input';
-import { Segmented } from '@/components/ui/segmented';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input, Label, Textarea } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/ui/confirm';
 import { SortableList } from '@/components/SortableList';
 import { Badge } from '@/components/ui/badge';
-
-type Draft = {
-  name: string;
-  muscleGroup: string;
-  category: ExerciseCategory;
-  equipment: Equipment;
-  sets: string;
-  reps: string;
-  restSec: string;
-  warmupSets: string;
-  targetWeight: string;
-  notes: string;
-  substitutes: string;
-};
-
-function toDraft(e: ExerciseTemplate | null, groups: string[], restC: number, show: (n: number | null | undefined) => number | null): Draft {
-  return {
-    name: e?.name ?? '',
-    muscleGroup: e?.muscleGroup ?? groups[0] ?? 'Peito',
-    category: e?.category ?? 'compound',
-    equipment: e?.equipment ?? 'barbell',
-    sets: String(e?.sets ?? 3),
-    reps: e ? fmtRepRange(e.repMin, e.repMax) : '8–12',
-    restSec: String(e?.restSec ?? restC),
-    warmupSets: String(e?.warmupSets ?? 0),
-    targetWeight: e?.targetWeight != null ? String(show(e.targetWeight)).replace('.', ',') : '',
-    notes: e?.notes ?? '',
-    substitutes: (e?.substitutes ?? []).join(', '),
-  };
-}
-
-function ExerciseDialog({
-  open,
-  onOpenChange,
-  initial,
-  onSave,
-}: {
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-  initial: ExerciseTemplate | null;
-  onSave: (e: ExerciseTemplate) => void;
-}) {
-  const settings = useSettings();
-  const { unit, show, parse } = useUnits();
-  const [d, setD] = useState<Draft>(() => toDraft(initial, settings.muscleGroups, settings.restCompoundSec, show));
-  const [newGroup, setNewGroup] = useState<string | null>(null);
-  const [errors, setErrors] = useState<string[]>([]);
-  useEffect(() => {
-    if (open) {
-      setD(toDraft(initial, settings.muscleGroups, settings.restCompoundSec, show));
-      setErrors([]);
-      setNewGroup(null);
-    }
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
-  const set = (p: Partial<Draft>) => setD((x) => ({ ...x, ...p }));
-  const groups = settings.muscleGroups.includes(d.muscleGroup) ? settings.muscleGroups : [...settings.muscleGroups, d.muscleGroup];
-
-  const submit = async () => {
-    const errs: string[] = [];
-    const reps = parseRepRange(d.reps.trim());
-    const sets = Number(d.sets);
-    const rest = Number(d.restSec);
-    const warm = Number(d.warmupSets);
-    const tw = d.targetWeight.trim() ? parseNum(d.targetWeight) : null;
-    if (!d.name.trim()) errs.push('Informe o nome do exercício.');
-    if (!reps) errs.push('Repetições: use um número (10) ou uma faixa (6-10, 8–12).');
-    if (!Number.isInteger(sets) || sets < 1 || sets > 20) errs.push('Séries: de 1 a 20.');
-    if (!Number.isInteger(rest) || rest < 0 || rest > 900) errs.push('Descanso: de 0 a 900 segundos.');
-    if (!Number.isInteger(warm) || warm < 0 || warm > 5) errs.push('Aquecimento: de 0 a 5 séries.');
-    if (d.targetWeight.trim() && (tw === null || tw < 0)) errs.push('Carga planejada inválida.');
-    if (newGroup !== null && !newGroup.trim()) errs.push('Informe o nome do novo grupo muscular.');
-    setErrors(errs);
-    if (errs.length || !reps) return;
-    let muscleGroup = d.muscleGroup;
-    if (newGroup !== null) {
-      muscleGroup = newGroup.trim();
-      if (!settings.muscleGroups.includes(muscleGroup)) await saveSettings({ muscleGroups: [...settings.muscleGroups, muscleGroup] });
-    }
-    onSave({
-      id: initial?.id ?? uid(),
-      name: d.name.trim(),
-      muscleGroup,
-      category: d.category,
-      equipment: d.equipment,
-      sets,
-      repMin: reps.min,
-      repMax: reps.max,
-      restSec: rest,
-      warmupSets: warm,
-      targetWeight: tw === null ? undefined : (parse(tw) ?? undefined),
-      notes: d.notes.trim() || undefined,
-      substitutes: d.substitutes.split(',').map((s) => s.trim()).filter(Boolean),
-    });
-    onOpenChange(false);
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{initial ? 'Editar exercício' : 'Novo exercício'}</DialogTitle>
-        </DialogHeader>
-        <form
-          className="space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void submit();
-          }}
-        >
-          <div className="space-y-1.5">
-            <Label htmlFor="ex-name">Nome</Label>
-            <Input id="ex-name" value={d.name} onChange={(e) => set({ name: e.target.value })} placeholder="Ex.: Supino reto com barra" />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="ex-group">Grupo muscular</Label>
-            {newGroup === null ? (
-              <NativeSelect
-                id="ex-group"
-                value={d.muscleGroup}
-                onChange={(e) => {
-                  if (e.target.value === '__new') setNewGroup('');
-                  else set({ muscleGroup: e.target.value });
-                }}
-              >
-                {groups.map((g) => (
-                  <option key={g} value={g}>
-                    {g}
-                  </option>
-                ))}
-                <option value="__new">+ Criar novo grupo…</option>
-              </NativeSelect>
-            ) : (
-              <div className="flex gap-2">
-                <Input autoFocus placeholder="Nome do novo grupo" value={newGroup} onChange={(e) => setNewGroup(e.target.value)} />
-                <Button variant="ghost" onClick={() => setNewGroup(null)}>
-                  Cancelar
-                </Button>
-              </div>
-            )}
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>Tipo</Label>
-              <Segmented
-                value={d.category}
-                onChange={(v) => set({ category: v, restSec: String(v === 'compound' ? settings.restCompoundSec : settings.restIsolationSec) })}
-                options={[
-                  { value: 'compound', label: 'Composto' },
-                  { value: 'isolation', label: 'Isolador' },
-                ]}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="ex-equip">Equipamento</Label>
-              <NativeSelect id="ex-equip" value={d.equipment} onChange={(e) => set({ equipment: e.target.value as Equipment })}>
-                {(Object.keys(EQUIPMENT_LABEL) as Equipment[]).map((k) => (
-                  <option key={k} value={k}>
-                    {EQUIPMENT_LABEL[k]}
-                  </option>
-                ))}
-              </NativeSelect>
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="ex-sets">Séries</Label>
-              <Input id="ex-sets" inputMode="numeric" value={d.sets} onChange={(e) => set({ sets: e.target.value.replace(/\D/g, '') })} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="ex-reps">Repetições</Label>
-              <Input id="ex-reps" value={d.reps} onChange={(e) => set({ reps: e.target.value })} placeholder="6-10" />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="ex-rest">Descanso (s)</Label>
-              <Input id="ex-rest" inputMode="numeric" value={d.restSec} onChange={(e) => set({ restSec: e.target.value.replace(/\D/g, '') })} />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="ex-warm">Séries de aquecimento</Label>
-              <Input id="ex-warm" inputMode="numeric" value={d.warmupSets} onChange={(e) => set({ warmupSets: e.target.value.replace(/\D/g, '') })} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="ex-weight">Carga planejada ({unit})</Label>
-              <Input id="ex-weight" inputMode="decimal" value={d.targetWeight} onChange={(e) => set({ targetWeight: e.target.value })} placeholder="opcional" />
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="ex-notes">Observações de execução</Label>
-            <Textarea id="ex-notes" value={d.notes} onChange={(e) => set({ notes: e.target.value })} placeholder="Ex.: cadência 2-0-1, amplitude completa" />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="ex-subs">Substitutos (separados por vírgula)</Label>
-            <Input id="ex-subs" value={d.substitutes} onChange={(e) => set({ substitutes: e.target.value })} placeholder="Ex.: Supino com halteres, Supino máquina" />
-          </div>
-          {errors.length > 0 && (
-            <ul className="space-y-1 text-sm text-destructive">
-              {errors.map((e) => (
-                <li key={e}>• {e}</li>
-              ))}
-            </ul>
-          )}
-          <DialogFooter>
-            <Button type="submit" size="lg">
-              Salvar exercício
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
+import { useModelCapability } from '@/features/compat/CompatGuard';
 
 export default function WorkoutEditorPage() {
   const { routineId, workoutId } = useParams();
   const navigate = useNavigate();
-  const routine = useLiveQuery(() => (routineId ? db.routines.get(routineId) : undefined), [routineId]);
+  const routine = useRoutine(routineId);
   const workout = routine?.workouts.find((w) => w.id === workoutId);
+  const active = useActiveSession();
+  const start = useStartWorkout();
   const [editing, setEditing] = useState<{ open: boolean; ex: ExerciseTemplate | null }>({ open: false, ex: null });
   const [toDelete, setToDelete] = useState<ExerciseTemplate | null>(null);
+  const [actionsFor, setActionsFor] = useState<ExerciseTemplate | null>(null);
+  const [preview, setPreview] = useState(false);
+  const [toUnlink, setToUnlink] = useState<ExerciseTemplate | null>(null);
+  const [detail, setDetail] = useState<LibraryItem | null>(null);
   const [meta, setMeta] = useState({ label: '', name: '', notes: '' });
   const { fmtW } = useUnits();
+  const outdated = useModelCapability().newer;
 
   useEffect(() => {
     if (workout) setMeta({ label: workout.label, name: workout.name, notes: workout.notes ?? '' });
@@ -250,20 +48,68 @@ export default function WorkoutEditorPage() {
   if (!routine || !workout) {
     return (
       <div className="space-y-3">
-        <p>Treino não encontrado.</p>
+        <p>Treino não encontrado (talvez tenha sido excluído em outra aba).</p>
         <Button onClick={() => navigate('/treinos')}>Voltar</Button>
       </div>
     );
   }
 
-  const saveWorkout = (w: Workout) => saveRoutineKeepPointer({ ...routine, workouts: routine.workouts.map((x) => (x.id === w.id ? w : x)) } as Routine);
-  const saveMeta = () => {
-    const label = meta.label.trim().toUpperCase().slice(0, 4) || workout.label;
-    if (routine.workouts.some((w) => w.id !== workout.id && w.label === label)) {
-      toast.error(`Já existe um treino ${label}`);
+  /**
+   * P17: cada ação é uma operação aplicada à versão gravada (src/db/library.ts › mutateWorkout), nunca a ficha inteira
+   * que esta tela tinha: o que outra aba fez no mesmo treino não se perde. Devolve false se nada foi gravado.
+   */
+  const apply = async (op: WorkoutOp, ok?: string): Promise<boolean> => {
+    // P11: um app desatualizado não regrava fichas que uma versão mais nova já usou (docs/CRONOMETROS_E_CONCORRENCIA.md §7).
+    if (outdated) {
+      toast.error('Atualize o IronTrack antes de editar: estes dados já foram usados por uma versão mais nova.');
+      return false;
+    }
+    try {
+      const r = await mutateWorkout(routine.id, workout.id, op);
+      if (ok && r.changed) toast.success(ok);
+      return true;
+    } catch (e) {
+      toast.error((e as Error).message);
+      return false;
+    }
+  };
+  const saveMeta = () => void apply({ type: 'meta', label: meta.label, name: meta.name, notes: meta.notes });
+  const libraryLink = (extra = '') => `/exercicios?para=${encodeURIComponent(`${routine.id}/${workout.id}`)}${extra}`;
+  const sessionHere = active && active.routineId === routine.id && active.workoutId === workout.id;
+  const n = workout.exercises.length;
+  const unlinked = workout.exercises.filter((e) => !libraryKeyOf(e)).length;
+  const here = `${routine.id}/${workout.id}`;
+
+  /**
+   * P18: abre os detalhes da origem SEM sair do editor (o que está sendo digitado continua aqui). O catálogo é carregado
+   * sob demanda (fica fora do pacote principal); personalizados vêm do banco.
+   */
+  const openOrigin = async (ex: ExerciseTemplate) => {
+    try {
+      if (ex.catalogId) {
+        const { catalogById } = await import('@/modules/exercises/catalog');
+        const c = catalogById(ex.catalogId);
+        if (c) return setDetail(catalogItem(c));
+      } else if (ex.customExerciseId) {
+        const c = await customExerciseById(ex.customExerciseId);
+        if (c) return setDetail(customItem(c));
+      }
+      toast.error('A origem deste exercício não está mais na biblioteca. A ficha guarda a própria cópia e continua funcionando.');
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+  const unlink = async (ex: ExerciseTemplate) => {
+    if (outdated) {
+      toast.error('Atualize o IronTrack antes de editar: estes dados já foram usados por uma versão mais nova.');
       return;
     }
-    void saveWorkout({ ...workout, label, name: meta.name.trim() || workout.name, notes: meta.notes.trim() || undefined });
+    try {
+      const r = await unlinkExercise(routine.id, workout.id, ex.id, instanceFingerprint(ex));
+      if (r.changed) toast.success(`Associação de ${ex.name} desfeita. A ficha, as metas e o histórico não mudaram.`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
   };
 
   return (
@@ -272,7 +118,10 @@ export default function WorkoutEditorPage() {
         <Button variant="ghost" size="icon" aria-label="Voltar" onClick={() => navigate('/treinos')}>
           <ArrowLeft />
         </Button>
-        <p className="truncate text-sm text-muted-foreground">{routine.name}</p>
+        <p className="min-w-0 flex-1 truncate text-sm text-muted-foreground">{routine.name}</p>
+        <Button variant="outline" size="sm" onClick={() => setPreview(true)} data-testid="open-preview">
+          <Eye /> Prévia
+        </Button>
       </div>
 
       <Card className="space-y-3 p-4">
@@ -292,60 +141,138 @@ export default function WorkoutEditorPage() {
         </div>
       </Card>
 
+      {sessionHere && (
+        <p className="rounded-2xl border border-primary/40 bg-primary/10 p-3 text-sm" role="status">
+          Há um treino em andamento desta ficha. Ele usa a cópia feita ao iniciar: as mudanças daqui valem a partir do próximo treino.
+        </p>
+      )}
+
       <section className="space-y-2">
-        <h2 className="text-sm font-semibold text-muted-foreground">
-          {workout.exercises.length} exercícios · arraste <span aria-hidden>⋮⋮</span> para reordenar
-        </h2>
+        <div className="flex flex-wrap gap-x-3 gap-y-1 rounded-2xl border p-3 text-sm" data-testid="editor-summary" aria-label="Resumo da ficha">
+          <span>
+            <span className="font-semibold tabular">{n}</span> {n === 1 ? 'exercício' : 'exercícios'}
+          </span>
+          <span title="Soma das séries planejadas na ficha; não é volume executado.">
+            <span className="font-semibold tabular">{plannedSets(workout.exercises)}</span> séries planejadas <span className="text-muted-foreground">(estimativa)</span>
+          </span>
+          {unlinked > 0 && (
+            <button className="font-medium text-warn underline-offset-2 hover:underline" onClick={() => navigate(`/exercicios/reconhecer?treino=${encodeURIComponent(here)}`)} data-testid="editor-unlinked">
+              {unlinked} sem vínculo com a biblioteca
+            </button>
+          )}
+        </div>
+        <h2 className="text-sm font-semibold text-muted-foreground">Use as setas ou arraste <span aria-hidden>⋮⋮</span> para reordenar</h2>
         <SortableList
           items={workout.exercises}
-          onReorder={(exs) => void saveWorkout({ ...workout, exercises: exs })}
-          render={(ex, handle, i) => (
-            <Card className="flex items-center gap-2 p-2 pr-2" data-testid="editor-exercise">
-              {handle}
-              <button className="flex-1 text-left min-w-0" onClick={() => setEditing({ open: true, ex })}>
-                <span className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-muted-foreground tabular">{i + 1}</span>
-                  <span className="truncate font-semibold">{ex.name}</span>
-                </span>
-                <span className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                  <Badge variant="secondary">{ex.muscleGroup}</Badge>
-                  <span className="tabular font-semibold text-foreground">
-                    {ex.sets} × {fmtRepRange(ex.repMin, ex.repMax)}
+          onReorder={(exs) => void apply({ type: 'reorder', order: exs.map((e) => e.id) })}
+          render={(ex, handle, i) => {
+            const origin = originLabel(ex);
+            return (
+              <Card className="flex items-center gap-1 p-2 pr-1" data-testid="editor-exercise">
+                {handle}
+                <button className="min-w-0 flex-1 text-left" onClick={() => setEditing({ open: true, ex })} aria-label={`Editar ${ex.name}: ${planSummary(ex)}`}>
+                  <span className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-muted-foreground tabular">{i + 1}</span>
+                    <span className="truncate font-semibold">{ex.name}</span>
                   </span>
-                  <span className="tabular">{fmtClock(ex.restSec)}</span>
-                  {ex.warmupSets > 0 && <span>+{ex.warmupSets} aquec.</span>}
-                  {ex.targetWeight != null && <span className="tabular">{fmtW(ex.targetWeight)}</span>}
-                  <span className={cn(ex.category === 'compound' ? 'text-primary' : '')}>{ex.category === 'compound' ? 'composto' : 'isolador'}</span>
-                </span>
-              </button>
-              <Button size="icon-sm" variant="ghost" aria-label={`Editar ${ex.name}`} onClick={() => setEditing({ open: true, ex })}>
-                <Pencil />
+                  <span className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                    <Badge variant="secondary">{ex.muscleGroup}</Badge>
+                    <span className="tabular font-semibold text-foreground">{planSummary(ex)}</span>
+                    {ex.modality && <Badge variant="outline">{MODALITY_LABEL[ex.modality]}</Badge>}
+                    {ex.laterality === 'unilateral' && <Badge variant="outline">unilateral</Badge>}
+                    {ex.restSec > 0 && <span className="tabular">{fmtClock(ex.restSec)}</span>}
+                    {ex.warmupSets > 0 && <span>+{ex.warmupSets} aquec.</span>}
+                    {ex.targetWeight != null && <span className="tabular">{fmtW(ex.targetWeight)}</span>}
+                    {ex.modality !== 'cardio' && ex.modality !== 'timed' && (
+                      <span className={cn(ex.category === 'compound' ? 'text-primary' : '')}>{ex.category === 'compound' ? 'composto' : 'isolador'}</span>
+                    )}
+                    {origin ? <span className="italic">{origin}</span> : <Badge variant="warn">sem vínculo</Badge>}
+                  </span>
+                </button>
+                <Button size="icon-sm" variant="ghost" aria-label={`Mover ${ex.name} para cima`} disabled={i === 0} onClick={() => void apply({ type: 'move', id: ex.id, delta: -1 })}>
+                  <ArrowUp />
+                </Button>
+                <Button size="icon-sm" variant="ghost" aria-label={`Mover ${ex.name} para baixo`} disabled={i === n - 1} onClick={() => void apply({ type: 'move', id: ex.id, delta: 1 })}>
+                  <ArrowDown />
+                </Button>
+                <Button size="icon-sm" variant="ghost" aria-label={`Mais ações para ${ex.name}`} onClick={() => setActionsFor(ex)} data-testid="exercise-actions">
+                  <MoreHorizontal />
+                </Button>
+              </Card>
+            );
+          }}
+        />
+        <div className="grid grid-cols-1 gap-2 min-[400px]:grid-cols-2">
+          <Button size="lg" className="w-full" onClick={() => navigate(libraryLink())} data-testid="add-from-library">
+            <Library /> Adicionar da biblioteca
+          </Button>
+          <Button size="lg" variant="outline" className="w-full border-dashed" onClick={() => setEditing({ open: true, ex: null })} data-testid="add-exercise">
+            <Plus /> Criar manualmente
+          </Button>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={() => navigate(libraryLink('&varios=1'))} data-testid="add-many">
+            <ListChecks /> Adicionar vários
+          </Button>
+          {n > 0 && (
+            <Button variant="outline" size="sm" onClick={() => navigate(`/treinos/${routine.id}/${workout.id}/substituir`)} data-testid="bulk-replace">
+              <Replace /> Substituir vários
+            </Button>
+          )}
+          {unlinked > 0 && (
+            <Button variant="outline" size="sm" onClick={() => navigate(`/exercicios/reconhecer?treino=${encodeURIComponent(here)}`)} data-testid="open-recognition-editor">
+              <ScanSearch /> Reconhecer {unlinked} {unlinked === 1 ? 'antigo' : 'antigos'}
+            </Button>
+          )}
+        </div>
+      </section>
+
+      <Dialog open={!!actionsFor} onOpenChange={(o) => !o && setActionsFor(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="break-words">{actionsFor?.name}</DialogTitle>
+          </DialogHeader>
+          {actionsFor && (
+            <div className="grid gap-2" data-testid="exercise-actions-menu">
+              <Button variant="secondary" size="lg" className="justify-start" onClick={() => (setEditing({ open: true, ex: actionsFor }), setActionsFor(null))}>
+                <Pencil /> Editar configuração
               </Button>
               <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label={`Duplicar ${ex.name}`}
+                variant="secondary"
+                size="lg"
+                className="justify-start"
                 onClick={() => {
-                  const idx = workout.exercises.findIndex((e) => e.id === ex.id);
-                  const copy = { ...ex, id: uid() };
-                  const exs = [...workout.exercises];
-                  exs.splice(idx + 1, 0, copy);
-                  void saveWorkout({ ...workout, exercises: exs });
-                  toast.success('Exercício duplicado');
+                  const ex = actionsFor;
+                  setActionsFor(null);
+                  void apply({ type: 'duplicate', id: ex.id, newId: uid() }, 'Exercício duplicado');
                 }}
               >
-                <Copy />
+                <Copy /> Duplicar
               </Button>
-              <Button size="icon-sm" variant="ghost" className="text-destructive" aria-label={`Excluir ${ex.name}`} onClick={() => setToDelete(ex)}>
-                <Trash2 />
+              <Button variant="secondary" size="lg" className="justify-start" onClick={() => navigate(libraryLink(`&substituir=${encodeURIComponent(actionsFor.id)}`))}>
+                <Replace /> Substituir por outro da biblioteca
               </Button>
-            </Card>
+              {libraryKeyOf(actionsFor) ? (
+                <>
+                  <Button variant="secondary" size="lg" className="justify-start" onClick={() => (void openOrigin(actionsFor), setActionsFor(null))} data-testid="open-origin">
+                    <Info /> Ver detalhes na biblioteca
+                  </Button>
+                  <Button variant="ghost" size="lg" className="justify-start" onClick={() => (setToUnlink(actionsFor), setActionsFor(null))} data-testid="unlink-origin">
+                    <Link2Off /> Desfazer associação com a biblioteca
+                  </Button>
+                </>
+              ) : (
+                <Button variant="secondary" size="lg" className="justify-start" onClick={() => navigate(`/exercicios/reconhecer?treino=${encodeURIComponent(here)}`)} data-testid="link-origin">
+                  <Link2 /> Associar à biblioteca
+                </Button>
+              )}
+              <Button variant="ghost" size="lg" className="justify-start text-destructive" onClick={() => (setToDelete(actionsFor), setActionsFor(null))}>
+                <Trash2 /> Remover da ficha
+              </Button>
+            </div>
           )}
-        />
-        <Button size="lg" variant="outline" className="w-full border-dashed" onClick={() => setEditing({ open: true, ex: null })} data-testid="add-exercise">
-          <Plus /> Adicionar exercício
-        </Button>
-      </section>
+        </DialogContent>
+      </Dialog>
 
       <ExerciseDialog
         open={editing.open}
@@ -353,19 +280,38 @@ export default function WorkoutEditorPage() {
         initial={editing.ex}
         onSave={(ex) => {
           const exists = workout.exercises.some((e) => e.id === ex.id);
-          void saveWorkout({ ...workout, exercises: exists ? workout.exercises.map((e) => (e.id === ex.id ? ex : e)) : [...workout.exercises, ex] });
-          toast.success(exists ? 'Exercício atualizado' : 'Exercício adicionado');
+          void apply(exists ? { type: 'update', exercise: ex } : { type: 'add', exercise: ex }, exists ? 'Exercício atualizado' : 'Exercício adicionado');
         }}
       />
       <ConfirmDialog
         open={!!toDelete}
         onOpenChange={(o) => !o && setToDelete(null)}
         destructive
-        title={`Excluir ${toDelete?.name}?`}
-        description="O histórico desse exercício em treinos anteriores é mantido."
-        confirmLabel="Excluir"
+        title={`Remover ${toDelete?.name}?`}
+        description="O histórico desse exercício em treinos anteriores é mantido. Metas ligadas a ele continuam existindo e usando o histórico registrado."
+        confirmLabel="Remover"
         onConfirm={() => {
-          if (toDelete) void saveWorkout({ ...workout, exercises: workout.exercises.filter((e) => e.id !== toDelete.id) });
+          if (toDelete) void apply({ type: 'remove', id: toDelete.id });
+        }}
+      />
+      <ConfirmDialog
+        open={!!toUnlink}
+        onOpenChange={(o) => !o && setToUnlink(null)}
+        title={`Desfazer a associação de ${toUnlink?.name}?`}
+        description="Só a referência de origem sai. O exercício continua na ficha com o mesmo nome, ID e configuração; metas, sessões, histórico, favoritos e o exercício da biblioteca não mudam. Você pode associar de novo depois."
+        confirmLabel="Desfazer associação"
+        onConfirm={() => (toUnlink ? unlink(toUnlink) : undefined)}
+      />
+      <ExerciseDetailDialog item={detail} onOpenChange={(o) => !o && setDetail(null)} favorite={false} onToggleFavorite={() => undefined} hideFavorite />
+      <WorkoutPreviewDialog
+        open={preview}
+        onOpenChange={setPreview}
+        workout={workout}
+        routineName={routine.name}
+        startDisabledReason={active ? 'Já há um treino em andamento: conclua ou descarte antes de iniciar outro.' : null}
+        onStart={() => {
+          setPreview(false);
+          void start(routine.id, workout.id);
         }}
       />
     </div>

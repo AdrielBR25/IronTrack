@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { CalendarClock, Check, Copy, Download, FileUp, MoreVertical, Moon, Pencil, Play, Plus, SkipForward, Sparkles, Trash2, Undo2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { AlertTriangle, CalendarClock, ChevronRight, Medal, CalendarDays, Check, Coffee, Copy, Download, Eye, FileUp, Library, Minus, MoreVertical, Moon, Pencil, Play, Plus, SkipForward, Sparkles, Trash2, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PageHeader } from '@/components/AppLayout';
+import { WorkoutPreviewDialog } from '@/features/library/WorkoutPreviewDialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -10,7 +11,11 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input, Label, NativeSelect } from '@/components/ui/input';
 import { ConfirmDialog } from '@/components/ui/confirm';
 import { SortableList } from '@/components/SortableList';
-import { useActiveSession, useRoutines, useSchedule, useSettings } from '@/hooks/data';
+import { useActiveSession, useRoutines, useSettings } from '@/hooks/data';
+import { useCalendarInput } from '@/hooks/useCalendar';
+import { ConflictNotice } from '@/features/calendar/ConflictNotice';
+import { CERTAINTY_HINT, ORIGIN_LABEL, entryLine, entryShort } from '@/features/calendar/calendarFormat';
+import { DAY_STATUS_LABEL, primaryEntries, resolveRange, rotationStatus, type ResolvedDay } from '@/modules/calendar';
 import { useStartWorkout } from '@/features/routines/useStartWorkout';
 import { importFichaFile, loadSampleFicha } from '@/features/routines/importFicha';
 import {
@@ -26,11 +31,10 @@ import {
   setNextWorkout,
   skipNextWorkout,
 } from '@/db/repo';
-import { routineToFicha } from '@/lib/routineSchema';
+import { routineToFicha } from '@/modules/training';
 import type { Routine, Workout } from '@/lib/types';
 import { cn, downloadJson, uid } from '@/lib/utils';
-import { fmtDateShort, todayISO, weekday, weekdayShort } from '@/lib/dates';
-import type { DayPlan } from '@/lib/rotation';
+import { addDays, fmtDateShort, weekday, weekdayShort } from '@/lib/dates';
 
 const LETTERS = 'ABCDEFGHIJ';
 
@@ -75,66 +79,103 @@ function RoutineDialog({ open, onOpenChange, routine }: { open: boolean; onOpenC
   );
 }
 
-function DayDialog({ day, routine, onClose }: { day: DayPlan | null; routine: Routine; onClose: () => void }) {
+/**
+ * Detalhes de um dia da agenda (P14). Deixa explícito qual modelo cada ação altera: o planejamento semanal (na tela
+ * Planejamento), a agenda anterior (reagendar/descanso, aqui) ou a rotação (controles do cartão). Nada é migrado.
+ */
+function AgendaDayDialog({ day, routine, onClose }: { day: ResolvedDay | null; routine: Routine; onClose: () => void }) {
+  const navigate = useNavigate();
   const [workoutId, setWorkoutId] = useState('');
-  useEffect(() => setWorkoutId(day?.workoutId ?? routine.workouts[0]?.id ?? ''), [day, routine]);
+  useEffect(() => setWorkoutId(day?.legacy?.workoutId ?? routine.workouts[0]?.id ?? ''), [day, routine]);
   if (!day) return null;
-  const isToday = day.date === todayISO();
+  const legacy = day.legacy;
+  const facts = day.entries.filter((e) => e.origin === 'session' || e.origin === 'active_session');
+  const primary = primaryEntries(day);
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent>
+      <DialogContent data-testid="agenda-day-dialog" data-date={day.date}>
         <DialogHeader>
           <DialogTitle>
-            {weekdayShort(weekday(day.date))}, {fmtDateShort(day.date)} {isToday && '(hoje)'}
+            {weekdayShort(weekday(day.date))}, {fmtDateShort(day.date)} {day.isToday && '(hoje)'}
           </DialogTitle>
-          <DialogDescription>Ajuste este dia. A rotação continua a partir do treino que você definir.</DialogDescription>
+          <DialogDescription>{DAY_STATUS_LABEL[day.status]}</DialogDescription>
         </DialogHeader>
-        <div className="space-y-3">
-          <Button
-            variant="secondary"
-            size="lg"
-            className="w-full justify-start"
-            onClick={async () => {
-              await setDayOverride({ routineId: routine.id, date: day.date, kind: 'rest' });
-              toast.success('Dia marcado como descanso');
-              onClose();
-            }}
-          >
-            <Moon /> Marcar como descanso
-          </Button>
-          <div className="space-y-2 rounded-2xl border p-3">
-            <Label>Reagendar: treinar neste dia</Label>
-            <div className="flex gap-2">
-              <NativeSelect value={workoutId} onChange={(e) => setWorkoutId(e.target.value)}>
-                {routine.workouts.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    Treino {w.label} · {w.name}
-                  </option>
-                ))}
-              </NativeSelect>
+        <div className="max-h-[65vh] space-y-3 overflow-y-auto">
+          <section aria-label="O que vale neste dia" className="space-y-1.5" data-testid="agenda-day-primary">
+            {[...facts, ...primary].map((e, i) => (
+              <p key={i} className="rounded-xl bg-secondary/50 px-3 py-2 text-sm">
+                <span className="block break-words font-medium">{entryLine(e)}</span>
+                <span className="block text-xs text-muted-foreground">
+                  {ORIGIN_LABEL[e.origin]} · {e.state}
+                  {e.followsRotation && CERTAINTY_HINT[e.certainty] ? ` · ${CERTAINTY_HINT[e.certainty]}` : ''}
+                </span>
+              </p>
+            ))}
+            {facts.length + primary.length === 0 && <p className="text-sm text-muted-foreground">Nada planejado nem sugerido para este dia.</p>}
+          </section>
+          <ConflictNotice day={day} planHref={`/planejamento?data=${day.date}`} legacyHref={null} />
+          <section aria-label="Planejamento semanal" className="space-y-2 rounded-2xl border p-3">
+            <p className="text-sm font-semibold">Planejamento semanal</p>
+            <p className="text-xs text-muted-foreground">Altera o planejamento de toda semana ou cria uma exceção só para esta data. Tem prioridade sobre a agenda anterior.</p>
+            <Button variant="secondary" className="w-full" onClick={() => navigate(`/planejamento?data=${day.date}`)} data-testid="agenda-edit-plan">
+              <CalendarDays /> Editar no planejamento
+            </Button>
+          </section>
+          {legacy && legacy.kind !== 'done' && !day.isPast && (
+            <section aria-label="Agenda anterior" className="space-y-2 rounded-2xl border p-3" data-testid="agenda-legacy-edit">
+              <p className="text-sm font-semibold">Agenda anterior (reagendar)</p>
+              <p className="text-xs text-muted-foreground">
+                Altera só a agenda anterior desta rotina (dias de treino das Configurações + reagendamentos). O planejamento semanal não muda. A rotação continua a partir do
+                treino que você definir.
+              </p>
+              {day.plan.source !== 'none' && (
+                <p className="rounded-xl bg-warn/10 p-2 text-xs text-warn">Este dia tem planejamento: ele continua valendo, e o reagendamento fica visível como agenda anterior.</p>
+              )}
               <Button
+                variant="secondary"
+                size="lg"
+                className="w-full justify-start"
                 onClick={async () => {
-                  await setDayOverride({ routineId: routine.id, date: day.date, kind: 'workout', workoutId });
-                  toast.success('Dia reagendado');
+                  await setDayOverride({ routineId: routine.id, date: day.date, kind: 'rest' });
+                  toast.success('Agenda anterior: dia marcado como descanso');
                   onClose();
                 }}
               >
-                Definir
+                <Moon /> Marcar como descanso
               </Button>
-            </div>
-          </div>
-          {day.source === 'override' && (
-            <Button
-              variant="ghost"
-              className="w-full"
-              onClick={async () => {
-                await clearDayOverride(routine.id, day.date);
-                toast('Dia voltou ao padrão');
-                onClose();
-              }}
-            >
-              <Undo2 /> Voltar ao padrão
-            </Button>
+              <Label>Reagendar: treinar neste dia</Label>
+              <div className="flex gap-2">
+                <NativeSelect value={workoutId} onChange={(e) => setWorkoutId(e.target.value)} aria-label="Treino para reagendar">
+                  {routine.workouts.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      Treino {w.label} · {w.name}
+                    </option>
+                  ))}
+                </NativeSelect>
+                <Button
+                  onClick={async () => {
+                    await setDayOverride({ routineId: routine.id, date: day.date, kind: 'workout', workoutId });
+                    toast.success('Agenda anterior: dia reagendado');
+                    onClose();
+                  }}
+                >
+                  Definir
+                </Button>
+              </div>
+              {legacy.source === 'override' && (
+                <Button
+                  variant="ghost"
+                  className="w-full"
+                  onClick={async () => {
+                    await clearDayOverride(routine.id, day.date);
+                    toast('Dia voltou ao padrão da agenda anterior');
+                    onClose();
+                  }}
+                >
+                  <Undo2 /> Voltar ao padrão
+                </Button>
+              )}
+            </section>
           )}
         </div>
       </DialogContent>
@@ -142,79 +183,144 @@ function DayDialog({ day, routine, onClose }: { day: DayPlan | null; routine: Ro
   );
 }
 
+const AGENDA_DAYS = 14;
+
 function RotationCard({ routine }: { routine: Routine }) {
-  const settings = useSettings();
-  const schedule = useSchedule(routine, settings, 14);
-  const [day, setDay] = useState<DayPlan | null>(null);
-  if (!schedule || routine.workouts.length === 0) return null;
-  const next = routine.workouts[schedule.nextIndex % routine.workouts.length];
-  const today = todayISO();
+  const input = useCalendarInput();
+  const [selected, setSelected] = useState<string | null>(null);
+  const days = useMemo(() => (input ? resolveRange(input, input.today, addDays(input.today, AGENDA_DAYS - 1)) : null), [input]);
+  const status = input ? rotationStatus(input, routine.id) : null;
+  if (!days || !status || routine.workouts.length === 0) return null;
+  const next = status.next;
+  const day = days.find((d) => d.date === selected) ?? null;
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <CalendarClock className="h-5 w-5 text-primary" /> Rotação
+          <CalendarClock className="h-5 w-5 text-primary" /> Rotação e agenda
         </CardTitle>
         <CardDescription>
-          {routine.workouts.map((w) => w.label).join(' → ')} → … contínua. Toque em um dia para marcar descanso ou reagendar.
+          {routine.workouts.map((w) => w.label).join(' → ')} → … contínua. A agenda é a mesma do Planejamento: o planejamento semanal tem prioridade; sem ele, vale a agenda
+          anterior (dias de treino das Configurações + reagendamentos). Toque em um dia para ver detalhes, reagendar ou editar o planejamento.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm text-muted-foreground">Próximo:</span>
-          <NativeSelect
-            aria-label="Corrigir próximo treino da sequência"
-            className="h-10 w-auto min-w-40 flex-1"
-            value={next?.id}
-            onChange={async (e) => {
-              await setNextWorkout(routine, e.target.value);
-              toast.success('Sequência corrigida');
-            }}
-          >
-            {routine.workouts.map((w) => (
-              <option key={w.id} value={w.id}>
-                Treino {w.label} · {w.name}
-              </option>
-            ))}
-          </NativeSelect>
-          <Button
-            variant="secondary"
-            size="sm"
-            className="h-10"
-            onClick={async () => {
-              await skipNextWorkout(routine);
-              toast('Treino pulado na sequência');
-            }}
-          >
-            <SkipForward /> Pular
-          </Button>
+        <div className="space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm text-muted-foreground">Próximo:</span>
+            <NativeSelect
+              aria-label="Corrigir próximo treino da sequência"
+              className="h-10 w-auto min-w-40 flex-1"
+              value={next?.id}
+              onChange={async (e) => {
+                await setNextWorkout(routine, e.target.value);
+                toast.success('Sequência corrigida');
+              }}
+            >
+              {routine.workouts.map((w) => (
+                <option key={w.id} value={w.id}>
+                  Treino {w.label} · {w.name}
+                </option>
+              ))}
+            </NativeSelect>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-10"
+              onClick={async () => {
+                await skipNextWorkout(routine);
+                toast('Treino pulado na sequência');
+              }}
+            >
+              <SkipForward /> Pular
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">Estes controles alteram só a rotação (o próximo treino da sequência).</p>
         </div>
         <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 no-scrollbar" data-testid="agenda">
-          {schedule.plan.map((d) => {
-            const w = routine.workouts.find((x) => x.id === d.workoutId);
-            const isToday = d.date === today;
+          {days.map((d) => {
+            const primary = primaryEntries(d);
+            const workouts = primary.filter((e) => e.kind === 'workout');
+            const first = workouts[0];
+            const doneDay = d.plan.sessions.length > 0 && (d.status === 'done' || d.status === 'trained');
+            const isPlan = d.origin === 'plan_exception' || d.origin === 'plan_recurring';
+            const isOverride = d.origin === 'legacy' && d.legacy?.source === 'override';
+            const uncertain = first && (first.certainty === 'forecast' || first.certainty === 'undetermined');
+            const what = doneDay
+              ? 'treino feito'
+              : workouts.length
+                ? workouts.map((e) => entryShort(e)).join(' + ')
+                : d.status === 'rest'
+                  ? 'descanso'
+                  : d.status === 'free'
+                    ? 'dia livre'
+                    : 'nada planejado';
+            const origin = isPlan ? (d.origin === 'plan_exception' ? 'exceção do planejamento' : 'planejamento semanal') : isOverride ? 'reagendado na agenda anterior' : d.origin === 'legacy' ? 'agenda anterior' : '';
             return (
               <button
                 key={d.date}
-                onClick={() => d.kind !== 'done' && setDay(d)}
+                onClick={() => setSelected(d.date)}
+                aria-label={`${weekdayShort(weekday(d.date))} ${fmtDateShort(d.date)}: ${what}${origin ? `, ${origin}` : ''}${d.hasWarning ? ', divergência entre agendas' : ''}`}
+                data-testid="agenda-day"
+                data-date={d.date}
+                data-status={d.status}
+                data-origin={d.origin}
+                data-warning={d.hasWarning ? 'true' : 'false'}
                 className={cn(
-                  'flex w-14 shrink-0 flex-col items-center gap-1 rounded-2xl border py-2 transition-colors',
-                  isToday && 'border-primary',
-                  d.kind === 'done' ? 'bg-primary/15' : d.kind === 'rest' ? 'bg-secondary/40' : 'bg-card hover:bg-accent',
+                  'relative flex w-14 shrink-0 flex-col items-center gap-1 rounded-2xl border py-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  d.isToday && 'border-primary',
+                  doneDay ? 'bg-primary/15' : d.status === 'rest' || d.status === 'free' ? 'bg-secondary/40' : 'bg-card hover:bg-accent',
                 )}
               >
+                {d.hasWarning && <AlertTriangle className="absolute right-1 top-1 h-3 w-3 text-warn" aria-hidden />}
                 <span className="text-[10px] uppercase text-muted-foreground">{weekdayShort(weekday(d.date))}</span>
                 <span className="text-xs tabular text-muted-foreground">{d.date.slice(8)}</span>
-                <span className={cn('font-display text-lg font-bold', d.kind === 'rest' ? 'text-muted-foreground' : 'text-primary')}>
-                  {d.kind === 'rest' ? <Moon className="h-4 w-4" /> : d.kind === 'done' ? <Check className="h-5 w-5" /> : w?.label}
+                <span className={cn('font-display text-lg font-bold', d.status === 'rest' || d.status === 'free' ? 'text-muted-foreground' : uncertain ? 'text-primary/60' : 'text-primary')}>
+                  {doneDay ? (
+                    <Check className="h-5 w-5" />
+                  ) : d.status === 'rest' ? (
+                    <Moon className="h-4 w-4" />
+                  ) : d.status === 'free' ? (
+                    <Coffee className="h-4 w-4" />
+                  ) : first ? (
+                    `${first.workoutLabel ?? '?'}${workouts.length > 1 ? '+' : ''}`
+                  ) : (
+                    <Minus className="h-4 w-4 text-muted-foreground" />
+                  )}
                 </span>
-                {d.source === 'override' && <span className="h-1 w-1 rounded-full bg-warn" title="ajustado" />}
+                {isPlan && <span className="h-1 w-3 rounded-full bg-primary" title="planejamento" aria-hidden />}
+                {isOverride && <span className="h-1 w-1 rounded-full bg-warn" title="reagendado" aria-hidden />}
               </button>
             );
           })}
         </div>
+        <ul className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground" aria-hidden data-testid="agenda-legend">
+          <li className="flex items-center gap-1">
+            <span className="h-1 w-3 rounded-full bg-primary" /> planejamento
+          </li>
+          <li className="flex items-center gap-1">
+            <span className="h-1 w-1 rounded-full bg-warn" /> reagendado (agenda anterior)
+          </li>
+          <li className="flex items-center gap-1">
+            <span className="font-bold text-primary/60">B</span> previsão da rotação
+          </li>
+          <li className="flex items-center gap-1">
+            <AlertTriangle className="h-3 w-3 text-warn" /> divergência
+          </li>
+        </ul>
+        <Link
+          to="/planejamento/importar"
+          className="flex min-h-11 items-center gap-2 rounded-xl bg-secondary/50 px-3 py-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid="treinos-open-import"
+        >
+          <CalendarDays className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+          <span className="min-w-0 flex-1">
+            <span className="font-medium">Importar agenda antiga para o planejamento</span>
+            <span className="block text-muted-foreground">Opcional, com prévia e confirmação. Reagendar e descanso aqui continuam alterando só a agenda anterior.</span>
+          </span>
+        </Link>
       </CardContent>
-      <DayDialog day={day} routine={routine} onClose={() => setDay(null)} />
+      <AgendaDayDialog day={day} routine={routine} onClose={() => setSelected(null)} />
     </Card>
   );
 }
@@ -225,6 +331,7 @@ function WorkoutRow({ routine, workout, handle }: { routine: Routine; workout: W
   const active = useActiveSession();
   const [menu, setMenu] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [preview, setPreview] = useState(false);
   const groups = [...new Set(workout.exercises.map((e) => e.muscleGroup))];
   return (
     <Card className="flex items-center gap-2 p-2 pr-3">
@@ -254,6 +361,18 @@ function WorkoutRow({ routine, workout, handle }: { routine: Routine; workout: W
             </Button>
             <Button variant="secondary" size="lg" className="justify-start" onClick={() => navigate(`/treinos/${routine.id}/${workout.id}`)}>
               <Pencil /> Editar exercícios
+            </Button>
+            <Button
+              variant="secondary"
+              size="lg"
+              className="justify-start"
+              onClick={() => {
+                setMenu(false);
+                setPreview(true);
+              }}
+              data-testid="workout-preview-open"
+            >
+              <Eye /> Ver prévia da ficha
             </Button>
             <Button
               variant="secondary"
@@ -295,6 +414,17 @@ function WorkoutRow({ routine, workout, handle }: { routine: Routine; workout: W
           toast('Treino excluído');
         }}
       />
+      <WorkoutPreviewDialog
+        open={preview}
+        onOpenChange={setPreview}
+        workout={workout}
+        routineName={routine.name}
+        startDisabledReason={active ? 'Já há um treino em andamento: conclua ou descarte antes de iniciar outro.' : null}
+        onStart={() => {
+          setPreview(false);
+          void start(routine.id, workout.id);
+        }}
+      />
     </Card>
   );
 }
@@ -308,6 +438,7 @@ export default function WorkoutsPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [importErrors, setImportErrors] = useState<string[] | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
 
   const routine = routines?.find((r) => r.id === (selectedId ?? settings.activeRoutineId)) ?? routines?.[0];
   const isActive = routine && routine.id === (settings.activeRoutineId ?? routines?.[0]?.id);
@@ -319,6 +450,12 @@ export default function WorkoutsPage() {
         subtitle="Rotinas, rotação e fichas"
         action={
           <div className="flex gap-2">
+            <Button variant="outline" size="icon" aria-label="Biblioteca de exercícios" title="Biblioteca de exercícios" onClick={() => navigate('/exercicios')} data-testid="open-library">
+              <Library />
+            </Button>
+            <Button variant="outline" size="icon" aria-label="Planejamento semanal" title="Planejamento semanal" onClick={() => navigate('/planejamento')} data-testid="open-planner">
+              <CalendarDays />
+            </Button>
             <Button variant="outline" size="icon" aria-label="Importar ficha JSON" onClick={() => fileRef.current?.click()}>
               <FileUp />
             </Button>
@@ -345,6 +482,17 @@ export default function WorkoutsPage() {
           } else setImportErrors(r.errors);
         }}
       />
+
+      {/* P19: acesso ao desempenho por exercício sem novo botão no cabeçalho (cabe em 360 px). */}
+      <Link
+        to="/desempenho"
+        data-testid="workouts-open-performance"
+        className="flex min-h-11 items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <Medal className="h-4 w-4 text-primary" aria-hidden />
+        <span className="flex-1">Desempenho e recordes por exercício</span>
+        <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden />
+      </Link>
 
       {routines && routines.length === 0 && (
         <Card className="p-5 text-center">

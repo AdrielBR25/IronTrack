@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bell, Database, Download, HardDrive, Palette, Plus, Smartphone, Target, Timer, TrendingUp, Upload, Vibrate, Volume2, X, Dumbbell, RotateCw } from 'lucide-react';
+import { Bell, Database, Download, HardDrive, ShieldCheck, Palette, Plus, Smartphone, Target, Timer, TrendingUp, Upload, Vibrate, Volume2, X, Dumbbell, RotateCw, Fingerprint } from 'lucide-react';
 import { toast } from 'sonner';
 import { PageHeader } from '@/components/AppLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -7,19 +7,23 @@ import { Input, Label } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Segmented } from '@/components/ui/segmented';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/ui/confirm';
-import { useSettings } from '@/hooks/data';
-import { db, requestPersistentStorage, saveSettings } from '@/db/db';
+import { useCurrentProfile, useSettings } from '@/hooks/data';
+import { renameProfile } from '@/db/profiles';
+import { PROFILE_NAME_MAX } from '@/lib/profile';
+import { clearLocalData, requestPersistentStorage, saveSettings } from '@/db/db';
 import type { Equipment, Settings } from '@/lib/types';
 import { GOAL_LABEL } from '@/lib/defaults';
-import { EQUIPMENT_LABEL } from '@/lib/units';
+import { EQUIPMENT_LABEL } from '@/modules/training';
 import { cn, downloadJson, fmtNum, parseNum, readFileText } from '@/lib/utils';
 import { weekdayShort } from '@/lib/dates';
 import { audioAvailable, notificationState, playBeep, requestNotificationPermission, showLocalNotification, unlockAudio, vibrate, vibrationAvailable, type NotifState } from '@/lib/alerts';
 import { useInstallAvailable } from '@/components/InstallBanner';
 import { promptInstall } from '@/lib/install';
-import { exportBackup, parseBackup, restoreBackupMerge, restoreBackupReplace, type BackupFile } from '@/lib/backup';
+import { checkBackupSize, checkLocalIntegrity, exportBackup, parseBackup, previewRestore, type BackupFile, type RestorePreview } from '@/lib/backup';
+import type { IntegrityReport } from '@/lib/integrity';
+import { IssueList, RestorePreviewDialog } from '@/features/backup/RestorePreviewDialog';
 
 function Row({ label, hint, children }: { label: string; hint?: React.ReactNode; children: React.ReactNode }) {
   return (
@@ -73,14 +77,52 @@ function Section({ icon: Icon, title, description, children }: { icon: typeof Be
   );
 }
 
+/** Identidade local: nome editável, ID fixo. Sem troca, criação ou exclusão de perfis nesta versão. */
+function LocalProfileSection() {
+  const profile = useCurrentProfile();
+  if (!profile) return null;
+  return (
+    <Section icon={Fingerprint} title="Perfil local" description="Seus dados ficam armazenados apenas neste navegador, neste aparelho. Não há conta online nem sincronização.">
+      <div className="space-y-1.5 py-3">
+        <Label htmlFor="profile-name">Nome do perfil</Label>
+        <Input
+          id="profile-name"
+          data-testid="profile-name"
+          maxLength={PROFILE_NAME_MAX}
+          defaultValue={profile.displayName}
+          key={profile.displayName}
+          onBlur={async (e) => {
+            const v = e.target.value;
+            if (v.trim() === profile.displayName) return;
+            try {
+              await renameProfile(profile.id, v);
+              toast.success('Nome do perfil atualizado');
+            } catch (err) {
+              e.target.value = profile.displayName;
+              toast.error(err instanceof Error ? err.message : String(err));
+            }
+          }}
+        />
+      </div>
+      <div className="space-y-1 py-3">
+        <p className="text-sm font-medium">Identificador local</p>
+        <p className="select-all break-all font-mono text-xs text-muted-foreground" data-testid="profile-id">
+          {profile.id}
+        </p>
+        <p className="text-xs text-muted-foreground">Gerado aleatoriamente uma única vez. Não muda ao renomear o perfil, atualizar o app ou restaurar backups.</p>
+      </div>
+    </Section>
+  );
+}
+
 export default function SettingsPage() {
   const s = useSettings();
   const set = (p: Partial<Settings>) => void saveSettings(p);
   const [notif, setNotif] = useState<NotifState>(notificationState());
   const [persisted, setPersisted] = useState<boolean | null>(null);
   const [usage, setUsage] = useState<string | null>(null);
-  const [pendingBackup, setPendingBackup] = useState<BackupFile | null>(null);
-  const [confirmReplace, setConfirmReplace] = useState(false);
+  const [pendingBackup, setPendingBackup] = useState<{ file: BackupFile; preview: RestorePreview } | null>(null);
+  const [integrity, setIntegrity] = useState<IntegrityReport | null>(null);
   const [confirmWipe, setConfirmWipe] = useState(false);
   const [newGroup, setNewGroup] = useState('');
   const installAvailable = useInstallAvailable();
@@ -112,6 +154,8 @@ export default function SettingsPage() {
           </div>
         </div>
       </Section>
+
+      <LocalProfileSection />
 
       <Section icon={Dumbbell} title="Treino">
         <Row label="Unidade de peso" hint="Os dados são guardados em kg e convertidos na tela.">
@@ -146,7 +190,10 @@ export default function SettingsPage() {
               );
             })}
           </div>
-          <p className="text-xs text-muted-foreground">A rotação segue nesses dias e continua de onde parou na semana seguinte.</p>
+          <p className="text-xs text-muted-foreground" data-testid="training-days-hint">
+            A rotação segue nesses dias e continua de onde parou na semana seguinte. Estes dias formam a agenda anterior: valem como sugestão nos dias sem planejamento
+            semanal (o planejamento tem prioridade no calendário).
+          </p>
         </div>
         <Row label="Descanso de compostos" hint="Padrão para novos exercícios">
           <NumField label="Descanso de compostos" integer max={900} value={s.restCompoundSec} onCommit={(v) => set({ restCompoundSec: v })} suffix="s" />
@@ -339,9 +386,16 @@ export default function SettingsPage() {
               const f = e.target.files?.[0];
               e.target.value = '';
               if (!f) return;
+              // Validação completa e prévia antes de qualquer escrita.
+              const tooBig = checkBackupSize(f.size);
+              if (tooBig) return void toast.error('Backup não aceito', { description: tooBig, duration: 10000 });
               const r = parseBackup(await readFileText(f));
-              if (!r.ok) toast.error('Backup inválido', { description: r.errors.join('\n'), duration: 10000 });
-              else setPendingBackup(r.value);
+              if (!r.ok) return void toast.error('Backup inválido', { description: r.errors.join('\n'), duration: 10000 });
+              try {
+                setPendingBackup({ file: r.value, preview: await previewRestore(r.value) });
+              } catch (err) {
+                toast.error('Não foi possível analisar o backup', { description: err instanceof Error ? err.message : String(err), duration: 10000 });
+              }
             }}
           />
         </div>
@@ -371,6 +425,9 @@ export default function SettingsPage() {
           </p>
         </div>
         <div className="py-3">
+          <Button variant="ghost" className="w-full" data-testid="check-integrity" onClick={async () => setIntegrity(await checkLocalIntegrity())}>
+            <ShieldCheck /> Verificar integridade dos dados
+          </Button>
           <Button variant="ghost" className="w-full text-destructive" onClick={() => setConfirmWipe(true)}>
             Apagar todos os dados
           </Button>
@@ -394,64 +451,29 @@ export default function SettingsPage() {
         </div>
       </Section>
 
-      <Dialog open={!!pendingBackup && !confirmReplace} onOpenChange={(o) => !o && setPendingBackup(null)}>
-        <DialogContent>
+      <RestorePreviewDialog backup={pendingBackup?.file ?? null} preview={pendingBackup?.preview ?? null} onClose={() => setPendingBackup(null)} />
+      <Dialog open={!!integrity} onOpenChange={(o) => !o && setIntegrity(null)}>
+        <DialogContent data-testid="integrity-report">
           <DialogHeader>
-            <DialogTitle>Restaurar backup</DialogTitle>
+            <DialogTitle>Integridade dos dados</DialogTitle>
             <DialogDescription>
-              Backup de {pendingBackup ? new Date(pendingBackup.exportedAt).toLocaleString('pt-BR') : ''}: {pendingBackup?.data.routines.length} rotinas, {pendingBackup?.data.sessions.length} treinos,{' '}
-              {pendingBackup?.data.bodyEntries.length} avaliações.
+              {integrity && integrity.issues.length === 0
+                ? 'Nenhum problema encontrado.'
+                : `${integrity?.counts.error ?? 0} erro(s), ${integrity?.counts.warning ?? 0} aviso(s), ${integrity?.counts.info ?? 0} observação(ões). Nada foi alterado.`}
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-2">
-            <Button
-              size="lg"
-              data-testid="backup-merge"
-              onClick={async () => {
-                if (!pendingBackup) return;
-                const r = await restoreBackupMerge(pendingBackup);
-                setPendingBackup(null);
-                toast.success('Backup mesclado', { description: `+${r.sessions} treinos, +${r.routines} rotinas, +${r.bodyEntries} avaliações · ${r.skipped} duplicados ignorados` });
-              }}
-            >
-              Mesclar com os dados atuais
-            </Button>
-            <Button size="lg" variant="outline" className="text-destructive" data-testid="backup-replace" onClick={() => setConfirmReplace(true)}>
-              Substituir todos os dados
-            </Button>
-          </div>
-          <DialogFooter>
-            <p className="text-xs text-muted-foreground">Mesclar adiciona o que não existe, sem duplicar.</p>
-          </DialogFooter>
+          {integrity && <IssueList issues={integrity.issues} />}
         </DialogContent>
       </Dialog>
-      <ConfirmDialog
-        open={confirmReplace}
-        onOpenChange={(o) => {
-          setConfirmReplace(o);
-          if (!o) setPendingBackup(null);
-        }}
-        destructive
-        title="Substituir todos os dados?"
-        description="Tudo o que está neste aparelho será apagado e trocado pelo conteúdo do backup. Essa ação não pode ser desfeita."
-        confirmLabel="Substituir"
-        onConfirm={async () => {
-          if (!pendingBackup) return;
-          const r = await restoreBackupReplace(pendingBackup);
-          toast.success('Backup restaurado', { description: `${r.sessions} treinos, ${r.routines} rotinas` });
-        }}
-      />
       <ConfirmDialog
         open={confirmWipe}
         onOpenChange={setConfirmWipe}
         destructive
         title="Apagar todos os dados?"
-        description="Rotinas, histórico, avaliações, fotos e configurações deste aparelho serão apagados. Exporte um backup antes, se quiser guardar."
+        description="Rotinas, histórico, avaliações, fotos e configurações deste aparelho serão apagados. O perfil local (nome e identificador) é mantido. Exporte um backup antes, se quiser guardar."
         confirmLabel="Apagar tudo"
         onConfirm={async () => {
-          await db.transaction('rw', [db.settings, db.routines, db.sessions, db.rotations, db.overrides, db.bodyEntries, db.photos], async () => {
-            await Promise.all([db.settings, db.routines, db.sessions, db.rotations, db.overrides, db.bodyEntries, db.photos].map((t) => t.clear()));
-          });
+          await clearLocalData();
           toast('Dados apagados');
         }}
       />

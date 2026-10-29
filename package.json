@@ -10,7 +10,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "test:gateway": "vitest run --config services/ai-gateway/vitest.config.ts",
+    "gateway:dev": "node services/ai-gateway/src/main.ts",
+    "gateway:token": "node services/ai-gateway/scripts/token.ts",
+    "gateway:homologate": "node services/ai-gateway/scripts/homologate.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

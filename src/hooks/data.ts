@@ -1,14 +1,19 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo, useState } from 'react';
 import { db, mergeSettings } from '@/db/db';
-import type { DayOverride, Routine, Settings, WorkoutSession } from '@/lib/types';
+import type { DayOverride, LocalProfile, Routine, Settings, WorkoutSession } from '@/lib/types';
 import { DEFAULT_SETTINGS } from '@/lib/defaults';
-import { projectSchedule, type DayPlan } from '@/lib/rotation';
+import { projectSchedule, type DayPlan } from '@/modules/training';
 import { todayISO, tsToISODate } from '@/lib/dates';
 
 export function useSettings(): Settings {
   const s = useLiveQuery(() => db.settings.get('settings'), []);
   return useMemo(() => (s ? mergeSettings(s) : DEFAULT_SETTINGS), [s]);
+}
+
+/** Perfil local atual (undefined enquanto carrega). */
+export function useCurrentProfile(): LocalProfile | undefined {
+  return useLiveQuery(async () => (db.currentProfileId ? db.profiles.get(db.currentProfileId) : undefined), []);
 }
 
 export function useSettingsLoaded(): boolean {
@@ -31,6 +36,16 @@ export function useActiveRoutine(): { routine: Routine | null | undefined; setti
     return (await db.routines.toCollection().first()) ?? null;
   }, []);
   return { routine, settings };
+}
+
+/** Rotina pelo ID (undefined enquanto carrega ou se não existe). */
+export function useRoutine(id: string | undefined): Routine | undefined {
+  return useLiveQuery(() => (id ? db.routines.get(id) : undefined), [id]);
+}
+
+/** Sessão pelo ID (undefined enquanto carrega ou se não existe). */
+export function useSession(id: string | undefined): WorkoutSession | undefined {
+  return useLiveQuery(() => (id ? db.sessions.get(id) : undefined), [id]);
 }
 
 export function useActiveSession(): WorkoutSession | null | undefined {
