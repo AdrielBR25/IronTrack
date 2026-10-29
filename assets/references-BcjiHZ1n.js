@@ -1,0 +1,1 @@
+import{a6 as f}from"./index-C-cez9hS.js";function l(s,n,i){let r=0;for(const e of n)for(const o of e.workouts??[])for(const c of o.exercises??[])f(c)===s&&r++;let t=0;for(const e of i)(e.exercises??[]).some(o=>f(o)===s)&&t++;return{templates:r,sessions:t}}const m=s=>s.templates>0||s.sessions>0;export{m as i,l};
