@@ -103,7 +103,11 @@ const bench = (load: number, reps: number, over: Partial<SessionExercise> = {}):
   ...over,
 });
 function ses(id: string, daysAgo: number, exercises: SessionExercise[], over: Partial<WorkoutSession> = {}): WorkoutSession {
-  const startedAt = Date.now() - daysAgo * DAY - 3_600_000;
+  // Meio-dia local do dia de calendário (hoje − daysAgo): o filtro de período conta dias locais, então um horário
+  // relativo ao relógio (agora − Nd − 1h) mudava de dia entre 00:00 e 01:00 e o teste falhava conforme a hora.
+  const day = new Date(Date.now() - daysAgo * DAY);
+  day.setHours(12, 0, 0, 0);
+  const startedAt = Math.min(day.getTime(), Date.now() - 60_000);
   return { id, profileId: db.currentProfileId!, routineId: 'gr', workoutId: 'gr-A', workoutLabel: 'A', workoutName: 'Treino A', status: 'completed', startedAt, finishedAt: startedAt + 3_600_000, exercises, updatedAt: startedAt, ...over };
 }
 
