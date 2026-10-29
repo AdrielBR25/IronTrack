@@ -71,6 +71,15 @@ test('biblioteca visual: miniaturas, selo 3D, filtro por movimento, humanoide 3D
   await expect(visual.getByTestId('muscle-map-2d')).toBeVisible();
   await expect(page.getByTestId('humanoid-canvas')).toHaveCount(0);
   await expect(page.getByTestId('muscle-legend')).toContainText('Quadríceps');
+  // Selecionar um grupo: só ele fica destacado; tocar de novo volta a mostrar todos.
+  const lit = visual.locator('[data-testid="muscle-map-2d"] path[data-emphasis]');
+  const all = await lit.count();
+  await page.getByTestId('muscle-focus').getByRole('button', { name: 'Quadríceps', exact: true }).click();
+  await expect(page.getByTestId('muscle-focus').getByRole('button', { name: 'Quadríceps', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => lit.count()).toBeLessThan(all);
+  expect(await lit.count()).toBeGreaterThan(0);
+  await page.getByTestId('muscle-focus').getByRole('button', { name: 'Quadríceps', exact: true }).click();
+  await expect(lit).toHaveCount(all);
   // Atalho para o assistente com a pergunta preenchida (nada enviado).
   await page.getByTestId('detail-ask-assistant').click();
   await expect(page).toHaveURL(/#\/assistente\?exercicio=/);

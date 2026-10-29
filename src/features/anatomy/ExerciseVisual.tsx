@@ -1,6 +1,6 @@
 import { Component, Suspense, lazy, useMemo, useState, type ReactNode } from 'react';
 import { Box, Pause, Play, Repeat, RotateCcw } from 'lucide-react';
-import { MUSCLE_NAME, type LibraryItem } from '@/modules/exercises';
+import { MUSCLE_NAME, type LibraryItem, type LibraryMuscle } from '@/modules/exercises';
 import { VISUAL_STATUS_LABEL, demoForCatalog, emphasisFor, visualFor } from '@/modules/exercises/demos';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -81,7 +81,16 @@ export default function ExerciseVisual({ item, instructions = [] }: { item: Visu
   const catalogId = item.kind === 'catalog' ? item.refId : null;
   const entry = visualFor(catalogId);
   const demo = demoForCatalog(catalogId);
-  const emphasis = useMemo(() => emphasisFor(item.primaryMuscles, item.secondaryMuscles), [item.primaryMuscles, item.secondaryMuscles]);
+  // Selecionar um grupo (legenda) destaca só ele, com o mesmo papel (principal ou secundário); o resto fica neutro.
+  const [focus, setFocus] = useState<LibraryMuscle | null>(null);
+  const emphasis = useMemo(
+    () =>
+      focus
+        ? emphasisFor(item.primaryMuscles.includes(focus) ? [focus] : [], item.primaryMuscles.includes(focus) ? [] : [focus])
+        : emphasisFor(item.primaryMuscles, item.secondaryMuscles),
+    [item.primaryMuscles, item.secondaryMuscles, focus],
+  );
+  const groups = [...new Set([...item.primaryMuscles, ...item.secondaryMuscles])];
   const [mode, setMode] = useState<'3d' | '2d'>(() => (webglAvailable() ? '3d' : '2d'));
   const [failed, setFailed] = useState<string | null>(() => (webglAvailable() ? null : 'Este aparelho não abre gráficos 3D (WebGL).'));
   const [view, setView] = useState<HumanoidView>(() => (demo?.views[0] === 'frontal' ? 'frontal' : 'lateral'));
@@ -210,6 +219,21 @@ export default function ExerciseVisual({ item, instructions = [] }: { item: Visu
       )}
       {demo && <p className="text-xs text-muted-foreground">Equipamento na cena: {demo.equipment}. Demonstração ilustrativa do movimento; não mede ativação muscular.</p>}
       <MuscleLegend item={item} />
+      {groups.length > 1 && (
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Destacar um grupo muscular" data-testid="muscle-focus">
+          <span className="text-xs text-muted-foreground">Destacar:</span>
+          {groups.map((m) => (
+            <Button key={m} size="sm" variant={focus === m ? 'secondary' : 'outline'} className="h-8 px-2.5 text-xs" aria-pressed={focus === m} onClick={() => setFocus((f) => (f === m ? null : m))}>
+              {MUSCLE_NAME[m]}
+            </Button>
+          ))}
+          {focus && (
+            <Button size="sm" variant="ghost" className="h-8 px-2.5 text-xs" onClick={() => setFocus(null)}>
+              Mostrar todos
+            </Button>
+          )}
+        </div>
+      )}
     </section>
   );
 }

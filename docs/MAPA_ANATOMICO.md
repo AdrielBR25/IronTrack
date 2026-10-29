@@ -30,7 +30,13 @@ As cores nunca são a única informação: a legenda em texto lista os grupos pr
   **fallback** quando não há WebGL, quando o contexto WebGL é perdido, quando o chunk 3D falha ao carregar (limite de
   erro) e também pode ser escolhido pela pessoa no botão de modo.
 
-## Limitações honestas
+## Selecionar um grupo
+
+Abaixo da legenda, "Destacar:" lista os grupos do exercício. Tocar num grupo deixa só ele colorido (com o mesmo papel,
+principal ou secundário) no 3D e no 2D; tocar de novo ou em "Mostrar todos" volta ao destaque completo. Não é possível
+tocar diretamente na região do boneco para selecioná-la.
+
+## Limitações
 
 - Regiões simplificadas (16), sem subdivisões (ex.: cabeças do deltoide, porção clavicular do peitoral).
 - Representa a descrição usual do exercício, não medidas de ativação.
