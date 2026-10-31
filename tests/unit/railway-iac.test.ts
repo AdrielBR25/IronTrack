@@ -81,6 +81,15 @@ describe('services/web (Caddy)', () => {
     expect(entry).toMatch(/API_HOST[\s\S]*fail/);
   });
 
+  it('Dockerfiles compatíveis com o builder da Railway: nenhum RUN --mount além de cache', () => {
+    for (const f of ['services/web/Dockerfile', 'services/api/Dockerfile']) {
+      const text = readFileSync(f, 'utf8');
+      for (const m of text.matchAll(/--mount=([^\s\\]+)/g)) expect(m[1], f).toMatch(/(^|,)type=cache(,|$)/);
+      expect(text, f).not.toMatch(/type=secret|type=ssh|type=bind/);
+      expect(text, f).toMatch(/^RUN npm ci /m);
+    }
+  });
+
   it('imagem de produção: build com VITE_ACCOUNTS=on em "/", servida pelo Caddy sem root (nunca vite preview)', () => {
     expect(docker).toContain('ENV BASE_PATH=/ VITE_ACCOUNTS=on');
     expect(docker).toContain('FROM caddy:');

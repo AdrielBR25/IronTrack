@@ -5,14 +5,27 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-secret_args=()
-if [ -n "${BUILD_CA:-}" ]; then secret_args=(--secret "id=build_ca,src=$BUILD_CA"); fi
 proxy_args=()
 if [ -n "${HTTPS_PROXY:-}" ]; then proxy_args=(--network host --build-arg "HTTPS_PROXY=$HTTPS_PROXY" --build-arg "NO_PROXY=${NO_PROXY:-}"); fi
 
+# Os Dockerfiles do repositório são exatamente os da Railway (sem RUN --mount, que o builder dela recusa). Só para builds
+# locais atrás de proxy com CA próprio (BUILD_CA), constrói a partir de uma cópia temporária em que o `npm ci` recebe o
+# CA por montagem secreta do BuildKit: o certificado nunca entra na imagem nem no repositório.
+build() { # build <Dockerfile> <tag>
+  local file="$1"
+  if [ -n "${BUILD_CA:-}" ]; then
+    file="$(mktemp)"
+    sed 's#^RUN npm ci#RUN --mount=type=secret,id=build_ca NODE_EXTRA_CA_CERTS=/run/secrets/build_ca npm ci#' "$1" > "$file"
+    DOCKER_BUILDKIT=1 docker build "${proxy_args[@]}" --secret "id=build_ca,src=$BUILD_CA" -f "$file" -t "$2" .
+    rm -f "$file"
+  else
+    docker build "${proxy_args[@]}" -f "$1" -t "$2" .
+  fi
+}
+
 if [ "${SKIP_BUILD:-}" != "1" ]; then
-  docker build "${proxy_args[@]}" "${secret_args[@]}" -f services/api/Dockerfile -t irontrack-api:stack .
-  docker build "${proxy_args[@]}" "${secret_args[@]}" -f services/web/Dockerfile -t irontrack-web:stack .
+  build services/api/Dockerfile irontrack-api:stack
+  build services/web/Dockerfile irontrack-web:stack
 fi
 
 export STACK_RATE_LIMIT_SECRET="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))")"

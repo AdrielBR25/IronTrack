@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # Serviço irontrack-web da Railway (Prompt 21.1): compila o app (React/Vite/PWA) e serve `dist` com o Caddy, que também
 # repassa /api/v1/* para o serviço irontrack-api pela rede privada (mesma origem: cookie de sessão e CSRF funcionam).
 # Contexto de build: a RAIZ do repositório. Nada secreto entra na imagem: o app só conhece a própria origem.
@@ -8,10 +7,8 @@ FROM node:22.18.0-bookworm-slim AS build
 WORKDIR /app
 ENV BASE_PATH=/ VITE_ACCOUNTS=on
 COPY package.json package-lock.json ./
-# `build_ca` é opcional: CA extra só para builds locais atrás de proxy corporativo (na Railway não existe e é ignorado).
-RUN --mount=type=secret,id=build_ca,required=false \
-    if [ -s /run/secrets/build_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/build_ca; fi; \
-    npm ci --ignore-scripts --no-audit --no-fund
+# Instalação determinística pelo package-lock.json. Sem RUN --mount: o builder da Railway só aceita montagens de cache.
+RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY index.html vite.config.ts tailwind.config.js postcss.config.js tsconfig.json tsconfig.app.json tsconfig.node.json ./
 # tsconfig.json da raiz referencia os dos serviços (o esbuild lê a cadeia); só os arquivos de configuração.
 COPY services/ai-gateway/tsconfig.json ./services/ai-gateway/tsconfig.json

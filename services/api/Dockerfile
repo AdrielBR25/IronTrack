@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # Imagem da API do IronTrack para a Railway (Prompt 21). Contexto de build: a RAIZ do repositório (a API usa shared/
 # e o adaptador de IA de services/ai-gateway). Node 22.18+ executa TypeScript diretamente (sem etapa de compilação).
 FROM node:22.18.0-bookworm-slim
@@ -8,10 +7,8 @@ WORKDIR /app
 
 # Só as dependências de execução (pg, argon2, zod...). Sem scripts de instalação; o argon2 vem pré-compilado.
 COPY package.json package-lock.json ./
-# `build_ca` é opcional: CA extra só para builds locais atrás de proxy corporativo (na Railway não existe e é ignorado).
-RUN --mount=type=secret,id=build_ca,required=false \
-    if [ -s /run/secrets/build_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/build_ca; fi; \
-    npm ci --omit=dev --ignore-scripts --no-audit --no-fund && npm cache clean --force
+# Instalação determinística pelo package-lock.json. Sem RUN --mount: o builder da Railway só aceita montagens de cache.
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund && npm cache clean --force
 
 COPY shared ./shared
 COPY services/ai-gateway/src ./services/ai-gateway/src
