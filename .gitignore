@@ -15,3 +15,5 @@ services/ai-gateway/config/*.json
 !services/ai-gateway/config/*.example.json
 dist-cloud
 playwright-report-cloud
+test-results-stack
+test-results-stack.log

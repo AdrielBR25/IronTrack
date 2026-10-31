@@ -63,7 +63,8 @@ const env: Record<string, string> = {
   EMAIL_PROVIDER: 'test-mailbox',
   AI_CONFIG_JSON: JSON.stringify(aiConfig),
   AI_DAILY_REQUESTS_PER_USER: '4',
-  // proxy do vite preview acrescenta o IP dele; cada navegador do teste informa um IP próprio (limites por IP).
+  // o proxy na frente (vite preview ou o Caddy do irontrack-web) acrescenta um IP; cada navegador do teste informa um IP
+  // próprio no X-Forwarded-For (papel da borda da Railway). Limites por IP separados por navegador.
   TRUST_PROXY_HOPS: '2',
   ACCESS_LOG: 'off',
   // chave fictícia, só para o provedor simulado local

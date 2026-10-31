@@ -1,0 +1,59 @@
+# Pilha local igual à da Railway (Prompt 21.1), só para TESTE: Postgres + irontrack-api + irontrack-web (Caddy).
+# Os nomes "api"/"db" fazem o papel dos domínios privados *.railway.internal. Banco descartável, senha de teste local.
+# Uso: scripts/stack-test.sh (constrói as imagens, sobe, roda e2e-stack/ e derruba tudo).
+name: irontrack-stack-test
+
+services:
+  db:
+    image: ${STACK_POSTGRES_IMAGE:-postgres:16}
+    environment:
+      POSTGRES_PASSWORD: teste-local-descartavel
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    tmpfs: [/var/lib/postgresql/data]
+
+  api:
+    image: irontrack-api:stack
+    depends_on:
+      db:
+        condition: service_healthy
+    # Na Railway a migração é o comando de pré-implantação; aqui roda antes de subir a API.
+    command: ['sh', '-c', 'node services/api/scripts/migrate.ts && exec node services/api/src/main.ts']
+    environment:
+      NODE_ENV: test
+      API_TEST_MODE: '1'
+      EMAIL_PROVIDER: test-mailbox
+      HOST: '::'
+      PORT: '8080'
+      DATABASE_URL: postgres://postgres:teste-local-descartavel@db:5432/postgres
+      DATABASE_SSL: disable
+      APP_ORIGIN: http://localhost:8090
+      RATE_LIMIT_SECRET: ${STACK_RATE_LIMIT_SECRET:?defina STACK_RATE_LIMIT_SECRET}
+      TRUST_PROXY_HOPS: '2'
+      # Cookie Secure (__Host-) como em produção; o Chromium aceita Secure em http://localhost.
+      COOKIE_SECURE: 'true'
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:8080/api/v1/ready').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    # Sem portas publicadas: como na Railway, a API só é alcançável pela rede interna (pelo Caddy).
+
+  web:
+    image: irontrack-web:stack
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      PORT: '8090'
+      API_HOST: api
+      API_PORT: '8080'
+    ports: ['127.0.0.1:8090:8090']
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8090/healthz']
+      interval: 2s
+      timeout: 3s
+      retries: 30

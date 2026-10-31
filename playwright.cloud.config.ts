@@ -1,6 +1,8 @@
-// E2E do modo nuvem (Prompt 21): app com VITE_ACCOUNTS=on servido em "/" (como na Netlify), `/api` pelo proxy do
-// vite preview para a API local, PostgreSQL descartável, e-mail e provedor de IA simulados.
-// Requer TEST_DATABASE_URL (PostgreSQL local ou serviço do CI). Ver docs/NUVEM_IMPLANTACAO.md §8.
+// E2E do modo nuvem (Prompt 21): app com VITE_ACCOUNTS=on servido em "/", `/api` repassado para a API local,
+// PostgreSQL descartável, e-mail e provedor de IA simulados.
+// Por padrão o app é servido pelo vite preview. Com E2E_WEB_IMAGE=<imagem do services/web/Dockerfile>, quem serve é o
+// contêiner de produção (Caddy + proxy /api/v1), como na Railway (Prompt 21.1); requer Docker.
+// Requer TEST_DATABASE_URL (PostgreSQL local ou serviço do CI). Ver docs/RAILWAY_FULLSTACK.md §10.
 import { defineConfig, devices } from '@playwright/test';
 
 const APP_PORT = 4174;
@@ -32,12 +34,21 @@ export default defineConfig({
       stdout: 'pipe',
       timeout: 60_000,
     },
-    {
-      command: `npx vite build --outDir dist-cloud --emptyOutDir && npx vite preview --outDir dist-cloud --port ${APP_PORT} --strictPort`,
-      port: APP_PORT,
-      reuseExistingServer: false,
-      env: { BASE_PATH: '/', VITE_ACCOUNTS: 'on', API_PROXY_TARGET: `http://127.0.0.1:${API_PORT}` },
-      timeout: 180_000,
-    },
+    process.env.E2E_WEB_IMAGE
+      ? {
+          // Caddy de produção na rede do host: app em APP_PORT, /api/v1 → API local (papel da rede privada da Railway).
+          command: `docker run --rm --name irontrack-web-e2e --network host -e PORT=${APP_PORT} -e API_HOST=127.0.0.1 -e API_PORT=${API_PORT} ${process.env.E2E_WEB_IMAGE}`,
+          url: `http://127.0.0.1:${APP_PORT}/healthz`,
+          reuseExistingServer: false,
+          gracefulShutdown: { signal: 'SIGTERM', timeout: 15_000 },
+          timeout: 60_000,
+        }
+      : {
+          command: `npx vite build --outDir dist-cloud --emptyOutDir && npx vite preview --outDir dist-cloud --port ${APP_PORT} --strictPort`,
+          port: APP_PORT,
+          reuseExistingServer: false,
+          env: { BASE_PATH: '/', VITE_ACCOUNTS: 'on', API_PROXY_TARGET: `http://127.0.0.1:${API_PORT}` },
+          timeout: 180_000,
+        },
   ],
 });
