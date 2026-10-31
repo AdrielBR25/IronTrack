@@ -1,6 +1,6 @@
 # Segurança do modo nuvem (Prompt 21)
 
-Complementa [NUVEM_API.md](NUVEM_API.md) (regras por rota) e [NUVEM_IMPLANTACAO.md](NUVEM_IMPLANTACAO.md) (variáveis).
+Complementa [NUVEM_API.md](NUVEM_API.md) (regras por rota) e [RAILWAY_FULLSTACK.md](RAILWAY_FULLSTACK.md) (variáveis).
 
 ## 1. Segredos
 
@@ -10,7 +10,7 @@ Complementa [NUVEM_API.md](NUVEM_API.md) (regras por rota) e [NUVEM_IMPLANTACAO.
 | `RATE_LIMIT_SECRET` | Railway | idem |
 | Chaves de IA (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`) | Railway | no app, no navegador, em backups ou exportações; o usuário comum nunca cola chave |
 | `RESEND_API_KEY` | Railway | idem |
-| Endereço da API | variável `API_PROXY_TARGET` da Netlify (vira `dist/_redirects` no build) | no bundle do app |
+| Endereço da API | referências `API_HOST`/`API_PORT` do `irontrack-web` (nome privado da Railway, lido pelo Caddy) | no bundle do app; a API não tem domínio público |
 
 Proteções automáticas: `ConfigError` lista só NOMES de variáveis; o pool não registra a URL; o script de migração não
 imprime a URL; a API recusa iniciar em produção com `COOKIE_SECURE=false`, `API_TEST_MODE` ou provedor de IA sem HTTPS;
@@ -45,7 +45,7 @@ domínios da Railway e chaves no código do app, e `VITE_` além de `VITE_ACCOUN
 - Validação Zod estrita; limites de corpo por rota; tempo limite por requisição; `statement_timeout` no PostgreSQL.
 - Limites de tentativas persistidos no PostgreSQL (valem entre réplicas e reinícios); chaves com HMAC (IP/e-mail não
   ficam em claro). IP do cliente = N-ésimo a partir da direita em `X-Forwarded-For` (`TRUST_PROXY_HOPS`).
-- Cabeçalhos: API com `no-store`, `nosniff`, CSP `default-src 'none'`, `DENY`, HSTS; app (Netlify) com CSP só da própria
+- Cabeçalhos: API com `no-store`, `nosniff`, CSP `default-src 'none'`, `DENY`, HSTS; app (Caddy do `irontrack-web`) com CSP só da própria
   origem (scripts sem `unsafe-inline`), `frame-ancestors 'none'`, `Referrer-Policy: no-referrer`, `Permissions-Policy`.
 - O service worker do PWA não atende `/api/*` (sem cache de dados da conta nem página no lugar da API).
 
@@ -62,7 +62,7 @@ senha, token, cookie, e-mail em claro, URL do banco, chaves, conteúdo da IA. Ev
   projeções de treino, histórico de revisões, operações, importações, consumo de IA. O e-mail fica livre para novo cadastro.
 - No aparelho: opção (marcada por padrão) de apagar também a cópia local da conta. O banco do modo sem conta não é tocado.
 - Backups do PostgreSQL: os dados apagados permanecem só nas cópias já feitas e somem quando elas expiram (retenção dos
-  backups automáticos da Railway e dos lógicos: até ~3 meses, ver NUVEM_IMPLANTACAO.md §6). Se um backup for restaurado,
+  backups automáticos da Railway e dos lógicos: até ~3 meses, ver RAILWAY_FULLSTACK.md §8). Se um backup for restaurado,
   as contas excluídas depois dele devem ser excluídas de novo (manter a lista de IDs excluídos fora do banco é uma
   melhoria pendente).
 - Limites de tentativas e eventos de log não guardam e-mail em claro.
@@ -70,6 +70,7 @@ senha, token, cookie, e-mail em claro, URL do banco, chaves, conteúdo da IA. Ev
 ## 7. Pendências conhecidas
 
 - E-mail transacional, provedores de IA e o próprio deploy dependem de configuração real (não feita nesta etapa).
-- `TRUST_PROXY_HOPS` com Netlify → Railway precisa ser conferido na homologação (NUVEM_IMPLANTACAO.md §7, item 6).
+- `TRUST_PROXY_HOPS=2` (borda da Railway + Caddy) comprovado com os contêineres, mas precisa ser conferido com a borda real
+  na homologação (RAILWAY_FULLSTACK.md §6 e §11, item 6).
 - Fotos não sincronizam (sem armazenamento privado de objetos).
 - Sem 2FA nem login social nesta fase.

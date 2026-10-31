@@ -16,7 +16,7 @@ export const STRONG = 'treinoForte2026';
 
 export function adminUrl(): string {
   const u = process.env.TEST_DATABASE_URL;
-  if (!u) throw new Error('Defina TEST_DATABASE_URL (PostgreSQL de teste; ver docs/NUVEM_IMPLANTACAO.md §8).');
+  if (!u) throw new Error('Defina TEST_DATABASE_URL (PostgreSQL de teste; ver docs/RAILWAY_FULLSTACK.md §10).');
   if (/railway|rlwy/i.test(u)) throw new Error('TEST_DATABASE_URL parece ser do Railway. Testes destrutivos só em banco local/CI.');
   return u;
 }

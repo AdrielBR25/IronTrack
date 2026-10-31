@@ -67,7 +67,7 @@ export async function apiRequest<T>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
     parsed = undefined;
   }
   if (res.ok) return parsed as T;
-  // Página HTML (ex.: proxy da API não configurado na Netlify) ou corpo inesperado.
+  // Página HTML (ex.: proxy /api/v1 do irontrack-web sem destino) ou corpo inesperado.
   const err = (parsed as { error?: { code?: string; message?: string; fields?: Record<string, string> } } | undefined)?.error;
   if (!err?.code) {
     if (res.status === 404 || res.status === 405) throw new ApiClientError('api_unavailable', res.status, 'O servidor do IronTrack não está disponível neste endereço.');

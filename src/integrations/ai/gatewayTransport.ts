@@ -94,7 +94,7 @@ export function createGatewayTransport(opts: GatewayTransportOptions): GatewayTr
 }
 
 /**
- * P21: IA pela conta. Mesma origem do app (proxy da Netlify para a API na Railway), caminho fixo `/api/v1/ai`, cookie
+ * P21: IA pela conta. Mesma origem do app (Caddy do irontrack-web repassa para a API na Railway), caminho fixo `/api/v1/ai`, cookie
  * de sessão HttpOnly enviado pelo navegador (o app não vê o token), cabeçalho anti-CSRF e as mesmas proteções do
  * transporte acima (sem redirecionamento, sem Referer, resposta limitada). As chaves dos provedores ficam só na Railway.
  */

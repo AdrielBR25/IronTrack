@@ -2,7 +2,7 @@
 
 Este documento foi escrito **antes** de qualquer código que toque dados. Ele registra o que existe hoje, as decisões
 de arquitetura da versão com contas e o plano para levar os dados locais ao PostgreSQL sem perder nada.
-Implantação passo a passo: [NUVEM_IMPLANTACAO.md](NUVEM_IMPLANTACAO.md). Rotas da API: [NUVEM_API.md](NUVEM_API.md).
+Implantação passo a passo: [RAILWAY_FULLSTACK.md](RAILWAY_FULLSTACK.md). Rotas da API: [NUVEM_API.md](NUVEM_API.md).
 Sincronização e conflitos: [NUVEM_SINCRONIZACAO.md](NUVEM_SINCRONIZACAO.md). Segurança: [NUVEM_SEGURANCA.md](NUVEM_SEGURANCA.md).
 
 ## 1. Auditoria do estado atual (main `9239bf0`)
@@ -45,19 +45,20 @@ estático no código e **não** vai para o banco (não há tabela `exercise_cata
 ## 2. Arquitetura alvo
 
 ```
-Navegador (PWA, Netlify)  ──/api/* (mesma origem, proxy Netlify)──►  API Node.js (Railway)  ──►  PostgreSQL (Railway, rede privada)
+Navegador (PWA) ──► irontrack-web (Caddy, Railway) ──/api/v1/* rede privada──► irontrack-api (Railway) ──► PostgreSQL (Railway, rede privada)
    IndexedDB = cache + fila                                             └──► OpenAI / Anthropic / Gemini (chaves só no Railway)
 ```
 
-* **Frontend** continua o mesmo app. Com `VITE_ACCOUNTS=on` (build da Netlify) ganha contas, sincronização e IA da
+* **Frontend** continua o mesmo app. Com `VITE_ACCOUNTS=on` (imagem do irontrack-web) ganha contas, sincronização e IA da
   conta. Sem a variável (build do GitHub Pages) nada muda: o app segue 100% local.
 * **API** nova em `services/api` (Node 22.18+, TypeScript nativo, `node:http`, sem framework). Reutiliza do gateway
   os adaptadores de provedor, o contrato `irontrack.ai-gateway.v1`, a validação de configuração de provedores e a
   lógica de reserva/acerto de cota (extraída para `services/ai-gateway/src/generation.ts`). O gateway continua
   existindo e funcionando sozinho (157 testes intactos); transformá-lo na API misturaria autenticação por token
   compartilhado com sessões de conta e quebraria seu modelo de ameaça "sem dependências".
-* **Mesma origem por proxy**: a Netlify encaminha `/api/*` para o domínio do Railway (regra 200 gerada no build a
-  partir de `API_PROXY_TARGET`). O navegador só fala com o domínio da Netlify, então o cookie de sessão é *first-party*
+* **Mesma origem por proxy** (Prompt 21.1, ver [RAILWAY_FULLSTACK.md](RAILWAY_FULLSTACK.md)): o Caddy do
+  `irontrack-web` encaminha `/api/v1/*` para o `irontrack-api` pela rede privada da Railway. O navegador só fala com o
+  domínio do web, então o cookie de sessão é *first-party*
   (`SameSite=Lax`, `HttpOnly`, `Secure`, `__Host-`) e não depende de cookies de terceiros — que Safari/iOS e o Chrome
   em modo restrito bloqueiam. Não há CORS com credenciais em produção.
 * **Contratos compartilhados** em `shared/` (protocolo de sincronização, coleções sincronizadas, JSON canônico e hash),
@@ -115,8 +116,8 @@ Todos os dados privados têm `user_id` com chave estrangeira para `users(id) ON 
 2. **Perfis locais do mesmo domínio** (`Minha conta › Importar dados deste aparelho`): lê o banco `irontrack` em
    transação de leitura, mostra perfil, contagens e prévia, exige confirmação e envia pela mesma rota da importação de
    backup. Nada é associado automaticamente e o banco local nunca é apagado.
-3. **GitHub Pages → Netlify** (outra origem, IndexedDB inacessível): exportar backup v8 no site antigo → entrar na
-   Netlify → `Importar backup` → validação (parser v0–v8 existente) → prévia → confirmação → envio em lotes para a
+3. **GitHub Pages → Railway** (outra origem, IndexedDB inacessível): exportar backup v8 no site antigo → entrar no
+   app da Railway → `Importar backup` → validação (parser v0–v8 existente) → prévia → confirmação → envio em lotes para a
    área de preparo → efetivação transacional → leitura de volta com comparação de contagens, IDs e hash canônico de
    cada registro → relatório. Só então "Importação concluída". O site antigo continua no ar.
 4. **Idempotência**: registro igual (mesmo ID e mesmo conteúdo canônico) = ignorado; mesmo ID com conteúdo diferente
@@ -146,4 +147,4 @@ assinadas de curta duração, nunca públicas; tabela `progress_photos` só com 
   indisponível; nada é "enviado de mentira".
 * IA real: depende das chaves no Railway e de homologação com chamada paga autorizada.
 * Backups do PostgreSQL: dependem do plano do Railway; procedimento e verificação de restauração documentados em
-  NUVEM_IMPLANTACAO.md §6, não declarados como ativos.
+  RAILWAY_FULLSTACK.md §8, não declarados como ativos.

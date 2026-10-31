@@ -145,7 +145,7 @@ export function parseCookies(header: string | undefined): Record<string, string>
 }
 
 export function sessionCookie(cfg: Pick<ApiConfig, 'cookieName' | 'cookieSecure'>, token: string, maxAgeSec: number): string {
-  // __Host-: exige Secure, Path=/ e nenhum Domain (o cookie fica preso ao host que o recebeu: o da Netlify, via proxy).
+  // __Host-: exige Secure, Path=/ e nenhum Domain (o cookie fica preso ao host que o recebeu: o do irontrack-web, via proxy).
   return [`${cfg.cookieName}=${token}`, 'Path=/', 'HttpOnly', 'SameSite=Lax', `Max-Age=${maxAgeSec}`, ...(cfg.cookieSecure ? ['Secure'] : [])].join('; ');
 }
 

@@ -1,5 +1,5 @@
 // Configuração da API a partir de variáveis de ambiente (Railway). Nenhum valor secreto é registrado em log: os erros
-// citam só o NOME da variável. Ver docs/NUVEM_IMPLANTACAO.md §4 (lista completa, sem valores).
+// citam só o NOME da variável. Ver docs/RAILWAY_FULLSTACK.md §4 (lista completa, sem valores).
 import { readFileSync } from 'node:fs';
 import { validateConfig, type GatewayConfig } from '../../ai-gateway/src/config.ts';
 
@@ -17,13 +17,13 @@ export interface ApiConfig {
   /** Origem pública do app (links dos e-mails) e origens aceitas na checagem CSRF/CORS. */
   appOrigin: string;
   allowedOrigins: string[];
-  /** Expressão regular opcional para origens de pré-visualização (ex.: deploy previews da Netlify). */
+  /** Expressão regular opcional para origens de pré-visualização (ex.: ambientes de PR da Railway). */
   allowedOriginPattern: RegExp | null;
   cookieSecure: boolean;
   cookieName: string;
   sessionTtlDays: number;
   sessionIdleDays: number;
-  /** Proxies confiáveis à frente da API (Netlify + Railway = 2). Define de onde vem o IP do cliente. */
+  /** Proxies confiáveis à frente da API (borda da Railway + Caddy do irontrack-web = 2). Define de onde vem o IP do cliente. */
   trustProxyHops: number;
   /** Segredo para o hash das chaves de limite (IP, e-mail). Nunca registrado. */
   rateLimitSecret: string;
@@ -105,7 +105,7 @@ export function loadConfig(env: Env = process.env): ApiConfig {
   if (sslRaw && !['disable', 'require', 'verify-full'].includes(sslRaw)) problems.push('DATABASE_SSL deve ser disable, require ou verify-full');
 
   const appOrigin = (env.APP_ORIGIN ?? '').trim();
-  if (!originOk(appOrigin, nodeEnv)) problems.push('APP_ORIGIN deve ser a origem pública do app (ex.: https://irontrack.netlify.app)');
+  if (!originOk(appOrigin, nodeEnv)) problems.push('APP_ORIGIN deve ser a origem pública do app (ex.: https://irontrack-web-production.up.railway.app)');
   const extra = (env.ALLOWED_ORIGINS ?? '')
     .split(',')
     .map((s) => s.trim())

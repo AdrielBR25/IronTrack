@@ -5,7 +5,7 @@ import { deviceLabel } from '../src/modules/auth.ts';
 
 const BASE = {
   DATABASE_URL: 'postgresql://u:senha-super-secreta@postgres.railway.internal:5432/railway',
-  APP_ORIGIN: 'https://irontrack.netlify.app',
+  APP_ORIGIN: 'https://irontrack-web-production.up.railway.app',
   RATE_LIMIT_SECRET: 'r'.repeat(40),
   NODE_ENV: 'production',
 };
@@ -27,7 +27,7 @@ describe('configuração da API', () => {
     expect(c.cookieName).toBe('__Host-irontrack_session');
     expect(c.cookieSecure).toBe(true);
     expect(c.email.provider).toBe('disabled');
-    expect(c.allowedOrigins).toEqual(['https://irontrack.netlify.app']);
+    expect(c.allowedOrigins).toEqual(['https://irontrack-web-production.up.railway.app']);
     expect(c.ai.config?.providers.anthropic?.apiKeyEnv).toBe('ANTHROPIC_API_KEY');
   });
 
@@ -50,9 +50,9 @@ describe('configuração da API', () => {
   });
 
   it('padrão de origem de pré-visualização ancorado', () => {
-    const c = loadConfig({ ...BASE, ALLOWED_ORIGIN_PATTERN: '^https://deploy-preview-\\d+--irontrack\\.netlify\\.app$' });
-    expect(c.allowedOriginPattern!.test('https://deploy-preview-12--irontrack.netlify.app')).toBe(true);
-    expect(c.allowedOriginPattern!.test('https://deploy-preview-12--irontrack.netlify.app.evil.com')).toBe(false);
+    const c = loadConfig({ ...BASE, ALLOWED_ORIGIN_PATTERN: '^https://irontrack-web-irontrack-pr-\\d+\\.up\\.railway\\.app$' });
+    expect(c.allowedOriginPattern!.test('https://irontrack-web-irontrack-pr-12.up.railway.app')).toBe(true);
+    expect(c.allowedOriginPattern!.test('https://irontrack-web-irontrack-pr-12.up.railway.app.evil.com')).toBe(false);
   });
 
   it('IP do cliente com N proxies confiáveis ignora valores forjados à esquerda', () => {

@@ -4,7 +4,7 @@ Código: `services/api` (Node 22.18+, `node:http`, `pg`, Zod). Contratos compart
 
 ## Regras gerais
 
-- **Mesma origem**: o app chama `/api/v1/...` na própria origem; a Netlify repassa à Railway. Sem CORS aberto: só
+- **Mesma origem**: o app chama `/api/v1/...` na própria origem; o Caddy do `irontrack-web` repassa ao `irontrack-api` pela rede privada da Railway. Sem CORS aberto: só
   origens de `APP_ORIGIN`/`ALLOWED_ORIGINS`/`ALLOWED_ORIGIN_PATTERN` recebem cabeçalhos CORS, com credenciais.
 - **Sessão**: cookie `__Host-irontrack_session` (HttpOnly, Secure, SameSite=Lax, Path=/). O token é aleatório (256 bits);
   o banco guarda só o SHA-256 dele. Sessões revogáveis, com validade máxima e por inatividade.

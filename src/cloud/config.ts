@@ -1,6 +1,6 @@
-// Configuração pública do modo nuvem (Prompt 21). Só existe uma variável de build: `VITE_ACCOUNTS=on` (Netlify).
+// Configuração pública do modo nuvem (Prompt 21). Só existe uma variável de build: `VITE_ACCOUNTS=on` (imagem do irontrack-web na Railway).
 // Sem ela (build do GitHub Pages) o app é 100% local, como antes. A API é SEMPRE a mesma origem (`/api`), servida
-// pelo proxy da Netlify para o Railway: nenhuma URL de backend, chave ou segredo vai para o bundle.
+// pelo Caddy do irontrack-web para a API, na rede privada da Railway: nenhuma URL de backend, chave ou segredo vai para o bundle.
 import { readAccountPointer } from './accountPointer';
 
 export const ACCOUNTS_ENABLED = import.meta.env.VITE_ACCOUNTS === 'on';

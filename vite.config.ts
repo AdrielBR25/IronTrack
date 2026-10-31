@@ -6,10 +6,10 @@ import { readFileSync } from 'node:fs';
 
 const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version: string };
 
-// GitHub Pages serve o app em /IronTrack/. BASE_PATH permite outro subdiretório (Netlify: "/").
+// GitHub Pages serve o app em /IronTrack/. BASE_PATH permite outro subdiretório (irontrack-web na Railway: "/").
 const base = process.env.BASE_PATH ?? '/IronTrack/';
 
-// P21: em desenvolvimento e nos testes E2E da nuvem, `/api` vai para a API local (mesma origem, como na Netlify).
+// P21: em desenvolvimento e nos testes E2E da nuvem, `/api` vai para a API local (mesma origem, como o Caddy do irontrack-web).
 // Só lido aqui (Node), nunca vai para o bundle.
 const apiProxy = process.env.API_PROXY_TARGET ? { '/api': { target: process.env.API_PROXY_TARGET, changeOrigin: false, xfwd: true } } : undefined;
 
