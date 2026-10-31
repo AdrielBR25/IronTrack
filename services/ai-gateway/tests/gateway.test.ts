@@ -213,7 +213,7 @@ describe('falhas e normalização', () => {
       [async () => json(500, { error: { message: 'detalhe interno XYZ-123' } }), 502, 'provider_failure'],
       // P07: 429 do provedor (limite/cota da conta) tem código próprio, distinto do limite do gateway.
       [async () => json(429, { error: { message: 'rate XYZ-123' } }), 429, 'provider_rate_limited'],
-      [async () => { throw new TypeError('ECONNRESET XYZ-123'); }, 502, 'provider_failure'],
+      [async () => { throw new TypeError('ECONNRESET XYZ-123'); }, 502, 'provider_unreachable'],
     ];
     for (const [upstream, status, code] of cases) {
       s = await boot({ upstream });
@@ -228,11 +228,11 @@ describe('falhas e normalização', () => {
     }
   });
 
-  it('chave recusada pelo provedor (401): 503 provider_unavailable', async () => {
+  it('chave recusada pelo provedor (401): 503 provider_auth_failed', async () => {
     s = await boot({ upstream: async () => json(401, { error: { message: 'bad key' } }) });
     const r = await post(s.base, TOKEN, genBody());
     expect(r.status).toBe(503);
-    expect((await err(r)).code).toBe('provider_unavailable');
+    expect((await err(r)).code).toBe('provider_auth_failed');
   });
 
   it('13. resposta inválida: corpo não JSON, formato inesperado, vazia ou grande demais → 502', async () => {

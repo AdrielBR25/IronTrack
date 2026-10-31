@@ -23,6 +23,8 @@ try {
 const pool = createPool(cfg);
 const api = createApi({ cfg, pool });
 if (cfg.ai.errors.length) err(`IA desativada: configuração de provedores inválida (${cfg.ai.errors.join(', ')}).`);
+// Hotfix 21.2: estado de cada provedor de IA (presença e formato da chave; nunca o valor).
+for (const line of api.aiStatus()) err(line);
 err(`e-mail: ${api.mailer.provider}${api.mailer.enabled ? '' : ' (verificação e recuperação de senha INDISPONÍVEIS)'}`);
 
 const maintenance = setInterval(() => void api.maintenance().catch(() => err('manutenção periódica falhou (tentará de novo)')), 10 * 60_000);

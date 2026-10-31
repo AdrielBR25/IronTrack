@@ -34,11 +34,27 @@ export interface CatalogResponse {
   providers: {
     id: string;
     displayName: string;
-    /** false = provedor permitido, mas sem chave configurada no servidor. */
+    /** false = provedor permitido, mas sem chave utilizável no servidor (ausente, formato errado ou recusada). */
     available: boolean;
-    models: { id: string; displayName: string; maxInputChars: number; maxOutputTokens: number }[];
+    /** Hotfix 21.2 (só a API da conta): diagnóstico do provedor. Nunca carrega a chave nem texto do provedor. */
+    status?: ProviderHealth;
+    /** Instante (ISO 8601) da última confirmação ou recusa pelo provedor. */
+    checkedAt?: string;
+    models: { id: string; displayName: string; maxInputChars: number; maxOutputTokens: number; status?: ModelHealth }[];
   }[];
 }
+
+/**
+ * Hotfix 21.2: estados do provedor, separados para o diagnóstico.
+ * missing_key: variável da chave ausente no serviço; invalid_key_format: valor que não tem o formato de uma chave de API;
+ * unverified: chave presente, ainda não confirmada pelo provedor; ok: o provedor aceitou a chave (teste ou resposta real);
+ * auth_failed: chave recusada (inválida ou revogada); forbidden: chave sem permissão; billing: créditos/faturamento;
+ * rate_limited: limite da conta no provedor; network: falha de rede ou tempo esgotado ao falar com o provedor.
+ */
+export const PROVIDER_HEALTH = ['missing_key', 'invalid_key_format', 'unverified', 'ok', 'auth_failed', 'forbidden', 'billing', 'rate_limited', 'network'] as const;
+export type ProviderHealth = (typeof PROVIDER_HEALTH)[number];
+/** Modelo: unverified (não testado), ok (confirmado), unavailable (inexistente ou não liberado para a chave). */
+export type ModelHealth = 'unverified' | 'ok' | 'unavailable';
 
 const ROLES: readonly string[] = ['system', 'user', 'assistant'];
 const KEYS = ['provider', 'model', 'messages', 'maxOutputTokens'];

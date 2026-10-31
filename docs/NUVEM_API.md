@@ -74,8 +74,9 @@ Detalhes e exemplos: [NUVEM_SINCRONIZACAO.md](NUVEM_SINCRONIZACAO.md).
 
 | Método | Rota | Descrição |
 |---|---|---|
-| GET | `/ai/models` | Catálogo `irontrack.ai-gateway.v1` só com provedores habilitados (`available` = há chave). |
-| POST | `/ai/generate` | Mesmo contrato do gateway (provedor, modelo, mensagens, `maxOutputTokens`). E-mail confirmado exigido por padrão. Limites: por minuto, diário de pedidos e tokens por conta (PostgreSQL), concorrência. Conteúdo nunca é gravado; `ai_usage_events` guarda só provedor, modelo, estado, tokens e duração. |
+| GET | `/ai/models` | Catálogo `irontrack.ai-gateway.v1` só com provedores habilitados. `available` = chave utilizável; `status` = `missing_key`, `invalid_key_format`, `unverified`, `ok`, `auth_failed`, `forbidden`, `billing`, `rate_limited` ou `network`; `checkedAt`; cada modelo com `status` `unverified`/`ok`/`unavailable`. Nunca chama o provedor. |
+| POST | `/ai/test` | Hotfix 21.2. Corpo `{ provider, model? }`. Diagnóstico **sem custo** (Anthropic: `GET /v1/models/{id}`): `{ provider, model, result, status, modelStatus, checkedAt, paid: false }`. E-mail confirmado exigido como no `/ai/generate`; 5 por minuto por conta. |
+| POST | `/ai/generate` | Mesmo contrato do gateway (provedor, modelo, mensagens, `maxOutputTokens`). E-mail confirmado exigido por padrão. Limites: por minuto, diário de pedidos e tokens por conta (PostgreSQL), concorrência. Conteúdo nunca é gravado; `ai_usage_events` guarda só provedor, modelo, estado, tokens e duração. Erros do provedor separados: `provider_auth_failed`, `provider_forbidden`, `provider_billing`, `model_unavailable`, `provider_rate_limited`, `provider_unreachable`, `timeout` (frase fixa, nunca o texto do provedor). |
 | GET | `/ai/usage` | Consumo do dia e limites. |
 
 ## Limites de tentativas (PostgreSQL, chaves com HMAC)

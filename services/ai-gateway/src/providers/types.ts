@@ -1,7 +1,8 @@
 // Contrato interno dos adaptadores de provedores do gateway (lado servidor).
+import type { ModelEffort, ModelThinking } from '../config.ts';
 import type { WireMessage } from '../protocol.ts';
 
-export type FetchLike = (input: string, init: { method: string; headers: Record<string, string>; body: string; signal: AbortSignal; redirect: 'manual' }) => Promise<Response>;
+export type FetchLike = (input: string, init: { method: string; headers: Record<string, string>; body?: string; signal: AbortSignal; redirect: 'manual' }) => Promise<Response>;
 
 /** Solicitação já validada e autorizada pelo gateway. */
 export interface UpstreamRequest {
@@ -11,6 +12,9 @@ export interface UpstreamRequest {
   /** Só user/assistant, terminando em user. */
   messages: { role: 'user' | 'assistant'; content: string }[];
   maxOutputTokens: number;
+  /** Só Anthropic (ver ModelConfig). */
+  effort?: ModelEffort;
+  thinking?: ModelThinking;
 }
 
 export interface UpstreamContext {
@@ -35,6 +39,11 @@ export interface UpstreamAdapter {
   /** Endereço oficial fixo. O cliente nunca escolhe o endereço. */
   readonly defaultBaseUrl: string;
   generate(req: UpstreamRequest, ctx: UpstreamContext): Promise<UpstreamResult>;
+  /**
+   * Hotfix 21.2: diagnóstico SEM custo (nenhum token gerado): confere se a chave é aceita e se o modelo existe e está
+   * liberado para ela. Resolve sem valor quando ok; rejeita com GatewayError normalizado. Ausente = sem diagnóstico.
+   */
+  check?(model: string, ctx: UpstreamContext): Promise<void>;
 }
 
 /** Separa a instrução de sistema das demais mensagens. */

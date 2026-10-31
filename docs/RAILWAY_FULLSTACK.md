@@ -97,7 +97,7 @@ contra uma conta real: o primeiro `plan` é a validação final.
 | `RATE_LIMIT_SECRET` | 32+ caracteres aleatórios | Ex.: `openssl rand -base64 48`, no seu computador. Marque como "sealed". |
 | `RAILWAY_DOCKERFILE_PATH` | `services/api/Dockerfile` | Só no caminho do painel (3A); o IaC usa `dockerfilePath`. |
 | `EMAIL_PROVIDER`, `EMAIL_FROM`, `RESEND_API_KEY` | `resend`, remetente do domínio verificado, chave | Opcional. Sem e-mail: confirmação, recuperação de senha e (por padrão) IA ficam indisponíveis. |
-| `ANTHROPIC_API_KEY` | chave | Opcional. Sem chave a IA aparece indisponível. |
+| `ANTHROPIC_API_KEY` | chave da Claude API (`sk-ant-api…`) | Opcional, **só no serviço `irontrack-api`**. Sem chave a IA aparece "sem chave no servidor"; chave de administração (`sk-ant-admin…`), aspas ou espaços aparecem como "formato inválido". Ver §12. |
 
 Opcionais sem mudança desde o Prompt 21: `ALLOWED_ORIGINS`, `ALLOWED_ORIGIN_PATTERN`, `DATABASE_POOL_MAX`,
 `SESSION_TTL_DAYS`, `SESSION_IDLE_DAYS`, `SIGNUP_ENABLED`, `AI_REQUIRE_VERIFIED_EMAIL`, cotas de IA, `AI_CONFIG_JSON`,
@@ -199,8 +199,50 @@ banco de produção.** O CI (`.github/workflows/cloud.yml`) roda tudo isso com b
    com `curl`: o bloqueio deve continuar.
 7. Segundo aparelho: entrar, ver a mesma ficha; editar o mesmo campo nos dois e ver o conflito explícito.
 8. Offline: modo avião com o app aberto, registrar uma série, voltar e ver "Sincronizado".
-9. IA (com chave): "IA real pela conta" responde. Homologação com o provedor real continua pendente.
+9. IA (com chave): siga §12. O estado passa de "ainda não testada" para "disponível" no "Testar" e a primeira pergunta é respondida.
 10. Exportar meus dados → arquivo v8 abre no app sem conta. Backup do GitHub Pages importa na conta.
 11. Humanoide 3D da biblioteca aparece; atualizar o app (novo deploy) mostra o aviso de nova versão do PWA.
 
 O GitHub Pages **continua no ar** como está. Não desligue nem apague o site antigo.
+
+## 12. IA real com a Anthropic (Hotfix 21.2)
+
+A chave fica **só** no serviço `irontrack-api` (nunca no `irontrack-web`, nunca em variável `VITE_`, nunca no app).
+O navegador fala com `/api/v1/ai/*` (mesma origem, sessão da conta); a API chama `https://api.anthropic.com` direto
+(endereço fixo; o cliente não escolhe destino, cabeçalho nem modelo fora da lista de `services/api/config/ai.json`).
+
+**Configurar**
+
+1. Console da Anthropic → API Keys → criar uma chave (formato `sk-ant-api…`) no workspace com créditos.
+2. Railway → serviço **irontrack-api** → Variables → `ANTHROPIC_API_KEY` = a chave, sem aspas. Variável de projeto
+   ("Shared Variable") só vale se for referenciada no serviço; colocar no `irontrack-web` não tem efeito.
+3. Clicar em **Deploy** para aplicar a mudança (a Railway deixa a alteração pendente até implantar).
+4. No log de inicialização do `irontrack-api` deve aparecer
+   `IA: Anthropic Claude — chave em ANTHROPIC_API_KEY configurada; ainda não validada (use "Testar" no app)`.
+   Se aparecer `variável ANTHROPIC_API_KEY AUSENTE neste serviço`, a variável não chegou ao processo (passos 2–3).
+   O valor da chave nunca é registrado.
+
+**Modelos oferecidos** (`services/api/config/ai.json`, conferidos em 2026-10-31): `claude-haiku-5-5` (padrão, menor
+custo; raciocínio desligado) e `claude-sonnet-5-5` (raciocínio `between_tools`), ambos com esforço `medium`, até 1.024
+tokens de saída e a versão de API `2026-10-21`. Para trocar a lista sem mexer no código, use `AI_CONFIG_JSON`.
+
+**Estados mostrados no app** (nunca "disponível" só porque o servidor respondeu): sem chave no servidor · formato
+inválido · chave configurada, ainda não testada · disponível · chave recusada (inválida/revogada) · sem permissão ·
+créditos ou faturamento · limite de uso · falha de rede · modelo indisponível (por modelo) · confirme seu e-mail.
+
+**Testar**: o botão chama `POST /api/v1/ai/test`, que consulta `GET /v1/models/{modelo}` na Anthropic. Não gera
+texto e não custa tokens: confirma a chave e se o modelo está liberado. Créditos só se confirmam numa pergunta real.
+Limite de 5 testes por minuto por conta. Nada é consultado ao abrir a tela.
+
+**Primeira conversa real**
+
+1. Entrar com uma conta de e-mail confirmado (exigido por padrão; `AI_REQUIRE_VERIFIED_EMAIL`).
+2. Assistente → "IA real pela conta" → "Conectar com sua conta". Estado: "chave configurada, ainda não testada".
+3. Escolher "Claude Haiku 5.5" → **Testar**. Esperado: "Teste ok… Nenhum token foi cobrado". Estado: "disponível".
+4. Escrever uma pergunta curta, escolher (ou não) dados de treino, **Enviar** → a prévia mostra destino, modelo e o
+   conteúdo exato; **Autorizar e enviar** → a resposta aparece na conversa.
+5. `GET /api/v1/ai/usage` (ou a tela de uso) mostra 1 pedido e os tokens do dia.
+
+Cotas padrão por conta: 6 pedidos/min, 50 pedidos/dia, 20.000 tokens/dia, 1 pedido simultâneo; entrada de até
+24.000 caracteres. Perguntas e respostas nunca são gravadas nem registradas em log.
+

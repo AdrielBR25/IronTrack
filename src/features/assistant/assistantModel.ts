@@ -2,6 +2,7 @@
 // rótulos e mensagens de erro. Sem React e sem banco, para testar sem montar a tela.
 import { AI_REQUEST_LIMITS, isAIError, type AIContextCategory, type AIErrorCode, type AIPurpose, type ContextExclusionReason } from '@/modules/ai';
 import type { AssistantCategory } from '@/integrations/ai/contextSources';
+import type { ModelHealth, ProviderHealth } from '@/integrations/ai/assistantService';
 
 export const MAX_QUESTION_CHARS = AI_REQUEST_LIMITS.maxInstructionChars;
 
@@ -106,7 +107,7 @@ export interface ChatMessage {
 // ---------------------------------------------------------------- P20: estado da conexão
 
 /** Estados mostrados ao usuário (P20 §IA): cada um com texto próprio, nunca um "erro" genérico. */
-export type AssistantStatus = 'local' | 'connected' | 'no_gateway' | 'unavailable' | 'auth_failure' | 'gateway_unreachable' | 'provider_unavailable';
+export type AssistantStatus = 'local' | 'connected' | 'no_gateway' | 'unavailable' | 'auth_failure' | 'gateway_unreachable' | 'provider_unavailable' | 'email_unverified';
 
 export const STATUS_INFO: Record<AssistantStatus, { label: string; text: string }> = {
   local: { label: 'Local', text: 'Modo local: respostas simuladas e do catálogo, geradas no aparelho. Nada sai do aparelho.' },
@@ -116,9 +117,75 @@ export const STATUS_INFO: Record<AssistantStatus, { label: string; text: string 
   auth_failure: { label: 'Falha de autenticação', text: 'O servidor seguro recusou o token (errado, revogado ou expirado). O token foi esquecido; informe um válido.' },
   gateway_unreachable: { label: 'Servidor inacessível', text: 'Não foi possível contatar o servidor seguro do IronTrack. Confira a internet ou o endereço nas configurações avançadas.' },
   provider_unavailable: { label: 'Provedor indisponível', text: 'O servidor respondeu, mas o provedor escolhido não pode atender agora (sem chave no servidor, chave recusada, cota, faturamento, limite ou falha).' },
+  email_unverified: { label: 'Confirme seu e-mail', text: 'A IA real pela conta exige e-mail confirmado. Confirme o e-mail em Minha conta e tente de novo. Nada foi enviado.' },
 };
 
-const PROVIDER_CODES: readonly string[] = ['provider_unavailable', 'provider_failure', 'invalid_response', 'content_blocked', 'rate_limited', 'quota_exceeded', 'timeout', 'model_unsupported'];
+const PROVIDER_CODES: readonly string[] = [
+  'provider_unavailable',
+  'provider_failure',
+  'invalid_response',
+  'content_blocked',
+  'rate_limited',
+  'quota_exceeded',
+  'timeout',
+  'model_unsupported',
+  'provider_auth_failed',
+  'provider_forbidden',
+  'provider_billing',
+  'model_unavailable',
+  'provider_unreachable',
+];
+
+/**
+ * Hotfix 21.2: diagnóstico do provedor na IA pela conta, com texto próprio para cada estado. "ok" só aparece depois que
+ * o provedor confirmou (teste ou resposta real); servidor no ar não basta. `env` = variável da chave no irontrack-api.
+ */
+export function providerHealthInfo(status: ProviderHealth, name: string, env = 'ANTHROPIC_API_KEY'): { label: string; text: string; tone: 'ok' | 'warn' | 'bad' | 'neutral' } {
+  switch (status) {
+    case 'ok':
+      return { label: `${name} disponível`, text: `${name} confirmou a chave do servidor. Cada pergunta ainda passa pela prévia e pela sua autorização.`, tone: 'ok' };
+    case 'unverified':
+      return { label: `${name}: chave configurada, ainda não testada`, text: 'O servidor do IronTrack está no ar e tem a chave, mas o provedor ainda não confirmou. Toque em Testar (sem custo) ou envie uma pergunta.', tone: 'neutral' };
+    case 'missing_key':
+      return { label: `${name} indisponível: sem chave no servidor`, text: `Quem administra o servidor precisa configurar a variável ${env} no serviço irontrack-api da Railway e implantar de novo. A chave nunca é colada neste app.`, tone: 'warn' };
+    case 'invalid_key_format':
+      return { label: `${name} indisponível: chave com formato inválido`, text: `A variável ${env} existe no servidor, mas o valor não tem o formato de uma chave de API (chave de administração, aspas ou espaços a mais?). Corrija na Railway e implante de novo.`, tone: 'bad' };
+    case 'auth_failed':
+      return { label: `${name} recusou a chave`, text: `A chave em ${env} é inválida ou foi revogada. Gere outra no console do provedor, troque na Railway e implante de novo.`, tone: 'bad' };
+    case 'forbidden':
+      return { label: `${name}: chave sem permissão`, text: 'A chave do servidor não tem permissão para este recurso ou modelo. Confira o workspace e as permissões da chave no console do provedor.', tone: 'bad' };
+    case 'billing':
+      return { label: `${name}: créditos ou faturamento`, text: 'O provedor recusou por falta de créditos ou problema de faturamento. Quem administra a conta no provedor precisa adicionar créditos ou regularizar o pagamento.', tone: 'warn' };
+    case 'rate_limited':
+      return { label: `${name}: limite de uso atingido`, text: 'O provedor recusou por limite de requisições ou de tokens da conta. Aguarde um pouco e tente de novo.', tone: 'warn' };
+    case 'network':
+      return { label: `${name}: falha de rede`, text: 'O servidor do IronTrack não conseguiu falar com o provedor a tempo. Tente de novo em instantes.', tone: 'warn' };
+  }
+}
+
+/** Hotfix 21.2: frase do resultado do "Testar" (consulta sem custo feita pelo servidor). */
+export function testResultText(t: { result: string; status?: ProviderHealth; modelStatus?: ModelHealth }, name: string, modelName: string): string {
+  if (t.result === 'ok')
+    return t.status === 'billing'
+      ? `Chave aceita e ${modelName} liberado, mas a última pergunta foi recusada por créditos/faturamento: isso só é confirmado numa resposta real.`
+      : `Teste ok: ${name} aceitou a chave do servidor e ${modelName} está liberado. Nenhum token foi cobrado; créditos são confirmados na primeira pergunta.`;
+  if (t.result === 'not_supported') return `O servidor não tem um teste sem custo para ${name}. Envie uma pergunta para confirmar.`;
+  if (t.result === 'model_unavailable') return `${modelName} não existe ou não está liberado para a chave do servidor. Escolha outro modelo.`;
+  if (t.status) return providerHealthInfo(t.status, name).text;
+  return 'O teste falhou. Tente de novo em instantes.';
+}
+
+/** Hotfix 21.2: efeito de uma falha de execução no diagnóstico do provedor (sem nova consulta ao servidor). */
+export function healthAfterError(code: string): ProviderHealth | 'model_unavailable' | null {
+  const map: Record<string, ProviderHealth | 'model_unavailable'> = {
+    provider_auth_failed: 'auth_failed',
+    provider_forbidden: 'forbidden',
+    provider_billing: 'billing',
+    provider_unreachable: 'network',
+    model_unavailable: 'model_unavailable',
+  };
+  return map[code] ?? null;
+}
 
 /** Estado da conexão a partir do modo, do gateway e da última falha de execução. Puro. */
 export function assistantStatus(i: { mode: 'simulated' | 'remote'; hasEndpoint?: boolean; gatewayStatus: 'disconnected' | 'connecting' | 'connected' | 'error'; gatewayErrorCode?: string; providerAvailable?: boolean | null; lastRunErrorCode?: string | null }): AssistantStatus {
@@ -128,6 +195,7 @@ export function assistantStatus(i: { mode: 'simulated' | 'remote'; hasEndpoint?:
   if (i.gatewayStatus !== 'connected') return 'unavailable';
   if (i.providerAvailable === false) return 'provider_unavailable';
   if (i.lastRunErrorCode === 'gateway_unreachable') return 'gateway_unreachable';
+  if (i.lastRunErrorCode === 'email_not_verified') return 'email_unverified';
   if (i.lastRunErrorCode && PROVIDER_CODES.includes(i.lastRunErrorCode)) return 'provider_unavailable';
   return 'connected';
 }

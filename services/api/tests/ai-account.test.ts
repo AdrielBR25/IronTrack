@@ -23,7 +23,20 @@ describe('IA pela conta', () => {
     expect((await new Client(env).get('/api/v1/ai/models')).status).toBe(401);
     const { client } = await signup(env);
     const cat = await client.get('/api/v1/ai/models');
-    expect(cat.body.providers).toEqual([{ id: 'anthropic', displayName: 'Anthropic Claude', available: true, models: [{ id: 'claude-haiku-5-5', displayName: 'Claude Haiku 5.5', maxInputChars: 24000, maxOutputTokens: 1024 }] }]);
+    expect(cat.body.providers).toEqual([
+      {
+        id: 'anthropic',
+        displayName: 'Anthropic Claude',
+        available: true,
+        // chave presente, ainda não confirmada pelo provedor: nunca "conectado ao Claude" só porque o servidor respondeu
+        status: 'unverified',
+        models: [
+          { id: 'claude-haiku-5-5', displayName: 'Claude Haiku 5.5 (rápido, menor custo)', maxInputChars: 24000, maxOutputTokens: 1024, status: 'unverified' },
+          { id: 'claude-sonnet-5-5', displayName: 'Claude Sonnet 5.5 (respostas mais elaboradas)', maxInputChars: 24000, maxOutputTokens: 1024, status: 'unverified' },
+        ],
+      },
+    ]);
+    expect(JSON.stringify(cat.body)).not.toMatch(/effort|thinking|apiKeyEnv|baseUrl/);
     expect(JSON.stringify(cat.body)).not.toContain(KEY);
     const conf = await client.get('/api/v1/config');
     expect(conf.body.features.ai).toBe(true);
@@ -71,6 +84,8 @@ describe('sem chave do provedor', () => {
       const { client } = await signup(e);
       const cat = await client.get('/api/v1/ai/models');
       expect(cat.body.providers[0].available).toBe(false);
+      expect(cat.body.providers[0].status).toBe('missing_key');
+      expect(e.api.aiStatus().join('\n')).toContain('ANTHROPIC_API_KEY AUSENTE');
       expect((await client.get('/api/v1/config')).body.features.ai).toBe(false);
       const r = await ask(client);
       expect(r.status).toBe(503);

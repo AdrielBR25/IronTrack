@@ -12,6 +12,11 @@ export type GatewayErrorCode =
   | 'provider_not_allowed'
   | 'model_not_allowed'
   | 'provider_unavailable'
+  | 'provider_auth_failed'
+  | 'provider_forbidden'
+  | 'provider_billing'
+  | 'model_unavailable'
+  | 'provider_unreachable'
   | 'rate_limited'
   | 'quota_exceeded'
   | 'provider_rate_limited'
@@ -33,6 +38,12 @@ export const GATEWAY_ERRORS: Record<GatewayErrorCode, { status: number; message:
   provider_not_allowed: { status: 403, message: 'Provedor não permitido neste gateway.' },
   model_not_allowed: { status: 403, message: 'Modelo não permitido neste gateway.' },
   provider_unavailable: { status: 503, message: 'O provedor escolhido não está configurado neste gateway.' },
+  // Hotfix 21.2: recusas do provedor separadas por causa (a frase é fixa; o texto do provedor nunca é repassado).
+  provider_auth_failed: { status: 503, message: 'O provedor recusou a chave configurada no servidor (inválida ou revogada).' },
+  provider_forbidden: { status: 503, message: 'A chave configurada no servidor não tem permissão para este recurso do provedor.' },
+  provider_billing: { status: 503, message: 'O provedor recusou por falta de créditos ou problema de faturamento da conta.' },
+  model_unavailable: { status: 503, message: 'O modelo não existe ou não está liberado para a chave configurada no servidor.' },
+  provider_unreachable: { status: 502, message: 'Não foi possível contatar o provedor (falha de rede). Nenhuma nova tentativa foi feita.' },
   rate_limited: { status: 429, message: 'Muitas solicitações. Aguarde um pouco.' },
   quota_exceeded: { status: 429, message: 'A cota de uso desta credencial acabou por hoje.' },
   provider_rate_limited: { status: 429, message: 'O provedor recusou por limite de uso ou cota da conta. Nenhuma nova tentativa foi feita.' },

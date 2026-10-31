@@ -104,7 +104,7 @@ export function createAccountTransport(opts: { fetchImpl?: typeof fetch; maxResp
   const doFetch = opts.fetchImpl ?? ((input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init));
   const max = opts.maxResponseBytes ?? MAX_GATEWAY_RESPONSE_BYTES;
   return async (req) => {
-    const path = req.path === '/v1/models' ? '/models' : req.path === '/v1/generate' ? '/generate' : null;
+    const path = req.path === '/v1/models' ? '/models' : req.path === '/v1/generate' ? '/generate' : req.path === '/v1/test' ? '/test' : null;
     if (!path) throw new AIError('request_invalid');
     const headers: Record<string, string> = { accept: 'application/json' };
     if (req.method === 'POST') {

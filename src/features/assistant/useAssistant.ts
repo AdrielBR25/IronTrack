@@ -10,9 +10,9 @@
 // só o token de acesso ao gateway e escolhe um modelo do catálogo dele. Chave de provedor nunca passa pelo app.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_CONSENT_TTL_MS, createConsent, isAIError, type AIContextSources, type PreparedAIRequest } from '@/modules/ai';
-import { ASSISTANT_TIMEOUT_MS, REMOTE_TIMEOUT_MS, createAssistantService, type AssistantComposition, type DemoScenario, type RemoteProviderInfo } from '@/integrations/ai/assistantService';
+import { ASSISTANT_TIMEOUT_MS, REMOTE_TIMEOUT_MS, createAssistantService, type AccountTestResult, type AssistantComposition, type DemoScenario, type RemoteProviderInfo } from '@/integrations/ai/assistantService';
 import { ASSISTANT_CATEGORIES, contextFingerprint, loadContextSources, watchContextSources, type AssistantCategory } from '@/integrations/ai/contextSources';
-import { CATEGORY_LABEL, assistantStatus, friendlyError, purposeFor, validateQuestion, type ChatMessage } from './assistantModel';
+import { CATEGORY_LABEL, assistantStatus, friendlyError, healthAfterError, providerHealthInfo, purposeFor, validateQuestion, type ChatMessage } from './assistantModel';
 import { loadSnapshot, saveSnapshot, sessionComposition, touchAssistantSession } from './assistantSession';
 import { localAnswer, type LocalExercise } from './localAnswers';
 import { resolveGatewayEndpoint, useGatewayEndpoint } from '@/integrations/ai/gatewayEndpoint';
@@ -362,7 +362,8 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
       const conn = await composition.connectAccount(ctrl.signal);
       if (!mountedRef.current || connectRef.current !== ctrl) return false;
       setGateway({ status: 'connected', origin: conn.origin, providers: conn.providers });
-      const wanted = conn.providers.find((p) => p.id === wantedRef.current) ?? conn.providers.find((p) => p.available);
+      // Sem provedor utilizável, o primeiro fica escolhido mesmo assim: o diagnóstico dele (ex.: sem chave) aparece na hora.
+      const wanted = conn.providers.find((p) => p.id === wantedRef.current) ?? conn.providers.find((p) => p.available) ?? conn.providers[0];
       if (wanted) {
         setWantedProvider(wanted.id);
         setProviderState(wanted.id);
@@ -401,10 +402,26 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
 
   /** P20: "Testar conexão" — confere de novo o gateway e a disponibilidade dos provedores (sem dados pessoais). */
   const [testing, setTesting] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
+  /** Hotfix 21.2: resultado do "Testar" da IA pela conta (consulta sem custo ao provedor) ou o motivo da falha. */
+  const [testResult, setTestResult] = useState<AccountTestResult | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
   const testConnection = useCallback(async () => {
     if (gateway.status !== 'connected') return;
     setTesting('testing');
+    setTestResult(null);
+    setTestError(null);
     try {
+      if (accountMode) {
+        const target = providerId || wantedRef.current || gateway.providers[0]?.id;
+        if (!target) throw new Error('sem provedor');
+        const { test, connection } = await composition.testAccount(target, modelId || undefined);
+        if (!mountedRef.current) return;
+        setGateway((g) => ({ ...g, status: 'connected', providers: connection.providers }));
+        setTestResult(test);
+        setLastRunError(null);
+        setTesting(test.result === 'ok' ? 'ok' : 'fail');
+        return;
+      }
       const conn = await composition.testGateway();
       if (!mountedRef.current) return;
       setGateway((g) => ({ ...g, status: 'connected', providers: conn.providers }));
@@ -414,6 +431,7 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
       if (!mountedRef.current) return;
       const fe = friendlyError(e);
       setTesting('fail');
+      setTestError(fe.message);
       if (fe.code === 'access_denied') {
         composition.disconnectGateway();
         setGateway({ status: 'error', providers: [], error: accountMode ? ACCOUNT_REJECTED_MESSAGE : TOKEN_REJECTED_MESSAGE, errorCode: 'access_denied' });
@@ -421,7 +439,25 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
         setModelState('');
       } else setLastRunError(fe.code);
     }
-  }, [composition, gateway.status, accountMode]);
+  }, [composition, gateway.status, gateway.providers, accountMode, providerId, modelId]);
+
+  /** Hotfix 21.2: atualiza o diagnóstico mostrado com o que a última pergunta revelou (sem nova consulta). */
+  const applyRunHealth = useCallback((pid: string, model: string, outcome: 'ok' | string) => {
+    setGateway((g) => {
+      if (g.status !== 'connected') return g;
+      return {
+        ...g,
+        providers: g.providers.map((p) => {
+          if (p.id !== pid || !p.status) return p;
+          if (outcome === 'ok') return { ...p, status: 'ok' as const, available: true, modelStatus: { ...p.modelStatus, [model]: 'ok' as const } };
+          const h = healthAfterError(outcome);
+          if (h === 'model_unavailable') return { ...p, modelStatus: { ...p.modelStatus, [model]: 'unavailable' as const } };
+          if (h) return { ...p, status: h, available: h !== 'auth_failed' };
+          return p;
+        }),
+      };
+    });
+  }, []);
 
   /** P20: limpa a conversa desta sessão (só memória). */
   const clearConversation = useCallback(() => {
@@ -482,7 +518,15 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
       return;
     }
     if (remoteInfo && !remoteInfo.available) {
-      setNotice('Este provedor não está configurado no gateway (sem chave no servidor). Escolha outro ou use o modo simulado.');
+      setNotice(
+        remoteInfo.status
+          ? `${providerHealthInfo(remoteInfo.status, remoteInfo.displayName).label}. Nada foi enviado.`
+          : 'Este provedor não está configurado no gateway (sem chave no servidor). Escolha outro ou use o modo simulado.',
+      );
+      return;
+    }
+    if (remoteInfo?.modelStatus?.[modelId] === 'unavailable') {
+      setNotice('Este modelo não existe ou não está liberado para a chave do servidor. Escolha outro modelo. Nada foi enviado.');
       return;
     }
     stopWatching();
@@ -573,12 +617,16 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
       };
       setMessages((m) => [...m.map((x) => (x.id === userMsg.id ? { ...x, status: 'sent' as const } : x)), reply]);
       setLastRunError(null);
+      if (isRemote) applyRunHealth(target.id, res.modelId, 'ok');
     } catch (e) {
       if (!mountedRef.current) return;
       const cancelled = isAIError(e) && e.code === 'cancelled';
       const error = cancelled ? 'Você cancelou. Nenhuma resposta foi gerada.' : friendlyError(e).message;
       setMessages((m) => m.map((x) => (x.id === userMsg.id ? { ...x, status: cancelled ? 'cancelled' : 'failed', error } : x)));
-      if (isRemote && isAIError(e) && !cancelled) setLastRunError(e.code);
+      if (isRemote && isAIError(e) && !cancelled) {
+        setLastRunError(e.code);
+        applyRunHealth(target.id, p.prepared.request.modelId, e.code);
+      }
       // P07: token recusado durante o uso (revogado, expirado ou trocado no servidor): esquece o token
       // desta página na hora, em vez de continuar tentando com uma credencial que não vale mais.
       if (isRemote && isAIError(e) && e.code === 'access_denied') {
@@ -593,7 +641,7 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
       if (abortRef.current === ctrl) abortRef.current = null;
       if (mountedRef.current) setPhase('idle');
     }
-  }, [deps, composition, setPreview, stopWatching, markStale]);
+  }, [deps, composition, setPreview, stopWatching, markStale, applyRunHealth]);
 
   /** Prepara de novo a mesma pergunta (prévia desatualizada ou expirada). */
   const reprepare = useCallback(() => {
@@ -669,6 +717,8 @@ export function useAssistant(overrides: Partial<AssistantDeps> = {}) {
     setWantedProvider,
     testing,
     testConnection,
+    testResult,
+    testError,
     clearConversation,
     askAIAnyway,
   };

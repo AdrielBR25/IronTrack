@@ -144,7 +144,7 @@ export function createGateway(opts: GatewayOptions): Gateway {
     protocol: PROTOCOL_VERSION,
     providers: (Object.entries(cfg.providers) as [ProviderId, NonNullable<GatewayConfig['providers'][ProviderId]>][])
       .filter(([, p]) => p.enabled)
-      .map(([id, p]) => ({ id, displayName: p.displayName, available: !!secretOf(cfg, id), models: p.models.map((m) => ({ ...m })) })),
+      .map(([id, p]) => ({ id, displayName: p.displayName, available: !!secretOf(cfg, id), models: p.models.map((m) => ({ id: m.id, displayName: m.displayName, maxInputChars: m.maxInputChars, maxOutputTokens: m.maxOutputTokens })) })),
   });
 
   async function generate(c: GatewayConfig, req: IncomingMessage, signal: AbortSignal, clientId: string, log: Partial<GatewayLogEvent>): Promise<GenerateResponse> {

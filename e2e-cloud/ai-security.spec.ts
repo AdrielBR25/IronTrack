@@ -23,7 +23,19 @@ test('IA pela conta: sem token nem endereço; só provedores habilitados; e-mail
   await page.goto('./#/assistente');
   await page.getByTestId('mode-remote').check();
   if (await page.getByTestId('connect-account').isVisible()) await page.getByTestId('connect-account').click();
+  // Hotfix 21.2: servidor no ar não é "Claude disponível": antes do teste, a chave aparece como ainda não testada
+  await expect(page.getByTestId('ai-status')).toHaveAttribute('data-health', 'unverified');
+  await expect(page.getByTestId('ai-status')).toContainText('ainda não testada');
+  // modelo que a chave não libera: o "Testar" (sem custo) marca indisponível
+  await page.getByTestId('ai-remote-model').selectOption('claude-sonnet-5-5');
+  await page.getByTestId('gateway-test').click();
+  await expect(page.getByTestId('gateway-test-result')).toHaveAttribute('data-result', 'model_unavailable');
+  await expect(page.locator('[data-testid="ai-remote-model"] option[value="claude-sonnet-5-5"]')).toBeDisabled();
   await page.getByTestId('ai-remote-model').selectOption('claude-haiku-5-5');
+  await page.getByTestId('gateway-test').click();
+  await expect(page.getByTestId('gateway-test-result')).toHaveAttribute('data-result', 'ok');
+  await expect(page.getByTestId('ai-status')).toHaveAttribute('data-health', 'ok');
+  await expect(page.getByTestId('ai-status')).toContainText('Anthropic Claude disponível');
   const selector = page.getByTestId('data-selector');
   await selector.locator('summary').click();
   await page.getByTestId('cat-profile_preferences').check();
@@ -31,6 +43,8 @@ test('IA pela conta: sem token nem endereço; só provedores habilitados; e-mail
   await page.getByTestId('ai-send').click();
   await expect(page.getByTestId('share-preview')).toBeVisible();
   await expect(page.getByTestId('preview-destination')).toContainText('Servidor do IronTrack (sua conta)');
+  await page.getByTestId('preview-raw').locator('summary').click();
+  await expect(page.getByTestId('preview-raw')).toContainText('Como foi minha semana?');
   await page.getByTestId('preview-authorize').click();
   await expect(page.getByTestId('chat-assistant')).toContainText('Resposta do provedor simulado', { timeout: 20_000 });
   const usage = await page.request.get('/api/v1/ai/usage');

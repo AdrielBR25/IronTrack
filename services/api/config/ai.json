@@ -1,5 +1,5 @@
 {
-  "$comment": "Provedores e modelos da IA da API (formato do gateway, SEM segredos; `clients` fica vazio porque o acesso é pela sessão da conta). As chaves vêm só das variáveis do Railway indicadas em apiKeyEnv. Provedor habilitado sem chave aparece como indisponível. Antes de habilitar OpenAI ou Gemini, troque o ID pelo de um modelo atual na documentação oficial. Substitua o arquivo inteiro com AI_CONFIG_JSON (ou AI_CONFIG_PATH) sem editar o código.",
+  "$comment": "Provedores e modelos da IA da API (formato do gateway, SEM segredos; `clients` fica vazio porque o acesso é pela sessão da conta). As chaves vêm só das variáveis do Railway indicadas em apiKeyEnv. Provedor habilitado sem chave aparece como indisponível. Modelos Anthropic conferidos em 2026-10-31 (IDs exatos, sem sufixo de data); `effort`/`thinking` mantêm a resposta dentro de maxOutputTokens (o raciocínio conta no limite). Para oferecer o Claude Opus 5.5 (custo maior), acrescente { \"id\": \"claude-opus-5-5\", ..., \"effort\": \"low\" } sem `thinking` (não pode ser desligado nele). Antes de habilitar OpenAI ou Gemini, troque o ID pelo de um modelo atual na documentação oficial. Substitua o arquivo inteiro com AI_CONFIG_JSON (ou AI_CONFIG_PATH) sem editar o código.",
   "enabled": true,
   "clients": [],
   "limits": {
@@ -19,8 +19,11 @@
       "enabled": true,
       "displayName": "Anthropic Claude",
       "apiKeyEnv": "ANTHROPIC_API_KEY",
-      "apiVersion": "2023-06-01",
-      "models": [{ "id": "claude-haiku-5-5", "displayName": "Claude Haiku 5.5", "maxInputChars": 24000, "maxOutputTokens": 1024 }]
+      "apiVersion": "2026-10-21",
+      "models": [
+        { "id": "claude-haiku-5-5", "displayName": "Claude Haiku 5.5 (rápido, menor custo)", "maxInputChars": 24000, "maxOutputTokens": 1024, "effort": "medium", "thinking": "disabled" },
+        { "id": "claude-sonnet-5-5", "displayName": "Claude Sonnet 5.5 (respostas mais elaboradas)", "maxInputChars": 24000, "maxOutputTokens": 1024, "effort": "medium", "thinking": "between_tools" }
+      ]
     },
     "openai": {
       "enabled": false,

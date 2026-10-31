@@ -112,7 +112,7 @@ export async function runGeneration(deps: GenerationDeps, input: GenerationInput
       try {
         const result = await raceAbort(
           adapter.generate(
-            { model: model.id, ...splitSystem(body.messages), maxOutputTokens: body.maxOutputTokens },
+            { model: model.id, ...splitSystem(body.messages), maxOutputTokens: body.maxOutputTokens, ...(model.effort ? { effort: model.effort } : {}), ...(model.thinking ? { thinking: model.thinking } : {}) },
             { apiKey, fetch: tracked, signal, baseUrl: pcfg.baseUrl ?? adapter.defaultBaseUrl, maxResponseBytes: c.limits.maxUpstreamResponseBytes, ...(pcfg.apiVersion ? { apiVersion: pcfg.apiVersion } : {}) },
           ),
           signal,

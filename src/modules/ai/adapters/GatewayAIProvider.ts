@@ -21,13 +21,30 @@ export interface GatewayHttpResult {
  * cabeçalho nem provedor de destino além do que o gateway permite. Deve rejeitar com
  * `AIError('gateway_unreachable')` em falha de rede e `AIError('cancelled')` se o sinal abortar.
  */
-export type GatewayTransport = (req: { method: 'GET'; path: '/v1/models'; signal?: AbortSignal } | { method: 'POST'; path: '/v1/generate'; body: unknown; signal?: AbortSignal }) => Promise<GatewayHttpResult>;
+export type GatewayTransport = (
+  req: { method: 'GET'; path: '/v1/models'; signal?: AbortSignal } | { method: 'POST'; path: '/v1/generate'; body: unknown; signal?: AbortSignal } | { method: 'POST'; path: '/v1/test'; body: unknown; signal?: AbortSignal },
+) => Promise<GatewayHttpResult>;
+
+/**
+ * Hotfix 21.2: diagnóstico do provedor informado pela API da conta (o gateway P06 não informa: fica ausente).
+ * Ver services/ai-gateway/src/protocol.ts (PROVIDER_HEALTH).
+ */
+export const PROVIDER_HEALTH = ['missing_key', 'invalid_key_format', 'unverified', 'ok', 'auth_failed', 'forbidden', 'billing', 'rate_limited', 'network'] as const;
+export type ProviderHealth = (typeof PROVIDER_HEALTH)[number];
+export type ModelHealth = 'unverified' | 'ok' | 'unavailable';
+const MODEL_HEALTH: readonly string[] = ['unverified', 'ok', 'unavailable'];
 
 export interface GatewayProviderEntry {
   id: string;
   displayName: string;
-  /** false = permitido no gateway, mas sem chave configurada no servidor. */
+  /** false = permitido no gateway, mas sem chave utilizável no servidor. */
   available: boolean;
+  /** Hotfix 21.2: estado do provedor (só na IA pela conta). */
+  status?: ProviderHealth;
+  /** Última confirmação ou recusa pelo provedor (ISO 8601). */
+  checkedAt?: string;
+  /** Estado de cada modelo (só na IA pela conta). */
+  modelStatus?: Record<string, ModelHealth>;
   models: AIModelInfo[];
 }
 
@@ -49,16 +66,29 @@ export function parseGatewayCatalog(body: unknown): GatewayProviderEntry[] {
   for (const p of body.providers.slice(0, 10)) {
     if (!isObj(p) || typeof p.id !== 'string' || !PROVIDER_ID.test(p.id) || p.id === 'mock' || !shortText(p.displayName, 60) || typeof p.available !== 'boolean' || !Array.isArray(p.models)) continue;
     const models: AIModelInfo[] = [];
+    const modelStatus: Record<string, ModelHealth> = {};
     for (const m of p.models.slice(0, 20)) {
       if (!isObj(m) || typeof m.id !== 'string' || !MODEL_ID.test(m.id) || !shortText(m.displayName, 80) || !posInt(m.maxInputChars) || !posInt(m.maxOutputTokens)) continue;
       if (models.some((x) => x.id === m.id)) continue;
+      if (typeof m.status === 'string' && MODEL_HEALTH.includes(m.status)) modelStatus[m.id] = m.status as ModelHealth;
       models.push({
         id: m.id,
         displayName: m.displayName,
         capabilities: { textGeneration: true, systemMessages: true, structuredOutput: false, imageInput: false, streaming: false, maxInputChars: m.maxInputChars, maxOutputTokens: m.maxOutputTokens },
       });
     }
-    if (models.length && !out.some((x) => x.id === p.id)) out.push({ id: p.id, displayName: p.displayName, available: p.available, models });
+    if (!models.length || out.some((x) => x.id === p.id)) continue;
+    const status = typeof p.status === 'string' && (PROVIDER_HEALTH as readonly string[]).includes(p.status) ? (p.status as ProviderHealth) : undefined;
+    const checkedAt = typeof p.checkedAt === 'string' && p.checkedAt.length <= 40 && !Number.isNaN(Date.parse(p.checkedAt)) ? p.checkedAt : undefined;
+    out.push({
+      id: p.id,
+      displayName: p.displayName,
+      available: p.available,
+      ...(status ? { status } : {}),
+      ...(checkedAt ? { checkedAt } : {}),
+      ...(Object.keys(modelStatus).length ? { modelStatus } : {}),
+      models,
+    });
   }
   return out;
 }
@@ -83,6 +113,14 @@ export function gatewayErrorCode(status: number, body: unknown): AIErrorCode {
     content_filtered: 'content_blocked',
     invalid_response: 'invalid_response',
     provider_failure: 'provider_failure',
+    // Hotfix 21.2
+    email_not_verified: 'email_not_verified',
+    provider_auth_failed: 'provider_auth_failed',
+    provider_forbidden: 'provider_forbidden',
+    provider_billing: 'provider_billing',
+    model_unavailable: 'model_unavailable',
+    provider_unreachable: 'provider_unreachable',
+    cancelled: 'cancelled',
   };
   if (map[code]) return map[code];
   if (status === 401 || status === 403) return 'access_denied';

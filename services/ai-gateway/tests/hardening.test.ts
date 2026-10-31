@@ -495,7 +495,7 @@ describe('resiliência', () => {
       const base = await listen(gw.server);
       const r = await post(base, tok, genBody({ provider: 'gemini' }));
       expect(r.status, name).toBe(502);
-      expect(await err(r)).toBe('provider_failure');
+      expect(await err(r)).toBe('provider_unreachable');
     }
   });
 });

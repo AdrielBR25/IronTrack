@@ -22,6 +22,14 @@ const provider = createServer((req, res) => {
   let body = '';
   req.on('data', (c) => (body += c));
   req.on('end', () => {
+    // Hotfix 21.2: consulta de modelo (diagnóstico sem custo do "Testar"). O Sonnet simula um modelo não liberado.
+    const model = /^\/v1\/models\/([^/]+)$/.exec(req.url ?? '');
+    if (req.method === 'GET' && model && req.headers['x-api-key'] && req.headers['anthropic-version'] === '2026-10-21') {
+      const id = decodeURIComponent(model[1]);
+      res.writeHead(id === 'claude-haiku-5-5' ? 200 : 404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(id === 'claude-haiku-5-5' ? { type: 'model', id, display_name: 'Claude Haiku 5.5' } : { type: 'error', error: { type: 'not_found_error', message: `model: ${id}` } }));
+      return;
+    }
     if (req.method !== 'POST' || req.url !== '/v1/messages' || !req.headers['x-api-key']) {
       res.writeHead(404).end();
       return;
@@ -47,7 +55,17 @@ const aiConfig = {
   clients: [],
   limits: { maxBodyBytes: 65536, maxMessages: 6, maxInputChars: 24000, maxOutputTokens: 1024, requestsPerMinute: 30, dailyTokenBudget: 20000, maxConcurrentPerClient: 1, maxConcurrentTotal: 4, upstreamTimeoutMs: 10000, maxUpstreamResponseBytes: 262144 },
   providers: {
-    anthropic: { enabled: true, displayName: 'Anthropic Claude', apiKeyEnv: 'ANTHROPIC_API_KEY', apiVersion: '2023-06-01', baseUrl: providerBase, models: [{ id: 'claude-haiku-5-5', displayName: 'Claude Haiku 5.5', maxInputChars: 24000, maxOutputTokens: 1024 }] },
+    anthropic: {
+      enabled: true,
+      displayName: 'Anthropic Claude',
+      apiKeyEnv: 'ANTHROPIC_API_KEY',
+      apiVersion: '2026-10-21',
+      baseUrl: providerBase,
+      models: [
+        { id: 'claude-haiku-5-5', displayName: 'Claude Haiku 5.5', maxInputChars: 24000, maxOutputTokens: 1024, effort: 'medium', thinking: 'disabled' },
+        { id: 'claude-sonnet-5-5', displayName: 'Claude Sonnet 5.5', maxInputChars: 24000, maxOutputTokens: 1024, effort: 'medium', thinking: 'between_tools' },
+      ],
+    },
     openai: { enabled: false, displayName: 'OpenAI', apiKeyEnv: 'OPENAI_API_KEY', models: [{ id: 'modelo-x', displayName: 'X', maxInputChars: 24000, maxOutputTokens: 1024 }] },
   },
 };
@@ -68,7 +86,7 @@ const env: Record<string, string> = {
   TRUST_PROXY_HOPS: '2',
   ACCESS_LOG: 'off',
   // chave fictícia, só para o provedor simulado local
-  ANTHROPIC_API_KEY: `sk-ant-e2e-${randomBytes(12).toString('hex')}`,
+  ANTHROPIC_API_KEY: `sk-ant-api03-e2e-${randomBytes(12).toString('hex')}`,
 };
 const cfg = loadConfig(env);
 const pool = createPool(cfg);

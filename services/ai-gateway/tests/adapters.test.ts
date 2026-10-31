@@ -22,7 +22,7 @@ const REQ: UpstreamRequest = {
 function capture(res: () => Response | Promise<Response>) {
   const calls: { url: string; init: Parameters<FetchLike>[1]; body: Record<string, unknown> }[] = [];
   const f: FetchLike = async (url, init) => {
-    calls.push({ url, init, body: JSON.parse(init.body) });
+    calls.push({ url, init, body: init.body ? JSON.parse(init.body) : {} });
     return res();
   };
   return { calls, f };
@@ -126,6 +126,58 @@ describe('Anthropic (Messages API)', () => {
   it('sem versão de API configurada: provider_unavailable', async () => {
     expect(await code(anthropicAdapter.generate(REQ, ctx(capture(() => json(200, {})).f, { apiVersion: undefined })))).toBe('provider_unavailable');
   });
+
+  it('Hotfix 21.2: esforço e modo de raciocínio da configuração do servidor vão no corpo; blocos thinking não entram no texto', async () => {
+    const { calls, f } = capture(() => json(200, { content: [{ type: 'thinking', thinking: '', signature: 's' }, { type: 'text', text: 'Resposta' }], stop_reason: 'end_turn' }));
+    const r = await anthropicAdapter.generate({ ...REQ, effort: 'medium', thinking: 'disabled' }, ctx(f));
+    expect(r.text).toBe('Resposta');
+    expect(calls[0].body).toMatchObject({ thinking: { type: 'disabled' }, output_config: { effort: 'medium' } });
+    const other = capture(() => json(200, { content: [{ type: 'text', text: 'x' }], stop_reason: 'end_turn' }));
+    await anthropicAdapter.generate({ ...REQ, thinking: 'between_tools' }, ctx(other.f));
+    expect(other.calls[0].body.thinking).toEqual({ type: 'between_tools' });
+    expect(other.calls[0].body).not.toHaveProperty('output_config');
+  });
+
+  it('Hotfix 21.2: erros reais da Anthropic separados por causa (pelo status e por error.type), sem repassar o texto', async () => {
+    const e = (type: string, message = 'detalhe secreto do provedor') => ({ type: 'error', error: { type, message } });
+    const cases: [number, unknown, string][] = [
+      [401, e('authentication_error', 'invalid x-api-key'), 'provider_auth_failed'],
+      [402, e('billing_error'), 'provider_billing'],
+      [400, e('invalid_request_error', 'Your credit balance is too low to access the Anthropic API.'), 'provider_billing'],
+      [403, e('permission_error'), 'provider_forbidden'],
+      [404, e('not_found_error', 'model: claude-x'), 'model_unavailable'],
+      [429, e('rate_limit_error'), 'provider_rate_limited'],
+      [400, e('invalid_request_error', 'max_tokens: too large'), 'provider_failure'],
+      [529, e('overloaded_error'), 'provider_failure'],
+    ];
+    for (const [status, body, want] of cases) {
+      const err = await anthropicAdapter.generate(REQ, ctx(capture(() => json(status, body)).f)).catch((x: unknown) => x);
+      expect(err, `${status} ${want}`).toBeInstanceOf(GatewayError);
+      expect((err as GatewayError).code, `${status} ${want}`).toBe(want);
+      expect((err as GatewayError).message).not.toContain('secreto');
+      expect((err as GatewayError).message).not.toContain('credit balance');
+    }
+  });
+
+  it('Hotfix 21.2: diagnóstico sem custo = GET /v1/models/{id} (nenhuma mensagem gerada)', async () => {
+    const ok = capture(() => json(200, { type: 'model', id: 'modelo-x.1', display_name: 'X' }));
+    await anthropicAdapter.check!('modelo-x.1', ctx(ok.f));
+    expect(ok.calls[0].url).toBe('https://provedor.test/v1/models/modelo-x.1');
+    expect(ok.calls[0].init.method).toBe('GET');
+    expect(ok.calls[0].init.body).toBeUndefined();
+    expect(ok.calls[0].init.redirect).toBe('manual');
+    expect(ok.calls[0].init.headers).toMatchObject({ 'x-api-key': 'chave-de-teste-123456', 'anthropic-version': '2026-10-21' });
+    const fail = async (status: number, type: string) => {
+      const err = await anthropicAdapter.check!('modelo-x.1', ctx(capture(() => json(status, { type: 'error', error: { type, message: 'x' } })).f)).catch((x: unknown) => x);
+      return (err as GatewayError).code;
+    };
+    expect(await fail(401, 'authentication_error')).toBe('provider_auth_failed');
+    expect(await fail(404, 'not_found_error')).toBe('model_unavailable');
+    expect(await fail(403, 'permission_error')).toBe('provider_forbidden');
+    const odd = capture(() => json(200, { type: 'model', id: 'outro' }));
+    expect(await code(anthropicAdapter.check!('modelo-x.1', ctx(odd.f)))).toBe('invalid_response');
+    expect(await code(anthropicAdapter.check!('a/../b', ctx(capture(() => json(404, {})).f)))).toBe('model_unavailable');
+  });
 });
 
 describe('Gemini (generateContent)', () => {
@@ -173,10 +225,11 @@ describe('comum aos três adaptadores', () => {
 
   it.each(all.map((a) => [a.id, a] as const))('%s: erros HTTP normalizados sem repetir', async (_id, a) => {
     for (const [status, want] of [
-      [401, 'provider_unavailable'],
-      [403, 'provider_unavailable'],
+      [401, 'provider_auth_failed'],
+      [402, 'provider_billing'],
+      [403, 'provider_forbidden'],
       [400, 'provider_failure'],
-      [404, 'provider_failure'],
+      [404, 'model_unavailable'],
       [413, 'payload_too_large'],
       [429, 'provider_rate_limited'],
       [500, 'provider_failure'],
@@ -205,7 +258,7 @@ describe('comum aos três adaptadores', () => {
     expect(await code(a.generate(REQ, ctx(f)))).toBe('invalid_response');
   });
 
-  it.each(all.map((a) => [a.id, a] as const))('%s: falha de rede → provider_failure', async (_id, a) => {
+  it.each(all.map((a) => [a.id, a] as const))('%s: falha de rede → provider_unreachable', async (_id, a) => {
     expect(
       await code(
         a.generate(
@@ -215,6 +268,6 @@ describe('comum aos três adaptadores', () => {
           }),
         ),
       ),
-    ).toBe('provider_failure');
+    ).toBe('provider_unreachable');
   });
 });

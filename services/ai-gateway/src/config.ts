@@ -14,7 +14,19 @@ export interface ModelConfig {
   maxInputChars: number;
   /** Limite de saída aceito pelo gateway para este modelo (tokens). */
   maxOutputTokens: number;
+  /**
+   * Hotfix 21.2, só Anthropic: esforço (`output_config.effort`) e modo de raciocínio (`thinking.type`). Nos modelos
+   * atuais o raciocínio conta no `max_tokens`; com um limite de saída curto, desligá-lo (Haiku 5.5: `disabled`;
+   * Sonnet 5.5: `between_tools`) evita resposta vazia cortada no limite. Ausente = padrão do modelo.
+   */
+  effort?: ModelEffort;
+  thinking?: ModelThinking;
 }
+
+export const MODEL_EFFORTS = ['low', 'medium', 'high'] as const;
+export type ModelEffort = (typeof MODEL_EFFORTS)[number];
+export const MODEL_THINKING = ['adaptive', 'disabled', 'between_tools'] as const;
+export type ModelThinking = (typeof MODEL_THINKING)[number];
 
 export interface ProviderConfig {
   enabled: boolean;
@@ -257,7 +269,20 @@ export function validateConfig(raw: unknown): ConfigResult {
       p.models.forEach((m, i) => {
         if (!isObj(m) || typeof m.id !== 'string' || !MODEL_ID.test(m.id) || !str(m.displayName, 80) || !posInt(m.maxInputChars, MAX_LIMITS.maxInputChars) || !posInt(m.maxOutputTokens, MAX_LIMITS.maxOutputTokens))
           return err(`${at}.models[${i}]`);
-        models.push({ id: m.id, displayName: m.displayName, maxInputChars: m.maxInputChars, maxOutputTokens: m.maxOutputTokens });
+        if (m.effort !== undefined && (id !== 'anthropic' || !(MODEL_EFFORTS as readonly unknown[]).includes(m.effort))) return err(`${at}.models[${i}].effort`);
+        if (m.thinking !== undefined && (id !== 'anthropic' || !(MODEL_THINKING as readonly unknown[]).includes(m.thinking))) return err(`${at}.models[${i}].thinking`);
+        // Combinações que a API recusa com 400 (referência de 2026-10-31): Opus 5.5 e Sonnet 5.5 não aceitam `disabled`;
+        // `between_tools` só existe no Sonnet 5.5.
+        if (m.thinking === 'disabled' && /^claude-(opus|sonnet)-5-5/.test(m.id)) return err(`${at}.models[${i}].thinking (disabled não é aceito por ${m.id})`);
+        if (m.thinking === 'between_tools' && !/^claude-sonnet-5-5/.test(m.id)) return err(`${at}.models[${i}].thinking (between_tools só no claude-sonnet-5-5)`);
+        models.push({
+          id: m.id,
+          displayName: m.displayName,
+          maxInputChars: m.maxInputChars,
+          maxOutputTokens: m.maxOutputTokens,
+          ...(m.effort !== undefined ? { effort: m.effort as ModelEffort } : {}),
+          ...(m.thinking !== undefined ? { thinking: m.thinking as ModelThinking } : {}),
+        });
       });
       if (new Set(models.map((m) => m.id)).size !== models.length) err(`${at}.models (duplicados)`);
       providers[id] = {

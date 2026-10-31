@@ -9,7 +9,7 @@ import { createPool, type Pool } from '../src/db/pool.ts';
 import { migrate } from '../src/db/migrate.ts';
 import type { Logger } from '../src/lib/log.ts';
 import type { TestMailbox } from '../src/mail/mailer.ts';
-import type { UpstreamAdapter } from '../../ai-gateway/src/providers/types.ts';
+import type { FetchLike, UpstreamAdapter } from '../../ai-gateway/src/providers/types.ts';
 
 export const APP_ORIGIN = 'http://localhost:4173';
 export const STRONG = 'treinoForte2026';
@@ -43,7 +43,7 @@ export const fakeAnthropic = (behavior: { text?: string; fail?: boolean } = {}):
   },
 });
 
-export async function setupApi(env: Record<string, string> = {}, opts: { adapter?: UpstreamAdapter; providerKey?: string | null } = {}): Promise<TestEnv> {
+export async function setupApi(env: Record<string, string> = {}, opts: { adapter?: UpstreamAdapter; providerKey?: string | null; fetch?: FetchLike } = {}): Promise<TestEnv> {
   const admin = adminUrl();
   const dbName = `it_${randomBytes(6).toString('hex')}`;
   const adminPool = new pg.Pool({ connectionString: admin, max: 1 });
@@ -74,7 +74,7 @@ export async function setupApi(env: Record<string, string> = {}, opts: { adapter
     error: (w, e) => write(JSON.stringify({ w, e: String(e) })),
   };
   const providerKey = opts.providerKey === undefined ? 'sk-ant-teste-chave-secreta-0000000000' : opts.providerKey;
-  const api = createApi({ cfg, pool, logger, env: providerKey ? { ANTHROPIC_API_KEY: providerKey } : {}, ai: { adapters: { anthropic: opts.adapter ?? fakeAnthropic() }, fetch: async () => new Response('{}', { status: 200 }) } });
+  const api = createApi({ cfg, pool, logger, env: providerKey ? { ANTHROPIC_API_KEY: providerKey } : {}, ai: { adapters: { anthropic: opts.adapter ?? fakeAnthropic() }, fetch: opts.fetch ?? (async () => new Response('{}', { status: 200 })) } });
   await new Promise<void>((r) => api.server.listen(0, '127.0.0.1', () => r()));
   const addr = api.server.address();
   const base = `http://127.0.0.1:${addr && typeof addr === 'object' ? addr.port : 0}`;

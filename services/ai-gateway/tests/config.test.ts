@@ -48,8 +48,25 @@ describe('validação', () => {
     ['modelo com barra', { providers: { openai: { enabled: true, displayName: 'O', apiKeyEnv: 'OPENAI_API_KEY', models: [{ id: 'a/b', displayName: 'm', maxInputChars: 1, maxOutputTokens: 1 }] } } }],
     ['Anthropic sem apiVersion', { providers: { anthropic: { enabled: true, displayName: 'A', apiKeyEnv: 'ANTHROPIC_API_KEY', models: [{ id: 'm', displayName: 'm', maxInputChars: 1, maxOutputTokens: 1 }] } } }],
     ['hash de token malformado', { clients: [{ id: 'a', tokenSha256: 'x', enabled: true }] }],
+    ['esforço fora da lista', { providers: { anthropic: { enabled: true, displayName: 'A', apiKeyEnv: 'ANTHROPIC_API_KEY', apiVersion: '2026-10-21', models: [{ id: 'claude-haiku-5-5', displayName: 'm', maxInputChars: 1, maxOutputTokens: 1, effort: 'max' }] } } }],
+    ['raciocínio em provedor que não é Anthropic', { providers: { openai: { enabled: true, displayName: 'O', apiKeyEnv: 'OPENAI_API_KEY', models: [{ id: 'm', displayName: 'm', maxInputChars: 1, maxOutputTokens: 1, thinking: 'disabled' }] } } }],
+    ['Sonnet 5.5 com raciocínio desligado (400 na API)', { providers: { anthropic: { enabled: true, displayName: 'A', apiKeyEnv: 'ANTHROPIC_API_KEY', apiVersion: '2026-10-21', models: [{ id: 'claude-sonnet-5-5', displayName: 'm', maxInputChars: 1, maxOutputTokens: 1, thinking: 'disabled' }] } } }],
+    ['Opus 5.5 com raciocínio desligado (400 na API)', { providers: { anthropic: { enabled: true, displayName: 'A', apiKeyEnv: 'ANTHROPIC_API_KEY', apiVersion: '2026-10-21', models: [{ id: 'claude-opus-5-5', displayName: 'm', maxInputChars: 1, maxOutputTokens: 1, thinking: 'disabled' }] } } }],
+    ['between_tools fora do Sonnet 5.5', { providers: { anthropic: { enabled: true, displayName: 'A', apiKeyEnv: 'ANTHROPIC_API_KEY', apiVersion: '2026-10-21', models: [{ id: 'claude-haiku-5-5', displayName: 'm', maxInputChars: 1, maxOutputTokens: 1, thinking: 'between_tools' }] } } }],
   ])('recusa: %s', (_n, over) => {
     expect(validateConfig(testConfig(tok, over)).ok).toBe(false);
+  });
+
+  it('configuração de IA da API (services/api/config/ai.json) é válida: IDs atuais, esforço e raciocínio aceitos pela API', () => {
+    const r = validateConfig(JSON.parse(readFileSync(join(dir, '../api/config/ai.json'), 'utf8')));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.config.providers.anthropic).toMatchObject({ enabled: true, apiKeyEnv: 'ANTHROPIC_API_KEY', apiVersion: '2026-10-21' });
+    expect(r.config.providers.anthropic!.models.map((m) => [m.id, m.thinking, m.effort])).toEqual([
+      ['claude-haiku-5-5', 'disabled', 'medium'],
+      ['claude-sonnet-5-5', 'between_tools', 'medium'],
+    ]);
+    expect(r.config.providers.anthropic).not.toHaveProperty('baseUrl');
   });
 
   it('host fora do loopback só com exposeBeyondLoopback explícito', () => {

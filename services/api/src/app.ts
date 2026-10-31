@@ -38,6 +38,8 @@ export interface Api {
   shutdown(graceMs?: number): Promise<void>;
   /** Limpeza periódica (limites vencidos, idempotência antiga, tokens expirados). */
   maintenance(): Promise<void>;
+  /** Hotfix 21.2: estado dos provedores de IA para o log de inicialização (nunca o valor de uma chave). */
+  aiStatus(): string[];
 }
 
 export function createApi(o: ApiOptions): Api {
@@ -172,5 +174,6 @@ export function createApi(o: ApiOptions): Api {
       await pool.query("UPDATE import_jobs SET status = 'cancelled' WHERE status = 'staging' AND created_at < now() - interval '2 days'");
       await pool.query("DELETE FROM ai_usage_events WHERE created_at < now() - interval '90 days'");
     },
+    aiStatus: () => ai.describe(),
   };
 }

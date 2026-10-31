@@ -33,14 +33,23 @@ async function readLimited(res: Response, maxBytes: number, signal: AbortSignal)
   return Buffer.concat(chunks).toString('utf8');
 }
 
-/** POST JSON. Erros de rede viram `provider_failure`; cancelamento é repassado ao chamador. */
-export async function postJson(fetchFn: FetchLike, url: string, headers: Record<string, string>, body: unknown, signal: AbortSignal, maxBytes: number): Promise<UpstreamHttpResult> {
+/** POST JSON. Erros de rede viram `provider_unreachable`; cancelamento é repassado ao chamador. */
+export function postJson(fetchFn: FetchLike, url: string, headers: Record<string, string>, body: unknown, signal: AbortSignal, maxBytes: number): Promise<UpstreamHttpResult> {
+  return requestJson(fetchFn, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', ...headers }, body: JSON.stringify(body) }, url, signal, maxBytes);
+}
+
+/** GET JSON (diagnóstico sem custo, ex.: consulta de modelo). Mesmas proteções do POST. */
+export function getJson(fetchFn: FetchLike, url: string, headers: Record<string, string>, signal: AbortSignal, maxBytes: number): Promise<UpstreamHttpResult> {
+  return requestJson(fetchFn, { method: 'GET', headers: { accept: 'application/json', ...headers } }, url, signal, maxBytes);
+}
+
+async function requestJson(fetchFn: FetchLike, init: { method: 'GET' | 'POST'; headers: Record<string, string>; body?: string }, url: string, signal: AbortSignal, maxBytes: number): Promise<UpstreamHttpResult> {
   let res: Response;
   try {
-    res = await fetchFn(url, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', ...headers }, body: JSON.stringify(body), signal, redirect: 'manual' });
+    res = await fetchFn(url, { ...init, signal, redirect: 'manual' });
   } catch (e) {
     if (signal.aborted) throw signal.reason;
-    throw new GatewayError('provider_failure');
+    throw new GatewayError('provider_unreachable');
   }
   // Redirecionamento (ou resposta opaca de redirect): descarta o corpo sem ler e não segue.
   if (res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400)) {
@@ -65,12 +74,20 @@ export async function postJson(fetchFn: FetchLike, url: string, headers: Record<
 }
 
 /**
- * Mapeia o status HTTP de erro do provedor. Sem repetição e sem o texto do provedor.
- * 401/403: chave recusada ou sem permissão; 429: limite/cota da conta no provedor; 413: corpo grande;
- * 400/404/408/5xx/529: falha do provedor (inclui modelo inexistente ou descontinuado).
+ * Mapeia o status HTTP de erro do provedor. Sem repetição e sem o texto do provedor (o corpo só é lido para
+ * classificar a causa, nunca devolvido nem registrado).
+ * 401: chave recusada (inválida ou revogada); 403: chave sem permissão; 402 (ou `billing_error`, ou 400 de saldo de
+ * créditos): faturamento; 404 (`not_found_error`): modelo inexistente ou não liberado; 429: limite/cota da conta no
+ * provedor; 413: corpo grande; 400/408/5xx/529: falha do provedor.
  */
-export function upstreamStatusError(status: number): GatewayError {
-  if (status === 401 || status === 403) return new GatewayError('provider_unavailable');
+export function upstreamStatusError(status: number, json?: unknown): GatewayError {
+  const err = isObj(json) && isObj(json.error) ? json.error : undefined;
+  const type = typeof err?.type === 'string' ? err.type : '';
+  const message = typeof err?.message === 'string' ? err.message : '';
+  if (status === 401 || type === 'authentication_error') return new GatewayError('provider_auth_failed');
+  if (status === 402 || type === 'billing_error' || (status === 400 && /credit balance|billing/i.test(message))) return new GatewayError('provider_billing');
+  if (status === 403) return new GatewayError('provider_forbidden');
+  if (status === 404) return new GatewayError('model_unavailable');
   if (status === 429) return new GatewayError('provider_rate_limited');
   if (status === 413) return new GatewayError('payload_too_large');
   return new GatewayError('provider_failure');

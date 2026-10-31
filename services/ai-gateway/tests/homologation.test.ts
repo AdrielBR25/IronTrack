@@ -103,13 +103,13 @@ describe('homologação externa: ensaio sem custo contra servidor simulado local
     for (const bad of ['RESPOSTA-MARCADOR', 'conectividade', key]) expect(out).not.toContain(bad);
   });
 
-  it('falha registrada com código normalizado (chave recusada → provider_unavailable), sem nova tentativa', async () => {
+  it('falha registrada com código normalizado (chave recusada → provider_auth_failed), sem nova tentativa', async () => {
     const m = await mock(() => ({ status: 401, body: { type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } } }));
     const r = await run([...ARGS, '--base-url', m.url], { AI_GATEWAY_HOMOLOGATION: '1', ANTHROPIC_API_KEY: fakeKey('sk-ant-') });
     expect(r.code).toBe(1);
     expect(m.seen).toHaveLength(1);
     const rec = JSON.parse(r.stdout) as Record<string, unknown>;
-    expect(rec).toMatchObject({ provider: 'anthropic', ok: false, code: 'provider_unavailable' });
+    expect(rec).toMatchObject({ provider: 'anthropic', ok: false, code: 'provider_auth_failed' });
     expect(r.stdout).not.toContain('invalid x-api-key');
   });
 

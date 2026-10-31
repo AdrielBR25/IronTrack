@@ -11,7 +11,7 @@ import { Card } from '@/components/ui/card';
 import { Input, NativeSelect } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import type { AssistantState } from './useAssistant';
-import { STATUS_INFO, type AssistantStatus } from './assistantModel';
+import { STATUS_INFO, providerHealthInfo, testResultText, type AssistantStatus } from './assistantModel';
 import { NO_GATEWAY_MESSAGE } from './useAssistant';
 import { PROVIDER_PRESETS, isOfficialKeysUrl, presetById, providerKeyKind, type ProviderPreset } from '@/integrations/ai/providerPresets';
 import { forgetGatewayOrigin, saveGatewayOrigin } from '@/integrations/ai/gatewayEndpoint';
@@ -57,13 +57,35 @@ const STATUS_TONE: Record<AssistantStatus, string> = {
   auth_failure: 'border-destructive/50 bg-destructive/10',
   gateway_unreachable: 'border-destructive/50 bg-destructive/10',
   provider_unavailable: 'border-warn/50 bg-warn/10',
+  email_unverified: 'border-warn/50 bg-warn/10',
 };
 
+const HEALTH_TONE = {
+  ok: { box: 'border-primary/40 bg-primary/10', dot: 'bg-primary' },
+  neutral: { box: 'border-border bg-secondary/40', dot: 'bg-muted-foreground' },
+  warn: { box: 'border-warn/50 bg-warn/10', dot: 'bg-warn' },
+  bad: { box: 'border-destructive/50 bg-destructive/10', dot: 'bg-destructive' },
+} as const;
+
 export function ConnectionStatus({ a }: { a: AssistantState }) {
+  // Hotfix 21.2: na IA pela conta, o estado do provedor (confirmado pelo provedor) vale mais que "servidor no ar".
+  const health = a.remoteInfo?.status && (a.status === 'connected' || a.status === 'provider_unavailable') ? a.remoteInfo.status : undefined;
+  if (health && a.remoteInfo) {
+    const h = providerHealthInfo(health, a.remoteInfo.displayName);
+    return (
+      <div className={cn('flex items-start gap-2 rounded-xl border p-2.5 text-sm', HEALTH_TONE[h.tone].box)} role="status" data-testid="ai-status" data-status={a.status} data-health={health}>
+        <span className={cn('mt-1 h-2.5 w-2.5 shrink-0 rounded-full', HEALTH_TONE[h.tone].dot)} aria-hidden />
+        <span className="min-w-0">
+          <span className="block font-semibold">{h.label}</span>
+          <span className="block text-xs text-muted-foreground">{h.text}</span>
+        </span>
+      </div>
+    );
+  }
   const info = STATUS_INFO[a.status];
   return (
     <div className={cn('flex items-start gap-2 rounded-xl border p-2.5 text-sm', STATUS_TONE[a.status])} role="status" data-testid="ai-status" data-status={a.status}>
-      <span className={cn('mt-1 h-2.5 w-2.5 shrink-0 rounded-full', a.status === 'connected' || a.status === 'local' ? 'bg-primary' : a.status === 'provider_unavailable' || a.status === 'no_gateway' ? 'bg-warn' : a.status === 'unavailable' ? 'bg-muted-foreground' : 'bg-destructive')} aria-hidden />
+      <span className={cn('mt-1 h-2.5 w-2.5 shrink-0 rounded-full', a.status === 'connected' || a.status === 'local' ? 'bg-primary' : a.status === 'provider_unavailable' || a.status === 'no_gateway' || a.status === 'email_unverified' ? 'bg-warn' : a.status === 'unavailable' ? 'bg-muted-foreground' : 'bg-destructive')} aria-hidden />
       <span className="min-w-0">
         <span className="block font-semibold">{info.label}</span>
         <span className="block text-xs text-muted-foreground">{info.text}</span>
@@ -275,13 +297,18 @@ function TokenField({ a, disabled }: { a: AssistantState; disabled: boolean }) {
 function ConnectedPanel({ a, preset, onStart, locked }: { a: AssistantState; preset: ProviderPreset | undefined; onStart: () => void; locked: boolean }) {
   const id = useId();
   const info = a.remoteInfo;
-  const where = preset ? providerOnServer(a, preset.id) : 'missing';
-  const ready = !!info?.available && !!a.modelId;
+  // Na IA pela conta o provedor vem do catálogo do servidor (não dos atalhos do gateway P20).
+  const where = a.accountMode ? (info ? (info.available ? 'ready' : 'no_key') : 'missing') : preset ? providerOnServer(a, preset.id) : 'missing';
+  const modelUnavailable = info?.modelStatus?.[a.modelId] === 'unavailable';
+  const ready = !!info?.available && !!a.modelId && !modelUnavailable;
+  const health = a.accountMode && info?.status ? providerHealthInfo(info.status, info.displayName) : null;
+  const modelName = (id: string) => a.models.find((m) => m.id === id)?.displayName ?? id;
+  const testText = a.testing === 'testing' ? '' : a.testResult && info ? testResultText(a.testResult, info.displayName, modelName(a.testResult.modelId)) : a.testError ? a.testError : a.testing === 'ok' ? 'Conexão ok: o servidor respondeu e a lista de modelos foi atualizada.' : a.testing === 'fail' ? 'O teste falhou. Veja o estado acima.' : '';
   return (
     <div className="space-y-3" data-testid="gateway-connected">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="flex items-center gap-1.5 text-sm font-semibold">
-          <span className="h-2 w-2 rounded-full bg-primary" aria-hidden /> Conectado ao servidor seguro
+          <span className="h-2 w-2 rounded-full bg-primary" aria-hidden /> {a.accountMode ? 'Conectado ao servidor do IronTrack' : 'Conectado ao servidor seguro'}
         </p>
         <div className="flex gap-1.5">
           <Button variant="outline" size="sm" onClick={() => void a.testConnection()} disabled={a.testing === 'testing' || locked} data-testid="gateway-test">
@@ -292,23 +319,38 @@ function ConnectedPanel({ a, preset, onStart, locked }: { a: AssistantState; pre
           </Button>
         </div>
       </div>
-      <p className="text-xs text-muted-foreground" role="status" data-testid="gateway-test-result">
-        {a.testing === 'ok' ? 'Conexão ok: o servidor respondeu e a lista de modelos foi atualizada.' : a.testing === 'fail' ? 'O teste falhou. Veja o estado acima.' : ''}
+      {health && info && (
+        <p className="text-xs" data-testid="provider-health" data-health={info.status}>
+          <span className="font-semibold">{health.label}.</span>{' '}
+          {info.checkedAt && info.status !== 'unverified' && <span className="text-muted-foreground">Última confirmação do provedor: {new Date(info.checkedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.</span>}
+        </p>
+      )}
+      <p className={cn('text-xs', a.testing === 'fail' ? 'text-warn' : 'text-muted-foreground')} role="status" data-testid="gateway-test-result" data-result={a.testResult?.result ?? ''}>
+        {testText}
       </p>
       <div className="space-y-1">
         <label htmlFor={`${id}-model`} className="text-sm font-semibold">
           3. Modelo
         </label>
         <NativeSelect id={`${id}-model`} value={a.modelId} onChange={(e) => a.setModel(e.target.value)} disabled={locked || where !== 'ready'} data-testid="ai-remote-model">
-          <option value="">{where === 'ready' ? 'Escolha um modelo' : where === 'no_key' ? 'Indisponível: sem chave no servidor' : 'Nenhum modelo disponível'}</option>
+          <option value="">{where === 'ready' ? 'Escolha um modelo' : where === 'no_key' ? (health ? `Indisponível: ${health.label}` : 'Indisponível: sem chave no servidor') : 'Nenhum modelo disponível'}</option>
           {where === 'ready' &&
-            a.models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.displayName}
-              </option>
-            ))}
+            a.models.map((m) => {
+              const off = info?.modelStatus?.[m.id] === 'unavailable';
+              return (
+                <option key={m.id} value={m.id} disabled={off}>
+                  {m.displayName}
+                  {off ? ' (indisponível para a chave do servidor)' : ''}
+                </option>
+              );
+            })}
         </NativeSelect>
         <p className="text-xs text-muted-foreground">Só aparecem os modelos que o servidor libera para este provedor.</p>
+        {modelUnavailable && (
+          <p className="text-xs text-warn" data-testid="model-unavailable">
+            Este modelo não existe ou não está liberado para a chave do servidor. Escolha outro modelo.
+          </p>
+        )}
       </div>
       {ready && info && (
         <div className="space-y-2 rounded-xl bg-secondary/60 p-2.5 text-sm" data-testid="setup-confirm">
@@ -428,7 +470,13 @@ function AccountProviderPicker({ a, locked }: { a: AssistantState; locked: boole
             <input type="radio" name="ai-provider-account" value={p.id} checked={a.wantedProvider === p.id} onChange={() => a.chooseProvider(p.id)} className="h-4 w-4 accent-[hsl(var(--primary))]" data-testid={`provider-${p.id}`} />
             <span>
               {p.displayName}
-              {!p.available && <span className="block text-xs font-normal text-muted-foreground">indisponível no momento</span>}
+              {p.status ? (
+                <span className="block text-xs font-normal text-muted-foreground" data-testid={`provider-health-${p.id}`}>
+                  {PROVIDER_SHORT[p.status]}
+                </span>
+              ) : (
+                !p.available && <span className="block text-xs font-normal text-muted-foreground">indisponível no momento</span>
+              )}
             </span>
           </label>
         ))}
@@ -436,6 +484,19 @@ function AccountProviderPicker({ a, locked }: { a: AssistantState; locked: boole
     </fieldset>
   );
 }
+
+/** Hotfix 21.2: estado curto do provedor na lista (o texto completo fica no quadro de estado). */
+const PROVIDER_SHORT: Record<NonNullable<AssistantState['gateway']['providers'][number]['status']>, string> = {
+  ok: 'disponível',
+  unverified: 'chave configurada, ainda não testada',
+  missing_key: 'indisponível: sem chave no servidor',
+  invalid_key_format: 'indisponível: chave com formato inválido',
+  auth_failed: 'indisponível: chave recusada',
+  forbidden: 'chave sem permissão',
+  billing: 'créditos ou faturamento',
+  rate_limited: 'limite de uso atingido',
+  network: 'falha de rede ao contatar',
+};
 
 /** P21: ajuda para quem administra o servidor: links oficiais das chaves e onde elas ficam (variáveis da Railway). */
 function AdminKeysHelp() {

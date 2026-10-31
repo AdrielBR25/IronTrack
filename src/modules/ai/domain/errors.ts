@@ -19,7 +19,14 @@ export type AIErrorCode =
   | 'rate_limited'
   | 'quota_exceeded'
   | 'gateway_unreachable'
-  | 'content_blocked';
+  | 'content_blocked'
+  // Hotfix 21.2: causas separadas do lado do provedor e da conta.
+  | 'email_not_verified'
+  | 'provider_auth_failed'
+  | 'provider_forbidden'
+  | 'provider_billing'
+  | 'model_unavailable'
+  | 'provider_unreachable';
 
 export const AI_ERROR_MESSAGES: Record<AIErrorCode, string> = {
   provider_not_found: 'O provedor de IA escolhido não está disponível neste aparelho.',
@@ -40,6 +47,12 @@ export const AI_ERROR_MESSAGES: Record<AIErrorCode, string> = {
   quota_exceeded: 'A cota de uso de IA desta credencial acabou por hoje.',
   gateway_unreachable: 'Não foi possível contatar o servidor seguro do IronTrack (gateway de IA). Verifique a internet e o endereço.',
   content_blocked: 'O provedor de IA recusou ou bloqueou esta resposta.',
+  email_not_verified: 'Confirme seu e-mail para usar a IA real pela conta. Nenhum dado foi enviado.',
+  provider_auth_failed: 'O provedor recusou a chave configurada no servidor (inválida ou revogada). Quem administra o servidor precisa trocar a chave.',
+  provider_forbidden: 'A chave configurada no servidor não tem permissão para este recurso do provedor.',
+  provider_billing: 'O provedor recusou por falta de créditos ou problema de faturamento da conta no provedor.',
+  model_unavailable: 'O modelo escolhido não existe ou não está liberado para a chave do servidor. Escolha outro modelo.',
+  provider_unreachable: 'O servidor do IronTrack não conseguiu contatar o provedor de IA (falha de rede). Tente de novo em instantes.',
 };
 
 export class AIError extends Error {

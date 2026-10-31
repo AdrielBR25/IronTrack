@@ -74,7 +74,7 @@ describe('OpenAI Responses — contrato', () => {
 
   it('erro de autenticação realista (401 invalid_api_key) não repassa a mensagem', async () => {
     const o = await outcome(openaiAdapter.generate(REQ, ctx(reply({ error: { message: 'Incorrect API key provided: sk-...abcd', type: 'invalid_request_error', code: 'invalid_api_key' } }, 401))));
-    expect(o).toEqual({ ok: false, code: 'provider_unavailable', usage: undefined });
+    expect(o).toEqual({ ok: false, code: 'provider_auth_failed', usage: undefined });
   });
 
   it('429 insufficient_quota / rate_limit_exceeded → provider_rate_limited', async () => {
@@ -111,7 +111,7 @@ describe('Anthropic Messages — contrato', () => {
 
   it('erros realistas: 401 authentication_error, 429 rate_limit_error, 529 overloaded_error', async () => {
     const err = (type: string) => ({ type: 'error', error: { type, message: 'detalhe' } });
-    expect(await outcome(anthropicAdapter.generate(REQ, ctx(reply(err('authentication_error'), 401))))).toMatchObject({ code: 'provider_unavailable' });
+    expect(await outcome(anthropicAdapter.generate(REQ, ctx(reply(err('authentication_error'), 401))))).toMatchObject({ code: 'provider_auth_failed' });
     expect(await outcome(anthropicAdapter.generate(REQ, ctx(reply(err('rate_limit_error'), 429))))).toMatchObject({ code: 'provider_rate_limited' });
     expect(await outcome(anthropicAdapter.generate(REQ, ctx(reply(err('overloaded_error'), 529))))).toMatchObject({ code: 'provider_failure' });
   });
@@ -149,11 +149,11 @@ describe('Gemini generateContent — contrato', () => {
     expect(await outcome(geminiAdapter.generate(REQ, ctx(reply({ candidates: [] }))))).toMatchObject({ code: 'invalid_response' });
   });
 
-  it('erros realistas: 400 API_KEY_INVALID → provider_failure; 403 PERMISSION_DENIED → provider_unavailable; 429 RESOURCE_EXHAUSTED → provider_rate_limited', async () => {
+  it('erros realistas: 400 API_KEY_INVALID → provider_failure; 403 PERMISSION_DENIED → provider_forbidden; 429 RESOURCE_EXHAUSTED → provider_rate_limited', async () => {
     const err = (code: number, status: string) => ({ error: { code, message: 'detalhe', status } });
     // O Gemini devolve chave inválida como 400 INVALID_ARGUMENT: sem ler o corpo, vira falha do provedor.
     expect(await outcome(geminiAdapter.generate(REQ, ctx(reply(err(400, 'INVALID_ARGUMENT'), 400))))).toMatchObject({ code: 'provider_failure' });
-    expect(await outcome(geminiAdapter.generate(REQ, ctx(reply(err(403, 'PERMISSION_DENIED'), 403))))).toMatchObject({ code: 'provider_unavailable' });
+    expect(await outcome(geminiAdapter.generate(REQ, ctx(reply(err(403, 'PERMISSION_DENIED'), 403))))).toMatchObject({ code: 'provider_forbidden' });
     expect(await outcome(geminiAdapter.generate(REQ, ctx(reply(err(429, 'RESOURCE_EXHAUSTED'), 429))))).toMatchObject({ code: 'provider_rate_limited' });
   });
 });

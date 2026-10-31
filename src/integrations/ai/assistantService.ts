@@ -5,7 +5,7 @@
 // Sem gateway conectado, nada sai do aparelho e o app funciona offline como antes.
 import { AIError, AIService, ProviderRegistry, type AIProviderDescriptor } from '@/modules/ai';
 import { MockAIProvider } from '@/modules/ai/adapters/MockAIProvider';
-import { GatewayAIProvider, gatewayErrorCode, parseGatewayCatalog, type GatewayTransport } from '@/modules/ai/adapters/GatewayAIProvider';
+import { GatewayAIProvider, PROVIDER_HEALTH, gatewayErrorCode, parseGatewayCatalog, type GatewayProviderEntry, type GatewayTransport, type ModelHealth, type ProviderHealth } from '@/modules/ai/adapters/GatewayAIProvider';
 import { createAccountTransport, createGatewayTransport, isAccessTokenFormat, validateGatewayUrl } from './gatewayTransport';
 
 /** P21: rótulo do destino quando a IA é usada pela conta (no lugar do endereço do gateway). */
@@ -36,9 +36,29 @@ export const CATALOG_TIMEOUT_MS = 10_000;
 
 /** Provedor remoto oferecido pelo gateway conectado. */
 export interface RemoteProviderInfo extends AIProviderDescriptor {
-  /** false = permitido no gateway, mas sem chave configurada lá. */
+  /** false = permitido no gateway, mas sem chave utilizável lá. */
   available: boolean;
+  /** Hotfix 21.2 (IA pela conta): diagnóstico do provedor e de cada modelo. Ausente no gateway P06. */
+  status?: ProviderHealth;
+  checkedAt?: string;
+  modelStatus?: Record<string, ModelHealth>;
 }
+
+/** Hotfix 21.2: resultado do "Testar" da IA pela conta (consulta sem custo ao provedor, feita pelo servidor). */
+export interface AccountTestResult {
+  providerId: string;
+  modelId: string;
+  /** 'ok', 'not_supported' ou o código de erro normalizado do servidor (nunca texto do provedor). */
+  result: string;
+  status?: ProviderHealth;
+  modelStatus?: ModelHealth;
+  checkedAt?: string;
+}
+
+export type { ModelHealth, ProviderHealth };
+
+/** Tempo limite do "Testar" (o servidor espera até 10 s pelo provedor). */
+export const TEST_TIMEOUT_MS = 15_000;
 
 export interface GatewayConnection {
   origin: string;
@@ -69,6 +89,11 @@ export interface AssistantComposition {
    * Railway e a cota é por conta. Busca só o catálogo (sem dados pessoais) e registra os provedores habilitados.
    */
   connectAccount(signal?: AbortSignal): Promise<GatewayConnection>;
+  /**
+   * Hotfix 21.2: "Testar" da IA pela conta. O servidor faz uma consulta SEM custo ao provedor (chave aceita? modelo
+   * existe e está liberado?) e o catálogo é buscado de novo com o estado atualizado. Nenhum dado pessoal sai.
+   */
+  testAccount(providerId: string, modelId: string | undefined, signal?: AbortSignal): Promise<{ test: AccountTestResult; connection: GatewayConnection }>;
 }
 
 export interface AssistantCompositionOptions {
@@ -95,7 +120,7 @@ export function createAssistantService(opts: AssistantCompositionOptions = {}): 
   const service = new AIService({ registry, ...(opts.now ? { now: opts.now } : {}), ...(opts.randomId ? { randomId: opts.randomId } : {}) });
   let remoteIds: string[] = [];
   let generation = 0;
-  let current: { origin: string; transport: GatewayTransport } | null = null;
+  let current: { origin: string; transport: GatewayTransport; account?: boolean } | null = null;
 
   const disconnectGateway = () => {
     generation++;
@@ -103,6 +128,27 @@ export function createAssistantService(opts: AssistantCompositionOptions = {}): 
     remoteIds = [];
     current = null;
   };
+
+  /** Registra os provedores do catálogo (substituindo os anteriores) e devolve as descrições públicas. */
+  function registerEntries(entries: GatewayProviderEntry[], transport: GatewayTransport, origin: string): RemoteProviderInfo[] {
+    for (const id of remoteIds) registry.unregister(id);
+    remoteIds = [];
+    const infos: RemoteProviderInfo[] = [];
+    for (const entry of entries) {
+      if (registry.has(entry.id)) continue;
+      registry.register(new GatewayAIProvider({ entry, transport, gatewayOrigin: origin }));
+      remoteIds.push(entry.id);
+      const d = service.listProviders().find((p) => p.id === entry.id)!;
+      infos.push({
+        ...d,
+        available: entry.available,
+        ...(entry.status ? { status: entry.status } : {}),
+        ...(entry.checkedAt ? { checkedAt: entry.checkedAt } : {}),
+        ...(entry.modelStatus ? { modelStatus: entry.modelStatus } : {}),
+      });
+    }
+    return infos;
+  }
 
   /** Catálogo do gateway com tempo limite e cancelamento. */
   async function fetchCatalog(transport: GatewayTransport, signal?: AbortSignal) {
@@ -141,16 +187,44 @@ export function createAssistantService(opts: AssistantCompositionOptions = {}): 
       const transport = opts.accountTransportFactory ? opts.accountTransportFactory() : createAccountTransport(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {});
       const entries = await fetchCatalog(transport, signal);
       if (mine !== generation) throw new AIError('cancelled');
-      const infos: RemoteProviderInfo[] = [];
-      for (const entry of entries) {
-        if (registry.has(entry.id)) continue;
-        registry.register(new GatewayAIProvider({ entry, transport, gatewayOrigin: ACCOUNT_GATEWAY_LABEL }));
-        remoteIds.push(entry.id);
-        const d = service.listProviders().find((p) => p.id === entry.id)!;
-        infos.push({ ...d, available: entry.available });
-      }
-      current = { origin: ACCOUNT_GATEWAY_LABEL, transport };
+      const infos = registerEntries(entries, transport, ACCOUNT_GATEWAY_LABEL);
+      current = { origin: ACCOUNT_GATEWAY_LABEL, transport, account: true };
       return { origin: ACCOUNT_GATEWAY_LABEL, providers: infos };
+    },
+    async testAccount(providerId, modelId, signal) {
+      if (!current?.account) throw new AIError('gateway_unreachable');
+      const mine = generation;
+      const { transport } = current;
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), TEST_TIMEOUT_MS);
+      const onAbort = () => ctrl.abort();
+      signal?.addEventListener('abort', onAbort, { once: true });
+      let res;
+      try {
+        res = await transport({ method: 'POST', path: '/v1/test', body: { provider: providerId, ...(modelId ? { model: modelId } : {}) }, signal: ctrl.signal });
+      } catch (e) {
+        if (signal?.aborted) throw new AIError('cancelled');
+        if (ctrl.signal.aborted) throw new AIError('timeout');
+        throw e;
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+      }
+      if (res.status !== 200) throw new AIError(gatewayErrorCode(res.status, res.body));
+      const b = res.body as Record<string, unknown> | null;
+      if (!b || typeof b !== 'object' || b.provider !== providerId || typeof b.model !== 'string' || typeof b.result !== 'string' || !/^[a-z_]{1,40}$/.test(b.result)) throw new AIError('invalid_response');
+      const test: AccountTestResult = {
+        providerId,
+        modelId: b.model,
+        result: b.result,
+        ...(typeof b.status === 'string' && (PROVIDER_HEALTH as readonly string[]).includes(b.status) ? { status: b.status as ProviderHealth } : {}),
+        ...(b.modelStatus === 'ok' || b.modelStatus === 'unavailable' || b.modelStatus === 'unverified' ? { modelStatus: b.modelStatus } : {}),
+        ...(typeof b.checkedAt === 'string' && b.checkedAt.length <= 40 ? { checkedAt: b.checkedAt } : {}),
+      };
+      const entries = await fetchCatalog(transport, signal);
+      if (mine !== generation) throw new AIError('cancelled');
+      const infos = registerEntries(entries, transport, ACCOUNT_GATEWAY_LABEL);
+      return { test, connection: { origin: ACCOUNT_GATEWAY_LABEL, providers: infos } };
     },
     async connectGateway({ url, token }, signal) {
       const check = validateGatewayUrl(url);
@@ -163,14 +237,7 @@ export function createAssistantService(opts: AssistantCompositionOptions = {}): 
       const entries = await fetchCatalog(transport, signal);
       // Outra conexão (ou desconexão) começou enquanto esta esperava: descarta.
       if (mine !== generation) throw new AIError('cancelled');
-      const infos: RemoteProviderInfo[] = [];
-      for (const entry of entries) {
-        if (registry.has(entry.id)) continue;
-        registry.register(new GatewayAIProvider({ entry, transport, gatewayOrigin: check.origin }));
-        remoteIds.push(entry.id);
-        const d = service.listProviders().find((p) => p.id === entry.id)!;
-        infos.push({ ...d, available: entry.available });
-      }
+      const infos = registerEntries(entries, transport, check.origin);
       current = { origin: check.origin, transport };
       return { origin: check.origin, providers: infos };
     },
