@@ -10,3 +10,8 @@ test-results
 .env.*
 services/**/tests
 tests
+dist-cloud
+playwright-report-cloud
+e2e
+e2e-cloud
+.railway/node_modules

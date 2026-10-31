@@ -1,0 +1,115 @@
+# Caddy do irontrack-web (Prompt 21.1). Duas tarefas, uma origem:
+#   /api/v1/*  → irontrack-api pela rede privada da Railway (http, criptografado pela própria rede);
+#   o resto    → arquivos do app (React/Vite/PWA) em /srv, com HashRouter (só "/" e arquivos reais).
+# Variáveis conferidas por entrypoint.sh: PORT, API_HOST, API_PORT, TRUSTED_PROXIES.
+{
+	admin off
+	# Encerramento gracioso: termina as requisições em andamento quando a Railway troca a versão.
+	grace_period 10s
+	persist_config off
+	# A borda da Railway termina o HTTPS; aqui é só HTTP.
+	auto_https off
+	servers {
+		trusted_proxies static {$TRUSTED_PROXIES}
+		# Sem cabeçalhos enormes nem conexões presas.
+		max_header_size 32KB
+		timeouts {
+			read_body 30s
+			read_header 10s
+			write 90s
+			idle 2m
+		}
+	}
+	log {
+		format json
+	}
+}
+
+# Cabeçalhos de segurança das páginas do app (a API manda os dela). CSP: tudo da própria origem; a API também é da
+# própria origem. 'unsafe-inline' só em estilos (animações e Tailwind geram atributos style); scripts nunca.
+(app_headers) {
+	header {
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		X-Frame-Options "DENY"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		Cross-Origin-Opener-Policy "same-origin"
+		-Server
+	}
+}
+
+:{$PORT} {
+	log {
+		# JSON, sem cabeçalhos (cookie, CSRF) nem o token de links de e-mail nos logs de acesso.
+		format filter {
+			wrap json
+			fields {
+				request>headers delete
+				request>uri query {
+					delete token
+				}
+				resp_headers delete
+			}
+		}
+	}
+
+	# Verificação de saúde do próprio serviço web (não depende da API).
+	handle /healthz {
+		log_skip
+		header Cache-Control "no-store"
+		respond "ok" 200
+	}
+
+	# ---- API: só /api/v1/*, sempre para o mesmo destino fixo (não é um proxy aberto).
+	handle /api/v1/* {
+		request_body {
+			# A API aceita até 4 MB (importação/sincronização); um pouco de folga para o cabeçalho JSON.
+			max_size 5MB
+		}
+		reverse_proxy {$API_HOST}:{$API_PORT} {
+			# X-Forwarded-For: a borda (confiável) já trouxe o IP do cliente; o Caddy acrescenta o IP da borda.
+			# A API usa TRUST_PROXY_HOPS=2 (penúltimo da lista). Host e cookies seguem como vieram.
+			header_up -X-Real-IP
+			header_up -Forwarded
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 70s
+			}
+			# Sem nova tentativa automática: POST de sincronização/importação não deve ser repetido pelo proxy.
+		}
+	}
+
+	# Qualquer outro /api é recusado aqui (nada de cair na página do app).
+	handle /api/* {
+		header Content-Type "application/json; charset=utf-8"
+		header Cache-Control "no-store"
+		respond `{"error":{"code":"not_found","message":"Rota não encontrada."}}` 404
+	}
+
+	# ---- App estático. Arquivos com hash no nome: cache longo e 404 de verdade se não existirem (um build antigo pedindo
+	# um arquivo que sumiu não pode receber o HTML guardado por um ano).
+	handle /assets/* {
+		import app_headers
+		root * /srv
+		encode zstd gzip
+		header Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+
+	handle {
+		import app_headers
+		root * /srv
+		encode zstd gzip
+		# HTML, service worker e manifesto: sempre conferidos (atualização do PWA).
+		@fresh path / /index.html /sw.js /registerSW.js /manifest.webmanifest
+		header @fresh Cache-Control "no-cache"
+		@manifest path /manifest.webmanifest
+		header @manifest Content-Type "application/manifest+json"
+		# HashRouter: as rotas ficam depois do "#", então o servidor só vê "/" e arquivos reais.
+		# Caminho desconhecido → index.html (links antigos ou digitados não dão 404).
+		try_files {path} /index.html
+		file_server
+	}
+}

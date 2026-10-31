@@ -42,7 +42,17 @@ async function stop(sig: string) {
 process.on('SIGTERM', () => void stop('SIGTERM'));
 process.on('SIGINT', () => void stop('SIGINT'));
 
-api.server.listen(cfg.port, cfg.host, () => {
+const onListening = () => {
   const a = api.server.address();
-  err(`ouvindo na porta ${a && typeof a === 'object' ? a.port : cfg.port} (${cfg.env}).`);
+  err(`ouvindo em ${a && typeof a === 'object' ? `${a.address} porta ${a.port}` : cfg.port} (${cfg.env}).`);
+};
+// HOST "::" (rede privada da Railway, IPv4 e IPv6). Num ambiente sem IPv6, cai para "0.0.0.0" em vez de não subir.
+api.server.once('error', (e: NodeJS.ErrnoException) => {
+  if (cfg.host === '::' && e.code === 'EAFNOSUPPORT') {
+    err('IPv6 indisponível neste ambiente; ouvindo só em IPv4 (0.0.0.0).');
+    api.server.listen(cfg.port, '0.0.0.0', onListening);
+    return;
+  }
+  throw e;
 });
+api.server.listen(cfg.port, cfg.host, onListening);
