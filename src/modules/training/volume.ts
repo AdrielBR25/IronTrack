@@ -1,5 +1,5 @@
 import type { SessionExercise, SessionSet, WorkoutSession } from './types';
-import { isValidDistanceM, isValidDurationSec } from './exerciseModel';
+import { isValidDistanceM, isValidDurationSec, setParts } from './exerciseModel';
 
 /** Série válida = concluída, não é aquecimento, com repetições > 0. Base de volume, recordes e 1RM antigos. */
 export function isValidWorkingSet(s: SessionSet): boolean {
@@ -16,10 +16,10 @@ export function isCompletedWorkSet(s: SessionSet): boolean {
   return (s.reps ?? 0) > 0 || isValidDurationSec(s.durationSec) || isValidDistanceM(s.distance);
 }
 
-/** Volume (kg) de uma série = carga × repetições, apenas para séries válidas. */
+/** Volume (kg) de uma série = carga × repetições, apenas para séries válidas. Série em partes soma cada parte. */
 export function setVolume(s: SessionSet): number {
   if (!isValidWorkingSet(s)) return 0;
-  return (s.weight ?? 0) * (s.reps ?? 0);
+  return setParts(s).reduce((acc, p) => acc + (p.weight ?? 0) * (p.reps ?? 0), 0);
 }
 
 export function exerciseVolume(ex: SessionExercise): number {
@@ -84,23 +84,27 @@ export function computeRecords(sessions: WorkoutSession[]): Map<string, Exercise
       r.name = ex.name;
       for (const set of ex.sets) {
         if (!isValidWorkingSet(set)) continue;
-        const w = set.weight ?? 0;
-        const reps = set.reps ?? 0;
         const ts = set.completedAt ?? s.startedAt;
-        if (w > r.maxWeight || (w === r.maxWeight && reps > r.maxWeightReps)) {
-          r.maxWeight = w;
-          r.maxWeightReps = reps;
-          r.maxWeightDate = ts;
-        }
-        const e = estimate1RM(w, reps);
-        if (e > r.best1RM) {
-          r.best1RM = e;
-          r.best1RMDate = ts;
-        }
-        if (reps > r.maxReps) {
-          r.maxReps = reps;
-          r.maxRepsWeight = w;
-          r.maxRepsDate = ts;
+        // Série em partes: cada parte conta como carga × repetições própria (8 × 35 + 4 × 40 → 35×8 e 40×4).
+        for (const part of setParts(set)) {
+          const w = part.weight ?? 0;
+          const reps = part.reps ?? 0;
+          if (reps <= 0) continue;
+          if (w > r.maxWeight || (w === r.maxWeight && reps > r.maxWeightReps)) {
+            r.maxWeight = w;
+            r.maxWeightReps = reps;
+            r.maxWeightDate = ts;
+          }
+          const e = estimate1RM(w, reps);
+          if (e > r.best1RM) {
+            r.best1RM = e;
+            r.best1RMDate = ts;
+          }
+          if (reps > r.maxReps) {
+            r.maxReps = reps;
+            r.maxRepsWeight = w;
+            r.maxRepsDate = ts;
+          }
         }
       }
       const vol = exerciseVolume(ex);
@@ -121,8 +125,9 @@ export function sessionPRs(session: WorkoutSession, previous: WorkoutSession[]):
     const valid = ex.sets.filter(isValidWorkingSet);
     if (!valid.length) continue;
     const r = before.get(ex.exerciseKey);
-    const maxW = Math.max(...valid.map((s) => s.weight ?? 0));
-    const best = Math.max(...valid.map((s) => estimate1RM(s.weight ?? 0, s.reps ?? 0)));
+    const parts = valid.flatMap(setParts).filter((p) => (p.reps ?? 0) > 0);
+    const maxW = Math.max(...parts.map((p) => p.weight ?? 0));
+    const best = Math.max(...parts.map((p) => estimate1RM(p.weight ?? 0, p.reps ?? 0)));
     if (!r) continue; // primeira vez não conta como recorde
     if (maxW > r.maxWeight || best > r.best1RM + 0.01) prs.push(ex.name);
   }

@@ -26,6 +26,11 @@ export interface SetObs {
   side?: Side;
   /** P10: assistência em kg (> 0) registrada na série. */
   assistanceKg?: number;
+  /**
+   * Partes adicionais da mesma série com outra carga (série em partes, ex.: 8 × 35 kg + 4 × 40 kg). `reps`/`load` são
+   * a primeira parte. Ausente = série de uma parte só. A série continua contando como uma série.
+   */
+  parts?: { reps: number; load: number | null }[];
 }
 
 /** P10: registro de cardio de um exercício numa sessão (somas das séries válidas). */

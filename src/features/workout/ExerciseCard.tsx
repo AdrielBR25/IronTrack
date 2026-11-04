@@ -1,7 +1,7 @@
 import { ArrowDown, ArrowUp, Check, ChevronDown, MoreVertical, Plus, Repeat, SkipForward, TrendingDown, TrendingUp, Minus as MinusIcon, Info } from 'lucide-react';
 import { useState } from 'react';
 import type { ExerciseModelFields, SessionExercise, SessionSet, Settings } from '@/lib/types';
-import { type ExerciseHistoryEntry, suggestProgression, EQUIPMENT_LABEL, MODALITY_LABEL, exerciseMeasures } from '@/modules/training';
+import { type ExerciseHistoryEntry, suggestProgression, EQUIPMENT_LABEL, MODALITY_LABEL, exerciseMeasures, previousSameSet, segmentsOf } from '@/modules/training';
 import { planSummary, setSummary } from './modelFormat';
 import { cn, fmtClock } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -20,26 +20,33 @@ export function summarizeSets(sets: SessionSet[], fmtW: (n: number | null | unde
 
 /** Exercício ou série com algum dado do modelo v3. */
 const usesModel = (ex: ExerciseModelFields, set: SessionSet) =>
-  !!(ex.modality || ex.laterality || ex.loadMode) || set.durationSec != null || set.distance != null || set.side != null || set.assistanceKg != null;
+  !!(ex.modality || ex.laterality || ex.loadMode) || set.durationSec != null || set.distance != null || set.side != null || set.assistanceKg != null || segmentsOf(set).length > 0;
 
 function SetRow({
   ex,
   set,
   index,
   current,
+  previous,
   onSelect,
 }: {
   ex: SessionExercise;
   set: SessionSet;
   index: number;
   current: boolean;
+  /**
+   * Referência da comparação de carga: a mesma série do último treino (série 2 com a série 2). `undefined` = sem
+   * último treino (compara com a carga planejada da ficha); `null` = há último treino, mas não esta série (sem badge).
+   */
+  previous: SessionSet | null | undefined;
   onSelect: () => void;
 }) {
   const { fmtW } = useUnits();
   const done = set.status === 'done';
   const skipped = set.status === 'skipped';
   const ms = exerciseMeasures(ex);
-  const wDelta = done && ms.weight !== 'none' && set.plannedWeight != null && set.weight != null ? set.weight - set.plannedWeight : null;
+  const refWeight = previous === undefined ? set.plannedWeight : previous?.weight;
+  const wDelta = done && ms.weight !== 'none' && refWeight != null && set.weight != null ? set.weight - refWeight : null;
   const repsState = done && ms.reps && set.type === 'normal' && set.reps != null ? (set.reps > ex.repMax ? 'above' : set.reps < ex.repMin ? 'below' : 'in') : null;
   return (
     <button
@@ -72,7 +79,12 @@ function SetRow({
         </span>
       </span>
       {wDelta !== null && wDelta !== 0 && (
-        <Badge variant={wDelta > 0 ? 'default' : 'warn'} className="tabular">
+        <Badge
+          variant={wDelta > 0 ? 'default' : 'warn'}
+          className="tabular"
+          title={previous ? 'Comparado com a mesma série do último treino' : 'Comparado com a carga planejada'}
+          data-testid="set-weight-delta"
+        >
           {wDelta > 0 ? <TrendingUp /> : <TrendingDown />}
           {wDelta > 0 ? '+' : ''}
           {fmtW(wDelta)}
@@ -220,7 +232,8 @@ export function ExerciseCard({
           <div className="space-y-1.5">
             {ex.sets.map((s) => {
               if (s.type === 'normal') n++;
-              return <SetRow key={s.id} ex={ex} set={s} index={n} current={s.id === currentSetId} onSelect={() => onSelectSet(s)} />;
+              const previous = history[0] ? (previousSameSet(ex, s, history[0].sets) ?? null) : undefined;
+              return <SetRow key={s.id} ex={ex} set={s} index={n} current={s.id === currentSetId} previous={previous} onSelect={() => onSelectSet(s)} />;
             })}
           </div>
 

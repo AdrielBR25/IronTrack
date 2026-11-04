@@ -2,7 +2,7 @@
 // Puro: recebe as cópias da sessão e devolve as séries classificadas e as medidas da sessão. Nada é gravado e o
 // snapshot da sessão nunca é alterado.
 import { canonicalE1rm, localDate } from '@/modules/analytics';
-import { DISTANCE_UNITS, LATERALITIES, LOAD_MODES, isSetSide, isValidAssistanceKg, isValidDistanceM, isValidDurationSec, type SessionExercise, type SessionSet, type WorkoutSession } from '@/modules/training';
+import { DISTANCE_UNITS, LATERALITIES, LOAD_MODES, isSetSide, isValidAssistanceKg, isValidDistanceM, isValidDurationSec, segmentsOf, type SessionExercise, type SessionSet, type WorkoutSession } from '@/modules/training';
 import { measureFamilyOf } from './identity';
 import type { MeasureFamily, PerfMetrics, PerfObservation, PerfSet, PerfSetKind } from './types';
 
@@ -48,7 +48,9 @@ export function classifySets(family: MeasureFamily, sets: readonly SessionSet[])
       ordinal = (counters.get(k) ?? 0) + 1;
       counters.set(k, ordinal);
     }
+    const parts = kind === 'trabalho' || kind === 'drop' ? segmentsOf(s).filter((p) => isPosInt(p.reps)).map((p) => ({ loadKg: isPos(p.weight) ? p.weight : null, reps: p.reps as number })) : [];
     out.push({
+      ...(parts.length ? { parts } : {}),
       id: String(s.id),
       kind,
       type: s.type,
@@ -106,20 +108,23 @@ export function metricsOf(family: MeasureFamily, sets: readonly PerfSet[]): Perf
     m.workSets++;
     if (s.kind === 'trabalho') m.normalSets++;
     if (family === 'carga') {
-      const reps = s.reps!;
-      m.totalReps = (m.totalReps ?? 0) + reps;
-      if (m.bestReps === null || reps > m.bestReps || (reps === m.bestReps && (s.loadKg ?? 0) > (m.bestRepsLoadKg ?? 0))) {
-        m.bestReps = reps;
-        m.bestRepsLoadKg = s.loadKg;
+      // Série em partes: cada parte entra como carga × repetições própria; a série conta uma vez.
+      for (const p of [{ loadKg: s.loadKg, reps: s.reps! }, ...(s.parts ?? [])]) {
+        const reps = p.reps;
+        m.totalReps = (m.totalReps ?? 0) + reps;
+        if (m.bestReps === null || reps > m.bestReps || (reps === m.bestReps && (p.loadKg ?? 0) > (m.bestRepsLoadKg ?? 0))) {
+          m.bestReps = reps;
+          m.bestRepsLoadKg = p.loadKg;
+        }
+        if (p.loadKg === null) continue;
+        m.volumeKg = (m.volumeKg ?? 0) + p.loadKg * reps;
+        if (m.topLoadKg === null || greater(p.loadKg, m.topLoadKg) || (same(p.loadKg, m.topLoadKg) && reps > (m.topLoadReps ?? 0))) {
+          m.topLoadKg = p.loadKg;
+          m.topLoadReps = reps;
+        }
+        const e = canonicalE1rm(p.loadKg, reps);
+        if (e.ok && (m.e1rm === null || greater(e.valueKg, m.e1rm.valueKg))) m.e1rm = { valueKg: e.valueKg, kind: e.kind, loadKg: e.loadKg, reps: e.reps, method: e.method };
       }
-      if (s.loadKg === null) continue;
-      m.volumeKg = (m.volumeKg ?? 0) + s.loadKg * reps;
-      if (m.topLoadKg === null || greater(s.loadKg, m.topLoadKg) || (same(s.loadKg, m.topLoadKg) && reps > (m.topLoadReps ?? 0))) {
-        m.topLoadKg = s.loadKg;
-        m.topLoadReps = reps;
-      }
-      const e = canonicalE1rm(s.loadKg, reps);
-      if (e.ok && (m.e1rm === null || greater(e.valueKg, m.e1rm.valueKg))) m.e1rm = { valueKg: e.valueKg, kind: e.kind, loadKg: e.loadKg, reps: e.reps, method: e.method };
     } else if (family === 'corporal') {
       if (s.durationSec !== null) {
         m.bestDurationSec = Math.max(m.bestDurationSec ?? 0, s.durationSec);

@@ -1,7 +1,7 @@
 // Métricas de treino calculadas a partir das sessões concluídas (ver docs/ANALYTICS_TREINAMENTO.md).
 // Funções puras e determinísticas. Uma passada normaliza o histórico (O(séries)); cada período
 // reaproveita esse índice e só percorre as sessões da janela.
-import { LATERALITIES, LOAD_MODES, MODALITIES, isSetSide, isValidAssistanceKg, isValidDistanceM, isValidDurationSec, type SessionExercise, type WorkoutSession } from '@/modules/training';
+import { LATERALITIES, LOAD_MODES, MODALITIES, isSetSide, isValidAssistanceKg, isValidDistanceM, isValidDurationSec, segmentsOf, type SessionExercise, type WorkoutSession } from '@/modules/training';
 import { classifyExercise, type ExerciseClassification, type ExplicitExerciseAttributes } from './classification';
 import { bodyweightMetrics, cardioMetrics, compareSides, timedMetrics } from './modalities';
 import { createMuscleNormalizer, normalizeMuscleGroup, type NormalizedMuscle } from './muscles';
@@ -127,6 +127,10 @@ export function normalizeSessions(sessions: readonly WorkoutSession[]): Normaliz
         const obs: SetObs = { reps: set.reps, load };
         if (isSetSide(set.side)) obs.side = set.side;
         if (isValidAssistanceKg(set.assistanceKg) && set.assistanceKg > 0) obs.assistanceKg = set.assistanceKg;
+        const parts = segmentsOf(set)
+          .filter((p) => isPositiveNumber(p.reps))
+          .map((p) => ({ reps: p.reps as number, load: isPositiveNumber(p.weight) ? p.weight : null }));
+        if (parts.length) obs.parts = parts;
         sets.push(obs);
       }
       if (!sets.length && !durations.length && !cardio) continue;
@@ -176,26 +180,35 @@ export function exercisePoint(session: Pick<SessionObs, 'ts' | 'date'>, ex: Exer
   let bestReps = 0;
   let bestUnloadedReps: number | null = null;
   const topLoadByBand: Partial<Record<RepBand, number>> = {};
-  for (const s of ex.sets) {
-    reps += s.reps;
-    bestReps = Math.max(bestReps, s.reps);
-    if (s.load === null) {
-      // P10: repetições com assistência não se comparam com repetições só com o corpo.
-      if (s.assistanceKg === undefined) bestUnloadedReps = Math.max(bestUnloadedReps ?? 0, s.reps);
-      continue;
+  for (const set of ex.sets) {
+    // Série em partes: cada parte é uma carga × repetições própria; o volume da série soma as partes e ela conta uma vez.
+    let setVolume = 0;
+    let loaded = false;
+    for (const s of [{ reps: set.reps, load: set.load }, ...(set.parts ?? [])]) {
+      reps += s.reps;
+      bestReps = Math.max(bestReps, s.reps);
+      if (s.load === null) {
+        // P10: repetições com assistência não se comparam com repetições só com o corpo.
+        if (set.assistanceKg === undefined) bestUnloadedReps = Math.max(bestUnloadedReps ?? 0, s.reps);
+        continue;
+      }
+      const v = s.load * s.reps;
+      volume += v;
+      setVolume += v;
+      loaded = true;
+      if (topLoad === null || s.load > topLoad || (s.load === topLoad && s.reps > (topLoadReps ?? 0))) {
+        topLoad = s.load;
+        topLoadReps = s.reps;
+      }
+      const est = canonicalE1rmKg(s.load, s.reps);
+      if (est !== null) e1rm = Math.max(e1rm ?? 0, est);
+      const band = repBand(s.reps);
+      topLoadByBand[band] = Math.max(topLoadByBand[band] ?? 0, s.load);
     }
-    const v = s.load * s.reps;
-    volume += v;
-    loadedSets++;
-    if (topLoad === null || s.load > topLoad || (s.load === topLoad && s.reps > (topLoadReps ?? 0))) {
-      topLoad = s.load;
-      topLoadReps = s.reps;
+    if (loaded) {
+      loadedSets++;
+      bestSetVolume = Math.max(bestSetVolume ?? 0, setVolume);
     }
-    bestSetVolume = Math.max(bestSetVolume ?? 0, v);
-    const est = canonicalE1rmKg(s.load, s.reps);
-    if (est !== null) e1rm = Math.max(e1rm ?? 0, est);
-    const band = repBand(s.reps);
-    topLoadByBand[band] = Math.max(topLoadByBand[band] ?? 0, s.load);
   }
   const durations = ex.durations ?? [];
   return {

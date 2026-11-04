@@ -1,4 +1,4 @@
-import type { DistanceUnit, ExerciseLaterality, ExerciseModelFields, LoadMode, SessionSet, SetSide, TrainingModality } from './types';
+import type { DistanceUnit, ExerciseLaterality, ExerciseModelFields, LoadMode, SessionSet, SetSegment, SetSide, TrainingModality } from './types';
 
 // Modelo de exercícios v3 (IronTrack 2.0 F01/P10): valores permitidos, limites, validação e quais campos cada
 // modalidade registra. Funções puras. Documentação: docs/MIGRACAO_EXERCICIOS_V3.md e docs/MODELO_EXERCICIOS_V2.md.
@@ -114,6 +114,15 @@ export function setModelIssues(set: Partial<Record<keyof SessionSet, unknown>>, 
   if (present(set.distance) && !isValidDistanceM(set.distance)) err('distance', 'distância inválida (maior que zero e até 1 000 km)');
   if (present(set.assistanceKg) && !isValidAssistanceKg(set.assistanceKg)) err('assistanceKg', `assistência inválida (de 0 a ${MODEL_LIMITS.maxAssistanceKg} kg)`);
   if (present(set.side) && !isSetSide(set.side)) err('side', `lado inválido (${String(set.side)})`);
+  if (
+    present(set.segments) &&
+    (!Array.isArray(set.segments) ||
+      set.segments.some((p: unknown) => {
+        const x = p as { weight?: unknown; reps?: unknown } | null;
+        return !x || typeof x !== 'object' || (present(x.weight) && !(finite(x.weight) && x.weight >= 0)) || (present(x.reps) && !(finite(x.reps) && x.reps >= 0));
+      }))
+  )
+    err('segments', 'partes da série inválidas (carga e repetições não negativas)');
   if (out.length) return out;
   if (finite(set.assistanceKg) && set.assistanceKg > 0 && finite(set.weight) && set.weight > 0) warn('assistanceKg', 'série com carga adicional e assistência ao mesmo tempo');
   if (present(set.assistanceKg) && ex.loadMode !== 'assistida') warn('assistanceKg', 'assistência registrada num exercício que não é assistido');
@@ -156,6 +165,40 @@ export function exerciseMeasures(e: ExerciseModelFields): ExerciseMeasures {
   };
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// Série em partes (várias cargas na mesma série, ex.: 8 × 35 kg + 4 × 40 kg). Ver docs/SERIES_POR_PARTES.md.
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Máximo de partes adicionais numa série (além da primeira). */
+export const MAX_SET_SEGMENTS = 5;
+
+/** A modalidade registra carga × repetições, então aceita partes com outra carga na mesma série. */
+export function allowsSegments(e: ExerciseModelFields): boolean {
+  const ms = exerciseMeasures(e);
+  return ms.reps && ms.weight !== 'none' && !ms.duration;
+}
+
+/** Partes adicionais bem formadas da série (lista vazia quando não há). Lê com cautela registros de backup. */
+export function segmentsOf(set: Pick<SessionSet, 'segments'> | null | undefined): SetSegment[] {
+  const raw = (set as { segments?: unknown } | null | undefined)?.segments;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((x): x is SetSegment => !!x && typeof x === 'object').map((x) => ({ weight: finite(x.weight) ? x.weight : null, reps: finite(x.reps) ? x.reps : null }));
+}
+
+/**
+ * Todas as partes da série com carga × repetições: a primeira (`weight` × `reps`) e as adicionais com repetições > 0.
+ * Base de volume, recordes e 1RM. Série sem `segments` devolve só ela mesma (comportamento de antes).
+ */
+export function setParts(set: Pick<SessionSet, 'weight' | 'reps' | 'segments'>): SetSegment[] {
+  const extra = segmentsOf(set).filter((p) => (p.reps ?? 0) > 0);
+  return [{ weight: set.weight, reps: set.reps }, ...extra];
+}
+
+/** Repetições somadas de todas as partes. */
+export function totalSetReps(set: Pick<SessionSet, 'weight' | 'reps' | 'segments'>): number {
+  return setParts(set).reduce((acc, p) => acc + (finite(p.reps) && p.reps > 0 ? p.reps : 0), 0);
+}
+
 /** Copia só os metadados definidos (sem criar chaves `undefined` que mudariam o registro gravado). */
 export function pickModelFields(e: ExerciseModelFields): ExerciseModelFields {
   const out: ExerciseModelFields = {};
@@ -182,6 +225,13 @@ export function setCompletionErrors(ex: ExerciseModelFields, set: SessionSet): s
   if (ms.duration && !ms.distance && !isValidDurationSec(set.durationSec)) errs.push('Informe a duração da série.');
   if (ms.distance && !isValidDurationSec(set.durationSec) && !isValidDistanceM(set.distance)) errs.push('Informe a duração ou a distância.');
   if (finite(set.assistanceKg) && set.assistanceKg > 0 && finite(set.weight) && set.weight > 0) errs.push('Use carga adicional ou assistência, não as duas.');
+  const parts = segmentsOf(set);
+  if (parts.length) {
+    if (!allowsSegments(ex)) errs.push('Este exercício não registra partes com outra carga.');
+    if (parts.length > MAX_SET_SEGMENTS) errs.push(`No máximo ${MAX_SET_SEGMENTS} partes adicionais por série.`);
+    if (parts.some((p) => !(finite(p.reps) && p.reps > 0 && Number.isInteger(p.reps)))) errs.push('Informe as repetições de cada parte.');
+    if (parts.some((p) => p.weight !== null && p.weight < 0)) errs.push('Carga inválida numa parte.');
+  }
   return [...new Set(errs)];
 }
 

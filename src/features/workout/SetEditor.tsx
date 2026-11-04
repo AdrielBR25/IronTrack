@@ -1,4 +1,4 @@
-import { ArrowLeftRight, Check, ChevronDown, ChevronUp, Info, SkipForward } from 'lucide-react';
+import { ArrowLeftRight, Check, ChevronDown, ChevronUp, Info, Layers, SkipForward, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { DistanceUnit, SessionExercise, SessionSet, SetSide, SetType, Settings } from '@/lib/types';
 import { NumberStepper } from './NumberStepper';
@@ -10,6 +10,9 @@ import { useNow } from '@/hooks/data';
 import {
   DISTANCE_UNITS,
   EQUIPMENT_HINT,
+  MAX_SET_SEGMENTS,
+  allowsSegments,
+  segmentsOf,
   SET_SIDES,
   SIDE_LABEL,
   exerciseMeasures,
@@ -164,6 +167,7 @@ export function SetFields({
           />
         )}
       </div>
+      {allowsSegments(ex) && <SegmentFields set={set} settings={settings} onPatch={onPatch} compact={compact} />}
       {cardio && (
         <div className="flex flex-col gap-2 text-xs" data-testid="cardio-quick">
           <div className="flex flex-wrap items-center gap-2">
@@ -250,6 +254,70 @@ export function SetFields({
           </div>
           <Input className="col-span-2 h-10 text-sm" placeholder="Observação da série" value={set.note ?? ''} onChange={(e) => onPatch({ note: e.target.value })} />
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Partes adicionais da mesma série com outra carga (ex.: 8 × 35 kg e mais 4 × 40 kg sem descanso). A primeira parte
+ * são os campos de peso e repetições acima; aqui ficam só as seguintes. Ver docs/SERIES_POR_PARTES.md.
+ */
+function SegmentFields({ set, settings, onPatch, compact }: { set: SessionSet; settings: Settings; onPatch: (p: Partial<SessionSet>) => void; compact?: boolean }) {
+  const { unit, show, parse } = useUnits();
+  const parts = segmentsOf(set);
+  const write = (next: SessionSet['segments']) => onPatch({ segments: next && next.length ? next : undefined });
+  const change = (i: number, p: Partial<NonNullable<SessionSet['segments']>[number]>) => write(parts.map((x, k) => (k === i ? { ...x, ...p } : x)));
+  const last = parts[parts.length - 1];
+  return (
+    <div className="flex flex-col gap-2" data-testid="set-segments">
+      {parts.map((p, i) => (
+        <div key={i} className="rounded-2xl border border-dashed p-2.5" data-testid="set-segment">
+          <div className="mb-1.5 flex items-center justify-between px-1">
+            <span className="text-xs font-semibold text-primary">+ Parte {i + 2} (mesma série)</span>
+            <button
+              type="button"
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-secondary"
+              aria-label={`Remover parte ${i + 2}`}
+              onClick={() => write(parts.filter((_, k) => k !== i))}
+              data-testid="remove-segment"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className={cn('grid gap-2', compact ? 'grid-cols-1' : 'grid-cols-1 min-[440px]:grid-cols-2 min-[440px]:gap-3')}>
+            <NumberStepper
+              size="md"
+              label={`Peso (${unit})`}
+              value={show(p.weight)}
+              onChange={(v) => change(i, { weight: parse(v) })}
+              step={settings.weightStep}
+              max={unit === 'kg' ? 1000 : 2200}
+              testId="segment-weight"
+            />
+            <NumberStepper
+              size="md"
+              label="Repetições"
+              value={p.reps}
+              onChange={(v) => change(i, { reps: v })}
+              step={settings.repStep}
+              integer
+              max={200}
+              decimals={0}
+              testId="segment-reps"
+            />
+          </div>
+        </div>
+      ))}
+      {parts.length < MAX_SET_SEGMENTS && (
+        <button
+          type="button"
+          className="flex h-9 items-center justify-center gap-1.5 rounded-xl border border-dashed text-xs font-semibold text-muted-foreground hover:bg-secondary/50"
+          onClick={() => write([...parts, { weight: last?.weight ?? set.weight, reps: null }])}
+          data-testid="add-segment"
+        >
+          <Layers className="h-4 w-4" /> Trocou a carga no meio da série? Adicionar parte
+        </button>
       )}
     </div>
   );

@@ -39,6 +39,8 @@ export interface PerfSet {
   assistanceKg: number | null;
   durationSec: number | null;
   distanceM: number | null;
+  /** Partes adicionais da mesma série com outra carga (série em partes). Ausente = uma parte só. */
+  parts?: { loadKg: number | null; reps: number }[];
 }
 
 export interface E1rmMark {
