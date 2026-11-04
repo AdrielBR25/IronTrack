@@ -1,0 +1,42 @@
+{
+  "formato": "irontrack.ficha",
+  "versao": 1,
+  "nome": "ABC Hipertrofia (exemplo)",
+  "descricao": "Ficha fictícia de exemplo. Edite ou importe a sua.",
+  "treinos": [
+    {
+      "rotulo": "A",
+      "nome": "Peito, ombros e tríceps",
+      "exercicios": [
+        { "nome": "Supino reto com barra", "grupo": "Peito", "tipo": "composto", "equipamento": "barra", "series": 3, "repeticoes": "6-10", "descanso": 150, "aquecimento": 1, "carga": 50, "observacoes": "Escápulas retraídas, pés firmes no chão.", "substitutos": ["Supino reto com halteres", "Supino na máquina"] },
+        { "nome": "Supino inclinado com halteres", "grupo": "Peito", "tipo": "composto", "equipamento": "halteres", "series": 3, "repeticoes": "8-12", "descanso": 120, "carga": 40 },
+        { "nome": "Desenvolvimento com halteres", "grupo": "Ombros", "tipo": "composto", "equipamento": "halteres", "series": 3, "repeticoes": "8-12", "descanso": 120, "carga": 28 },
+        { "nome": "Elevação lateral", "grupo": "Ombros", "tipo": "isolado", "equipamento": "halteres", "series": 3, "repeticoes": "12-15", "descanso": 75, "carga": 16 },
+        { "nome": "Tríceps na polia (corda)", "grupo": "Tríceps", "tipo": "isolado", "equipamento": "polia", "series": 3, "repeticoes": "10-12", "descanso": 75, "carga": 25 }
+      ]
+    },
+    {
+      "rotulo": "B",
+      "nome": "Costas e bíceps",
+      "exercicios": [
+        { "nome": "Puxada frontal", "grupo": "Costas", "tipo": "composto", "equipamento": "maquina", "series": 3, "repeticoes": "8-12", "descanso": 120, "aquecimento": 1, "carga": 55 },
+        { "nome": "Remada curvada com barra", "grupo": "Costas", "tipo": "composto", "equipamento": "barra", "series": 3, "repeticoes": "6-10", "descanso": 150, "carga": 50, "substitutos": ["Remada baixa na polia", "Remada unilateral com halter"] },
+        { "nome": "Remada baixa na polia", "grupo": "Costas", "tipo": "composto", "equipamento": "polia", "series": 3, "repeticoes": "10-12", "descanso": 120, "carga": 50 },
+        { "nome": "Rosca direta com barra", "grupo": "Bíceps", "tipo": "isolado", "equipamento": "barra", "series": 3, "repeticoes": "8-12", "descanso": 90, "carga": 25 },
+        { "nome": "Rosca martelo", "grupo": "Bíceps", "tipo": "isolado", "equipamento": "halteres", "series": 3, "repeticoes": "10-12", "descanso": 75, "carga": 20 }
+      ]
+    },
+    {
+      "rotulo": "C",
+      "nome": "Pernas e abdômen",
+      "exercicios": [
+        { "nome": "Agachamento livre", "grupo": "Quadríceps", "tipo": "composto", "equipamento": "barra", "series": 3, "repeticoes": "6-10", "descanso": 180, "aquecimento": 2, "carga": 60, "observacoes": "Profundidade confortável, joelhos acompanhando os pés." },
+        { "nome": "Leg press 45°", "grupo": "Quadríceps", "tipo": "composto", "equipamento": "maquina", "series": 3, "repeticoes": "10-12", "descanso": 150, "carga": 140 },
+        { "nome": "Stiff com barra", "grupo": "Posterior de coxa", "tipo": "composto", "equipamento": "barra", "series": 3, "repeticoes": "8-12", "descanso": 150, "carga": 50 },
+        { "nome": "Cadeira flexora", "grupo": "Posterior de coxa", "tipo": "isolado", "equipamento": "maquina", "series": 3, "repeticoes": "10-15", "descanso": 90, "carga": 40 },
+        { "nome": "Panturrilha em pé", "grupo": "Panturrilha", "tipo": "isolado", "equipamento": "maquina", "series": 4, "repeticoes": "12-15", "descanso": 60, "carga": 60 },
+        { "nome": "Abdominal na polia", "grupo": "Abdômen", "tipo": "isolado", "equipamento": "polia", "series": 3, "repeticoes": "12-15", "descanso": 60, "carga": 30 }
+      ]
+    }
+  ]
+}
