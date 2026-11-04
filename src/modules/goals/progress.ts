@@ -261,7 +261,10 @@ export function sessionGoalValue(goal: Pick<TrainingGoal, 'type' | 'params' | 'e
     return best ? { value: best.v, load: best.s.load, reps: best.s.reps, ...(best.s.side ? { side: best.s.side } : {}) } : null;
   };
   // Assistência nunca é carga e nunca se compara com séries só com o corpo.
-  const sets = point.setObs.filter((s) => s.assistanceKg === undefined && sideOk(s));
+  // Série em partes: cada parte (carga × repetições) é uma marca possível, como uma série própria.
+  const sets = point.setObs
+    .filter((s) => s.assistanceKg === undefined && sideOk(s))
+    .flatMap((s): SetObs[] => [s, ...(s.parts ?? []).map((p) => ({ reps: p.reps, load: p.load, ...(s.side ? { side: s.side } : {}) }))]);
   switch (goal.type) {
     case 'max_load':
       return bestOf(sets, (s) => s.load);
