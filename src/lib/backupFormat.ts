@@ -24,6 +24,8 @@ export const BACKUP_APP = 'irontrack';
 // v8 (P20): + campos opcionais nas sessões para edição e retomada de treinos finalizados (`timing`, `revision`,
 // `revisions`) e nos exercícios da sessão (`catalogVersion`, `replacedBy`, `replacesExerciseId`, `addedAfterFinishAt`,
 // `correctedFrom`). Estrutura igual à v7; nada é preenchido na migração (ausente = treino nunca editado/retomado).
+// Ainda v8: as séries podem trazer `segments` (série em partes, docs/SERIES_POR_PARTES.md), campo opcional preservado pelo
+// esquema `passthrough` da série; ausente = série de uma parte só.
 export const BACKUP_SCHEMA_VERSION = 8;
 
 export type BackupData = DataSnapshot;

@@ -9,6 +9,7 @@ import {
   carryForwardWeight,
   completeSet,
   historyFor,
+  previousSameSet,
   nextPending,
   removeSet,
   restAfter,
@@ -42,6 +43,7 @@ import type { LibraryItem, LibraryKey } from '@/modules/exercises';
 import { SwapPreviewDialog } from '@/features/workout/SwapPreviewDialog';
 import { sessionCandidate } from '@/features/library/sessionCandidate';
 import { ExerciseCard, summarizeSets } from '@/features/workout/ExerciseCard';
+import { setSummary } from '@/features/workout/modelFormat';
 import { SetEditor, SetFields, setTitle } from '@/features/workout/SetEditor';
 import { RestPanel } from '@/features/workout/RestPanel';
 import { SetTimerChip } from '@/features/workout/SetTimerPanel';
@@ -206,7 +208,9 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
     unlockAudio();
     void closeRestNotifications();
     const patched = patch ? updateSet(base, current.exerciseId, current.setId, patch) : base;
-    let next = carryForwardWeight(completeSet(patched, current.exerciseId, current.setId), current.exerciseId, current.setId);
+    // Séries com a mesma série no último treino mantêm o que foi feito nela; só as sem referência seguem esta carga.
+    const previous = historyFor(ex0.exerciseKey, completed ?? [], 1)[0]?.sets;
+    let next = carryForwardWeight(completeSet(patched, current.exerciseId, current.setId), current.exerciseId, current.setId, previous);
     const following = nextPending(next, current.exerciseId);
     const secs = restAfter(next, current, following, settings);
     next = {
@@ -260,7 +264,14 @@ function WorkoutRunner({ initial }: { initial: WorkoutSession }) {
   const editingEx = editing ? session.exercises.find((e) => e.id === editing.exId) : undefined;
   const editingSet = editingEx?.sets.find((s) => s.id === editing?.setId);
   const lastForCurrent = currentEx ? history(currentEx.exerciseKey)[0] : undefined;
-  const lastText = lastForCurrent && currentEx ? summarizeSets(lastForCurrent.sets, fmtW, currentEx).split(' · ').slice(0, 3).join(' · ') : undefined;
+  // "Anterior" mostra a MESMA série do último treino (série 2 com a série 2); sem ela, o resumo do último treino.
+  const sameLast = currentEx && currentSet ? previousSameSet(currentEx, currentSet, lastForCurrent?.sets) : undefined;
+  const lastText =
+    lastForCurrent && currentEx
+      ? sameLast
+        ? setSummary(sameLast, fmtW, currentEx)
+        : summarizeSets(lastForCurrent.sets, fmtW, currentEx).split(' · ').slice(0, 3).join(' · ')
+      : undefined;
 
   return (
     <div className="min-h-dvh bg-background">

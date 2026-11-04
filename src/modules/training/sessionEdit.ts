@@ -288,7 +288,7 @@ export function validateSessionEdit(s: WorkoutSession): EditIssue[] {
   return out;
 }
 
-const setSig = (x: SessionSet) => JSON.stringify([x.type, x.status, x.weight ?? null, x.reps ?? null, x.durationSec ?? null, x.distance ?? null, x.side ?? null, x.assistanceKg ?? null, x.rir ?? null, x.rpe ?? null, x.note ?? null]);
+const setSig = (x: SessionSet) => JSON.stringify([x.type, x.status, x.weight ?? null, x.reps ?? null, x.segments?.length ? x.segments : null, x.durationSec ?? null, x.distance ?? null, x.side ?? null, x.assistanceKg ?? null, x.rir ?? null, x.rpe ?? null, x.note ?? null]);
 
 /** Resumo legível do que mudou entre duas versões do mesmo treino. */
 export function describeSessionChanges(before: WorkoutSession, after: WorkoutSession): string[] {

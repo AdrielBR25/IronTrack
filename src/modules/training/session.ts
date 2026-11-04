@@ -1,7 +1,7 @@
 import type { ExerciseModelFields, ExerciseTemplate, RestDefaults, Routine, SessionExercise, SessionSet, SetType, Workout, WorkoutSession } from './types';
 import { exerciseKey, uid } from '@/lib/utils';
 import { fmtRepRange } from './routineSchema';
-import { exerciseMeasures, pickModelFields, type ExerciseMeasures } from './exerciseModel';
+import { allowsSegments, exerciseMeasures, pickModelFields, segmentsOf, type ExerciseMeasures } from './exerciseModel';
 import { closeTiming } from './timing';
 
 // Lógica pura da sessão de treino. Cada operação devolve uma nova sessão,
@@ -63,7 +63,10 @@ function buildSets(plan: SetPlan, last: SessionSet[] | undefined): SessionSet[] 
   const lastNormal = (last ?? []).filter((s) => s.type === 'normal');
   const lastWarm = (last ?? []).filter((s) => s.type === 'warmup');
   const topLastWeight = lastNormal.length ? Math.max(...lastNormal.map((s) => s.weight ?? 0)) : undefined;
+  // Carga de referência da ficha (aquecimento). Nas séries de trabalho, sem carga planejada na ficha, o plano de cada
+  // série é a carga da MESMA série no último treino (série 2 com a série 2), não a mais pesada.
   const plannedWeight = ms.weight === 'none' ? null : (targetWeight ?? topLastWeight ?? null);
+  const withSegments = allowsSegments(plan);
   // Exercícios por tempo e cardio não têm repetições: nada de converter repetições em segundos.
   const plannedReps = ms.reps ? fmtRepRange(repMin, repMax) : null;
   const sets: SessionSet[] = [];
@@ -83,16 +86,21 @@ function buildSets(plan: SetPlan, last: SessionSet[] | undefined): SessionSet[] 
     });
   }
   for (let i = 0; i < plannedSets; i++) {
-    const prev = lastNormal[i] ?? lastNormal[lastNormal.length - 1];
+    // Cada série recebe a carga e as repetições da mesma série do último treino; séries a mais que o último treino
+    // repetem a última série feita.
+    const same = lastNormal[i];
+    const prev = same ?? lastNormal[lastNormal.length - 1];
+    const parts = withSegments && same ? segmentsOf(same).filter((p) => (p.reps ?? 0) > 0) : [];
     sets.push({
       id: uid(),
       type: 'normal',
       status: 'pending',
       weight: ms.weight === 'none' ? null : (prev?.weight ?? targetWeight ?? null),
       reps: ms.reps ? (prev?.reps ?? repMax) : null,
-      plannedWeight,
+      plannedWeight: ms.weight === 'none' ? null : (targetWeight ?? prev?.weight ?? plannedWeight),
       plannedReps,
       ...modelPrefill(ms, plan, prev),
+      ...(parts.length ? { segments: parts } : {}),
     });
   }
   return sets;
@@ -199,10 +207,25 @@ export function completeSet(session: WorkoutSession, exId: string, setId: string
 }
 
 /**
+ * Série do último treino que corresponde, pela posição, a esta série (mesmo tipo: série 2 com a série 2,
+ * aquecimento 1 com o aquecimento 1). `previous` são as séries concluídas do último treino com o exercício.
+ */
+export function previousSameSet(ex: Pick<SessionExercise, 'sets'>, set: SessionSet, previous: readonly SessionSet[] | null | undefined): SessionSet | undefined {
+  if (!previous?.length || set.type === 'drop') return undefined;
+  const pos = ex.sets.filter((s) => s.type === set.type).findIndex((s) => s.id === set.id);
+  if (pos < 0) return undefined;
+  return previous.filter((s) => s.type === set.type && s.status === 'done')[pos];
+}
+
+/**
  * Ao concluir uma série, repassa a carga usada para as próximas séries pendentes
  * do mesmo tipo no exercício que ainda não foram editadas manualmente.
+ *
+ * Séries que têm a mesma série no último treino (`previous`) NÃO recebem a carga: elas já vêm preenchidas com o que
+ * foi feito naquela série da última vez (35 → 45 → 50 continua 35 → 45 → 50). Só séries sem referência (primeiro
+ * treino do exercício ou séries a mais) seguem a carga da série concluída.
  */
-export function carryForwardWeight(session: WorkoutSession, exId: string, setId: string): WorkoutSession {
+export function carryForwardWeight(session: WorkoutSession, exId: string, setId: string, previous?: readonly SessionSet[] | null): WorkoutSession {
   const ex = session.exercises.find((e) => e.id === exId);
   const done = ex?.sets.find((s) => s.id === setId);
   if (!ex || !done || done.type === 'drop') return session;
@@ -215,7 +238,9 @@ export function carryForwardWeight(session: WorkoutSession, exId: string, setId:
   return {
     ...session,
     exercises: session.exercises.map((e) =>
-      e.id !== exId ? e : { ...e, sets: e.sets.map((s, i) => (i > idx && s.status === 'pending' && s.type === done.type && !s.edited ? { ...s, ...patch } : s)) },
+      e.id !== exId
+        ? e
+        : { ...e, sets: e.sets.map((s, i) => (i > idx && s.status === 'pending' && s.type === done.type && !s.edited && !previousSameSet(ex, s, previous) ? { ...s, ...patch } : s)) },
     ),
   };
 }

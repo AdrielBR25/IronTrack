@@ -1,5 +1,5 @@
 import type { DistanceUnit, ExerciseModelFields, SessionSet } from '@/lib/types';
-import { SIDE_SHORT, exerciseMeasures, fmtDurationSec, fmtRepRange, fromMetersTo, isValidDistanceM, isValidDurationSec } from '@/modules/training';
+import { SIDE_SHORT, exerciseMeasures, fmtDurationSec, fmtRepRange, fromMetersTo, isValidDistanceM, isValidDurationSec, segmentsOf } from '@/modules/training';
 import { fmtNum } from '@/lib/utils';
 
 // Textos de exibição do modelo v3 (P10). Só formatam o que existe: campo ausente vira "—" ou some, nunca zero.
@@ -40,7 +40,11 @@ export function setSummary(set: SessionSet, fmtW: FmtW, ex: ExerciseModelFields 
   }
   const reps = set.reps ?? '—';
   if (set.assistanceKg != null && set.assistanceKg > 0) return `${side}assist. ${fmtW(set.assistanceKg)} × ${reps}`;
-  if (ex.loadMode === 'adicional') return `${side}${set.weight != null && set.weight > 0 ? `+${fmtW(set.weight)}` : 'corpo'} × ${reps}`;
   if (set.weight == null && exerciseMeasures(ex).weight === 'none') return `${side}${reps} reps`;
-  return `${side}${fmtW(set.weight, false)}×${set.reps ?? 0}`;
+  // Série em partes: "35×8 + 40×4" (cada parte com a própria carga).
+  const extra = segmentsOf(set)
+    .map((p) => (ex.loadMode === 'adicional' ? ` + ${p.weight != null && p.weight > 0 ? `+${fmtW(p.weight)}` : 'corpo'} × ${p.reps ?? '—'}` : ` + ${fmtW(p.weight, false)}×${p.reps ?? 0}`))
+    .join('');
+  if (ex.loadMode === 'adicional') return `${side}${set.weight != null && set.weight > 0 ? `+${fmtW(set.weight)}` : 'corpo'} × ${reps}${extra}`;
+  return `${side}${fmtW(set.weight, false)}×${set.reps ?? 0}${extra}`;
 }

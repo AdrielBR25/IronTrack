@@ -81,6 +81,16 @@ export interface Routine {
   updatedAt: number;
 }
 
+/**
+ * Parte adicional de uma mesma série, com outra carga (ex.: 8 × 35 kg e, sem descanso, mais 4 × 40 kg). A primeira parte
+ * continua sendo `weight` × `reps` da série; `segments` guarda só as partes seguintes, na ordem. Ver docs/SERIES_POR_PARTES.md.
+ */
+export interface SetSegment {
+  /** kg */
+  weight: number | null;
+  reps: number | null;
+}
+
 export interface SessionSet {
   id: string;
   type: SetType;
@@ -106,6 +116,11 @@ export interface SessionSet {
   /** Duração (s) e distância (m) planejadas, copiadas da ficha. */
   plannedDurationSec?: number | null;
   plannedDistance?: number | null;
+  /**
+   * Partes adicionais da série com outra carga (opcional, só carga × repetições). Ausente ou vazio = série de uma parte
+   * só, como sempre foi. Volume, recordes e 1RM somam/consideram cada parte; a contagem de séries não muda.
+   */
+  segments?: SetSegment[];
 }
 
 export interface SessionExercise extends ExerciseModelFields {

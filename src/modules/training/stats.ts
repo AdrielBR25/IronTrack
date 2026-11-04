@@ -1,6 +1,7 @@
 import { addDays, startOfWeek, tsToISODate, weekday } from '@/lib/dates';
 import type { WorkoutSession } from './types';
 import { exerciseVolume, isCompletedWorkSet, isValidWorkingSet, sessionVolume } from './volume';
+import { setParts } from './exerciseModel';
 
 export function sessionsInRange(sessions: WorkoutSession[], fromISO: string, toISOExclusive: string) {
   return sessions.filter((s) => {
@@ -98,12 +99,14 @@ export function exerciseSeries(sessions: WorkoutSession[], key: string): Exercis
     if (!ex) continue;
     const valid = ex.sets.filter(isValidWorkingSet);
     if (!valid.length) continue;
+    // Série em partes: cada parte entra como carga × repetições própria; as repetições totais somam todas.
+    const parts = valid.flatMap(setParts).filter((v) => (v.reps ?? 0) > 0);
     out.push({
       date: s.startedAt,
-      maxWeight: Math.max(...valid.map((v) => v.weight ?? 0)),
-      best1RM: Math.max(...valid.map((v) => ((v.weight ?? 0) > 0 ? (v.weight ?? 0) * (1 + (v.reps ?? 0) / 30) : 0))),
-      bestReps: Math.max(...valid.map((v) => v.reps ?? 0)),
-      totalReps: valid.reduce((a, v) => a + (v.reps ?? 0), 0),
+      maxWeight: Math.max(...parts.map((v) => v.weight ?? 0)),
+      best1RM: Math.max(...parts.map((v) => ((v.weight ?? 0) > 0 ? (v.weight ?? 0) * (1 + (v.reps ?? 0) / 30) : 0))),
+      bestReps: Math.max(...parts.map((v) => v.reps ?? 0)),
+      totalReps: parts.reduce((a, v) => a + (v.reps ?? 0), 0),
       volume: exerciseVolume(ex),
     });
   }
