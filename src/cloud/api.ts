@@ -5,7 +5,7 @@ import { API_ERRORS, CSRF_HEADER, CSRF_VALUE } from '@shared/api/errors.ts';
 import type { AccountInfo, ServerFeatures, SessionInfo } from '@shared/api/auth.ts';
 import type { PullResponse, PushResponse, SyncOp } from '@shared/sync/protocol.ts';
 import { SYNC_PROTOCOL } from '@shared/sync/protocol.ts';
-import type { ActionView, AssistantStatusView, ConversationSummaryView, ConversationView, MemoryView, StreamEvent } from '@shared/assistant/protocol.ts';
+import type { ActionView, ApproveBody, MemoryCategory, AssistantStatusView, ConversationSummaryView, ConversationView, MemoryView, StreamEvent } from '@shared/assistant/protocol.ts';
 import { API_BASE } from './config';
 
 export class ApiClientError extends Error {
@@ -188,11 +188,12 @@ export const assistantApi = {
   send: (conversationId: string | null, body: { content: string; model?: string; timezone?: string; attachments?: { type: 'image'; purpose: 'meal'; dataUrl: string }[] }, onEvent: (ev: StreamEvent) => void, signal: AbortSignal) =>
     apiStream(`/assistant/conversations/${conversationId ? encodeURIComponent(conversationId) : 'new'}/messages`, body, (e) => onEvent(e as StreamEvent), signal),
   action: (id: string) => apiRequest<{ action: ActionView }>('GET', `/assistant/actions/${encodeURIComponent(id)}`),
-  approve: (id: string) => apiRequest<{ action: ActionView }>('POST', `/assistant/actions/${encodeURIComponent(id)}/approve`, {}),
+  approve: (id: string, body?: ApproveBody) => apiRequest<{ action: ActionView }>('POST', `/assistant/actions/${encodeURIComponent(id)}/approve`, body ?? {}),
   reject: (id: string) => apiRequest<{ action: ActionView }>('POST', `/assistant/actions/${encodeURIComponent(id)}/reject`, {}),
   undo: (id: string) => apiRequest<{ action: ActionView }>('POST', `/assistant/actions/${encodeURIComponent(id)}/undo`, {}),
   memories: () => apiRequest<{ memories: MemoryView[]; max: number }>('GET', '/assistant/memories'),
-  addMemory: (content: string) => apiRequest<{ memories: MemoryView[] }>('POST', '/assistant/memories', { content }),
+  addMemory: (content: string, category?: MemoryCategory) => apiRequest<{ memories: MemoryView[] }>('POST', '/assistant/memories', { content, ...(category ? { category } : {}) }),
+  updateMemory: (id: string, patch: { content?: string; category?: MemoryCategory; confirmed?: true; expiresOn?: string | null }) => apiRequest<{ memories: MemoryView[] }>('PATCH', `/assistant/memories/${encodeURIComponent(id)}`, patch),
   removeMemory: (id: string) => apiRequest<void>('DELETE', `/assistant/memories/${encodeURIComponent(id)}`),
   removeAllMemories: () => apiRequest<{ deleted: number }>('DELETE', '/assistant/memories'),
 };

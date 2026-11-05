@@ -4,7 +4,7 @@
 //    pessoa aprova (POST /api/v1/assistant/actions/:id/approve), pelo `ActionHandler` do mesmo tipo, revalidando tudo.
 // Não existe ferramenta genérica (SQL livre, comando, URL): só as funções registradas aqui, com argumentos validados.
 import type { z } from 'zod';
-import type { ActionCollection, ActionKind, PreviewSection } from '../../../../../shared/assistant/protocol.ts';
+import type { ActionCollection, ActionKind, ApproveBody, PreviewSection } from '../../../../../shared/assistant/protocol.ts';
 import type { Pool, PoolClient } from '../../db/pool.ts';
 import type { PhotoAnalysisView } from '../../../../../shared/nutrition/vision.ts';
 
@@ -63,13 +63,17 @@ export interface StoredAction {
   payload: unknown;
   targetId: string | null;
   baseVersion: number | null;
+  /** Fase 06 (planos): resultado e desfazer de uma aplicação parcial anterior (nova tentativa só das etapas que faltam). */
+  previous?: { result: unknown; undo: unknown };
+  /** Fase 06 (planos): edição feita na prévia (etapas desmarcadas, horários ajustados). */
+  approve?: ApproveBody;
 }
 
 /** Aplica uma proposta aprovada dentro da transação da aprovação. Lança ToolError para recusar. */
 export interface ActionHandler {
   kind: ActionKind;
   /** `undo` = o necessário para desfazer depois (estado anterior + versão gravada). */
-  apply(c: PoolClient, ctx: ToolContext, action: StoredAction): Promise<{ collection: ActionCollection; entityId: string; summary: string; undo?: unknown }>;
+  apply(c: PoolClient, ctx: ToolContext, action: StoredAction): Promise<{ collection: ActionCollection; entityId: string; summary: string; undo?: unknown; outcome?: 'applied' | 'partial' | 'failed'; steps?: unknown[]; error?: string }>;
   /** Desfaz uma aplicação (Fase 01). Lança StaleError se o registro mudou depois; ToolError para recusar. */
   undo?(c: PoolClient, ctx: ToolContext, action: StoredAction, undo: unknown): Promise<{ summary: string }>;
 }

@@ -3,12 +3,13 @@
 // existem e diz isso, em vez de inventar dados.
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { MAX_MEMORIES, savePreferenceArgsSchema } from '../../../../../shared/assistant/protocol.ts';
+import { MAX_MEMORIES, MEMORY_CATEGORIES, MEMORY_CATEGORY_LABEL, savePreferenceArgsSchema } from '../../../../../shared/assistant/protocol.ts';
 import { bodyModule, goalsModule } from './progress.ts';
 import { lifeModule } from './life.ts';
 import { nutritionModule } from './nutrition.ts';
 import { knowledgeModule } from './knowledge.ts';
 import { bibleModule } from './bible.ts';
+import { integrationModule } from './integration.ts';
 import { trainingModule } from './training.ts';
 import { ToolError, type ActionHandler, type AiModuleDef, type AiTool, type WriteTool } from './types.ts';
 
@@ -17,25 +18,39 @@ const proposePreference: WriteTool<typeof savePreferenceArgsSchema> = {
   name: 'propose_save_preference',
   label: 'Preparando uma preferência para salvar',
   description:
-    'Prepara a PROPOSTA de guardar uma preferência explícita da pessoa (ex.: "prefiro treinos de 45 minutos", "tenho dor no ombro esquerdo, evitar desenvolvimento"). Só use quando a pessoa pedir para lembrar algo. A pessoa aprova antes de salvar.',
-  parameters: { type: 'object', properties: { content: { type: 'string', description: 'A preferência, curta, em terceira pessoa ou como a pessoa disse.' } }, required: ['content'], additionalProperties: false },
+    'Prepara a PROPOSTA de guardar uma preferência persistente (objetivo, alimentação, horários, treino, estudos, prioridade da semana, hábitos, limitações). Use quando a pessoa pedir para lembrar algo (inferred false). Também pode propor guardar algo que você DEDUZIU dos registros ou da conversa, com inferred true (fica marcado como inferência até a pessoa confirmar). Nunca proponha para cada frase da conversa; nada que já está nos registros dos módulos (eles são a fonte da verdade). Prioridade da semana: use expiresOn (domingo). A pessoa aprova antes de salvar.',
+  parameters: {
+    type: 'object',
+    properties: {
+      content: { type: 'string', description: 'A preferência, curta, em terceira pessoa ou como a pessoa disse.' },
+      category: { type: ['string', 'null'], enum: [...MEMORY_CATEGORIES, null] },
+      inferred: { type: ['boolean', 'null'], description: 'true = dedução sua, não dita pela pessoa.' },
+      expiresOn: { type: ['string', 'null'], description: 'yyyy-mm-dd (opcional, para prioridades temporárias)' },
+    },
+    required: ['content'],
+    additionalProperties: false,
+  },
   args: savePreferenceArgsSchema,
   async prepare(ctx, a) {
     const n = await ctx.pool.query<{ n: number }>('SELECT count(*)::int AS n FROM assistant_memories WHERE user_id = $1', [ctx.userId]);
     if ((n.rows[0]?.n ?? 0) >= MAX_MEMORIES) throw new ToolError('memory_limit', 'Limite de preferências salvas atingido.');
-    return { kind: 'save_preference', title: 'Salvar uma preferência', rationale: null, payload: { content: a.content }, preview: [{ title: 'Preferência', lines: [{ kind: 'add', text: a.content }] }], targetId: null, baseVersion: null };
+    const dup = await ctx.pool.query('SELECT 1 FROM assistant_memories WHERE user_id = $1 AND lower(content) = lower($2)', [ctx.userId, a.content]);
+    if (dup.rowCount) throw new ToolError('duplicate', 'Essa preferência já está salva.');
+    const cat = a.category ?? 'other';
+    const lines = [{ kind: 'add' as const, text: a.content }, { kind: 'info' as const, text: `${MEMORY_CATEGORY_LABEL[cat]}${a.inferred ? ' · inferida pela IA (não confirmada)' : ''}${a.expiresOn ? ` · vale até ${a.expiresOn}` : ''}` }];
+    return { kind: 'save_preference', title: a.inferred ? 'Guardar uma inferência sobre você' : 'Salvar uma preferência', rationale: null, payload: { content: a.content, category: cat, inferred: !!a.inferred, expiresOn: a.expiresOn ?? null }, preview: [{ title: 'Preferência', lines }], targetId: null, baseVersion: null };
   },
 };
 
 const preferenceHandler: ActionHandler = {
   kind: 'save_preference',
   async apply(c, ctx, action) {
-    const { content } = savePreferenceArgsSchema.parse(action.payload);
+    const { content, category, inferred, expiresOn } = savePreferenceArgsSchema.parse(action.payload);
     const n = await c.query<{ n: number }>('SELECT count(*)::int AS n FROM assistant_memories WHERE user_id = $1', [ctx.userId]);
     if ((n.rows[0]?.n ?? 0) >= MAX_MEMORIES) throw new ToolError('memory_limit', 'Limite de preferências salvas atingido.');
     const id = randomUUID();
-    await c.query("INSERT INTO assistant_memories (id, user_id, content, source) VALUES ($1, $2, $3, 'ai_approved')", [id, ctx.userId, content]);
-    return { collection: 'memories', entityId: id, summary: `Preferência salva: "${content}"`, undo: { id } };
+    await c.query("INSERT INTO assistant_memories (id, user_id, content, source, category, confirmed, expires_on) VALUES ($1, $2, $3, 'ai_approved', $4, $5, $6)", [id, ctx.userId, content, category ?? 'other', !inferred, expiresOn ?? null]);
+    return { collection: 'memories', entityId: id, summary: `${inferred ? 'Inferência guardada (não confirmada)' : 'Preferência salva'}: "${content}"`, undo: { id } };
   },
   async undo(c, ctx, _a, u) {
     const { id } = u as { id: string };
@@ -57,7 +72,7 @@ const PLANNED: AiModuleDef[] = [
   { id: 'label_photo', name: 'Leitura de rótulos nutricionais por foto', status: 'planned', scope: 'foto do rótulo → alimento próprio revisado (preparado no contrato de visão, ainda sem ferramenta)', tools: [], actions: [] },
 ];
 
-export const MODULES: readonly AiModuleDef[] = [trainingModule, goalsModule, bodyModule, lifeModule, nutritionModule, knowledgeModule, bibleModule, memoryModule, ...PLANNED];
+export const MODULES: readonly AiModuleDef[] = [trainingModule, goalsModule, bodyModule, lifeModule, nutritionModule, knowledgeModule, bibleModule, integrationModule, memoryModule, ...PLANNED];
 
 const listModules: AiTool = {
   kind: 'read',

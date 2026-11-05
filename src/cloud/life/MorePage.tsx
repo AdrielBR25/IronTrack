@@ -52,6 +52,10 @@ const GROUPS: { title: string; items: { to: string; label: string; hint: string;
   {
     title: 'Desenvolvimento pessoal',
     items: [
+      { to: '/semana', label: 'Minha Semana', hint: 'Agenda de 7 dias com todas as áreas', icon: CalendarDays },
+      { to: '/minha-evolucao', label: 'Minha Evolução', hint: 'Indicadores da semana e do mês', icon: BarChart3 },
+      { to: '/missoes', label: 'Missões', hint: 'Diárias, semanais e desafios', icon: ListChecks },
+      { to: '/jornada', label: 'Jornada', hint: 'Nível, atributos e conquistas', icon: Target },
       { to: '/missoes?aba=habitos', label: 'Hábitos', hint: 'Criar, pausar e arquivar', icon: ListChecks },
       { to: '/missoes?aba=rotinas', label: 'Rotinas', hint: 'Matinal, estudos, treino, noturna', icon: CalendarDays },
     ],

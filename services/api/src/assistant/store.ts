@@ -1,7 +1,7 @@
 // Persistência do assistente no PostgreSQL: conversas, mensagens, memórias, propostas e cota. Toda consulta filtra
 // pela conta da sessão (`user_id`); um ID de outra conta simplesmente "não existe".
 import { randomUUID } from 'node:crypto';
-import { UNDO_WINDOW_HOURS, type ActionCollection, type ActionKind, type ActionStatus, type ActionView, type ConversationSummaryView, type MemoryView, type MessageRole, type MessageView, type PreviewSection, type ToolUseView } from '../../../../shared/assistant/protocol.ts';
+import { UNDO_WINDOW_HOURS, type ActionCollection, type ActionKind, type ActionStatus, type ActionStepView, type ActionView, type ConversationSummaryView, type MemoryView, type MessageRole, type MessageView, type PreviewSection, type ToolUseView } from '../../../../shared/assistant/protocol.ts';
 import type { Pool, PoolClient } from '../db/pool.ts';
 
 type Q = Pick<Pool | PoolClient, 'query'>;
@@ -66,9 +66,45 @@ export function actionView(r: ActionRow, now: number): ActionView {
     decidedAt: r.decided_at?.toISOString() ?? null,
     result: r.result ? { collection: r.result.collection, entityId: r.result.entityId } : null,
     error: r.error,
-    undoable: r.status === 'applied' && r.undo_data != null && !!r.decided_at && now - r.decided_at.getTime() < UNDO_WINDOW_HOURS * 3_600_000,
+    undoable: (r.status === 'applied' || r.status === 'partial') && r.undo_data != null && !!r.decided_at && now - r.decided_at.getTime() < UNDO_WINDOW_HOURS * 3_600_000,
     revertedAt: r.reverted_at?.toISOString() ?? null,
+    ...(r.kind === 'apply_life_plan' ? { steps: planStepViews(r) } : {}),
   };
+}
+
+interface PlanPayloadStep {
+  kind: ActionKind;
+  title: string;
+  preview: PreviewSection[];
+  payload: unknown;
+}
+export interface PlanStepResult {
+  index: number;
+  status: 'applied' | 'failed' | 'skipped' | 'reverted';
+  error?: string | null;
+  collection?: ActionCollection;
+  entityId?: string;
+  summary?: string;
+}
+
+/** Fase 06: visão das etapas de um plano (o que foi proposto + o que aconteceu com cada uma). */
+function planStepViews(r: ActionRow): ActionStepView[] {
+  const steps = ((r.payload as { steps?: PlanPayloadStep[] })?.steps ?? []) as PlanPayloadStep[];
+  const res = new Map((((r.result as { steps?: PlanStepResult[] } | null)?.steps ?? []) as PlanStepResult[]).map((x) => [x.index, x]));
+  return steps.map((s, i) => {
+    const x = res.get(i);
+    const items = s.kind === 'create_planner_items' ? ((s.payload as { items?: { date: string; startTime?: string | null; title: string }[] })?.items ?? []).map((it) => ({ date: it.date, startTime: it.startTime ?? null, title: it.title })) : undefined;
+    return {
+      index: i,
+      kind: s.kind,
+      title: s.title,
+      preview: s.preview,
+      status: r.status === 'reverted' && x?.status === 'applied' ? 'reverted' : (x?.status ?? 'pending'),
+      error: x?.error ?? null,
+      result: x?.collection && x.entityId ? { collection: x.collection, entityId: x.entityId } : null,
+      ...(items ? { items } : {}),
+    };
+  });
 }
 
 export async function listConversations(q: Q, userId: string, limit = 100): Promise<ConversationSummaryView[]> {
@@ -141,8 +177,11 @@ export async function conversationActions(q: Q, userId: string, conversationId: 
 }
 
 export async function listMemories(q: Q, userId: string): Promise<MemoryView[]> {
-  const r = await q.query<{ id: string; content: string; source: MemoryView['source']; created_at: Date }>('SELECT id, content, source, created_at FROM assistant_memories WHERE user_id = $1 ORDER BY created_at', [userId]);
-  return r.rows.map((x) => ({ id: x.id, content: x.content, source: x.source, createdAt: x.created_at.toISOString() }));
+  const r = await q.query<{ id: string; content: string; source: MemoryView['source']; created_at: Date; category: MemoryView['category']; confirmed: boolean; expires_on: string | null; updated_at: Date | null }>(
+    'SELECT id, content, source, created_at, category, confirmed, expires_on, updated_at FROM assistant_memories WHERE user_id = $1 ORDER BY created_at',
+    [userId],
+  );
+  return r.rows.map((x) => ({ id: x.id, content: x.content, source: x.source, createdAt: x.created_at.toISOString(), category: x.category ?? 'other', confirmed: x.confirmed !== false, expiresOn: x.expires_on ?? null, updatedAt: x.updated_at?.toISOString() ?? null }));
 }
 
 // ------------------------------------------------------------------ cota diária (por conta, persistida)

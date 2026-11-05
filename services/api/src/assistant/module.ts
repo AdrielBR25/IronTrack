@@ -14,6 +14,10 @@ import {
   MAX_MESSAGE_BODY_BYTES,
   MAX_USER_MESSAGE_CHARS,
   sendMessageSchema,
+  approveBodySchema,
+  memoryPatchSchema,
+  MEMORY_CATEGORIES,
+  type ApproveBody,
   type AssistantAvailability,
   type AssistantStatusView,
   type StreamEvent,
@@ -340,13 +344,25 @@ export function createAssistantModule(d: AssistantDeps): AssistantModule {
     }
   }
 
-  /** Aprovação: revalida dono, estado, prazo e versão do registro; aplica numa transação e registra o resultado. */
+  /**
+   * Aprovação: revalida dono, estado, prazo e versão do registro; aplica numa transação e registra o resultado.
+   * Fase 06: planos multimódulo aplicam etapa por etapa (cada uma num SAVEPOINT); se parte falhar, a ação fica
+   * `partial` com o resultado de cada etapa e pode ser aprovada de novo para tentar só as que faltaram.
+   */
   async function decide(ctx: RequestCtx, approve: boolean) {
     const a = ctx.auth!;
+    let edit: ApproveBody | undefined;
+    if (approve) {
+      const raw = await readJson(ctx, 8 * 1024).catch(() => ({}));
+      const p = approveBodySchema.safeParse(raw && typeof raw === 'object' ? raw : {});
+      if (!p.success) return fail('action_invalid', 422);
+      edit = p.data;
+    }
     const result = await withTx(d.pool, async (c) => {
       const row = await S.getAction(c, a.userId, ctx.params.id, true);
       if (!row) return { err: fail('not_found', 404) };
-      if (row.status !== 'pending' || row.expires_at.getTime() <= now()) {
+      const retry = approve && row.status === 'partial';
+      if (!retry && (row.status !== 'pending' || row.expires_at.getTime() <= now())) {
         if (row.status === 'pending') await c.query("UPDATE assistant_actions SET status = 'expired', decided_at = now() WHERE id = $1", [row.id]);
         return { err: fail('action_not_pending', 409) };
       }
@@ -359,16 +375,33 @@ export function createAssistantModule(d: AssistantDeps): AssistantModule {
       if (!handler) return { err: fail('action_invalid', 422) };
       await c.query('SAVEPOINT apply');
       try {
-        const applied = await handler.apply(c, { pool: d.pool, userId: a.userId, dataProfileId: a.dataProfileId, timezone: DEFAULT_TZ, now: now() }, { id: row.id, kind: row.kind, payload: row.payload, targetId: row.target_id, baseVersion: row.base_version });
+        const applied = await handler.apply(c, { pool: d.pool, userId: a.userId, dataProfileId: a.dataProfileId, timezone: DEFAULT_TZ, now: now() }, {
+          id: row.id,
+          kind: row.kind,
+          payload: row.payload,
+          targetId: row.target_id,
+          baseVersion: row.base_version,
+          ...(retry ? { previous: { result: row.result, undo: row.undo_data } } : {}),
+          ...(edit && (edit.skip?.length || edit.times?.length) ? { approve: edit } : {}),
+        });
         await c.query('RELEASE SAVEPOINT apply');
-        await c.query("UPDATE assistant_actions SET status = 'applied', decided_at = now(), result = $2, undo_data = $3 WHERE id = $1", [row.id, JSON.stringify({ collection: applied.collection, entityId: applied.entityId }), applied.undo === undefined || !handler.undo ? null : JSON.stringify(applied.undo)]);
-        if (row.conversation_id) await S.insertMessage(c, { userId: a.userId, conversationId: row.conversation_id, role: 'event', content: `A pessoa aprovou e o app aplicou: ${applied.summary}` });
+        const outcome = applied.outcome ?? 'applied';
+        const resultJson = JSON.stringify({ collection: applied.collection, entityId: applied.entityId, ...(applied.steps ? { steps: applied.steps } : {}) });
+        const undoJson = applied.undo === undefined || !handler.undo ? null : JSON.stringify(applied.undo);
+        if (outcome === 'failed') {
+          await c.query("UPDATE assistant_actions SET status = 'failed', decided_at = now(), result = $2, error = $3 WHERE id = $1", [row.id, resultJson, (applied.error ?? ASSISTANT_ERROR_MESSAGES.action_invalid).slice(0, 300)]);
+          if (row.conversation_id) await S.insertMessage(c, { userId: a.userId, conversationId: row.conversation_id, role: 'event', content: `A pessoa aprovou, mas nada foi gravado: ${applied.summary}` });
+          return { row: (await S.getAction(c, a.userId, row.id))! };
+        }
+        await c.query('UPDATE assistant_actions SET status = $4, decided_at = now(), result = $2, undo_data = $3, error = $5 WHERE id = $1', [row.id, resultJson, undoJson, outcome, outcome === 'partial' ? ASSISTANT_ERROR_MESSAGES.action_partial : null]);
+        if (row.conversation_id) await S.insertMessage(c, { userId: a.userId, conversationId: row.conversation_id, role: 'event', content: outcome === 'partial' ? `A pessoa aprovou e o app aplicou SÓ PARTE do plano: ${applied.summary}` : `A pessoa aprovou e o app aplicou: ${applied.summary}` });
         return { row: (await S.getAction(c, a.userId, row.id))! };
       } catch (e) {
         await c.query('ROLLBACK TO SAVEPOINT apply');
         const code = e instanceof StaleError ? 'action_stale' : e instanceof ToolError && e.code === 'memory_limit' ? 'memory_limit' : e instanceof ToolError || isZod(e) || isRecordError(e) || isApiError(e) ? 'action_invalid' : null;
         if (!code) throw e;
-        await c.query("UPDATE assistant_actions SET status = 'failed', decided_at = now(), error = $2 WHERE id = $1", [row.id, ASSISTANT_ERROR_MESSAGES[code]]);
+        // Numa nova tentativa de plano parcial, o que já foi gravado continua valendo (a ação segue parcial).
+        if (!retry) await c.query("UPDATE assistant_actions SET status = 'failed', decided_at = now(), error = $2 WHERE id = $1", [row.id, ASSISTANT_ERROR_MESSAGES[code]]);
         return { err: fail(code, code === 'action_stale' ? 409 : 422) };
       }
     });
@@ -383,7 +416,7 @@ export function createAssistantModule(d: AssistantDeps): AssistantModule {
       const row = await S.getAction(c, a.userId, ctx.params.id, true);
       if (!row) return { err: fail('not_found', 404) };
       const handler = ACTION_HANDLERS.get(row.kind);
-      if (row.status !== 'applied' || row.undo_data == null || !handler?.undo || !row.decided_at || now() - row.decided_at.getTime() >= UNDO_WINDOW_HOURS * 3_600_000) return { err: fail('action_not_undoable', 409) };
+      if ((row.status !== 'applied' && row.status !== 'partial') || row.undo_data == null || !handler?.undo || !row.decided_at || now() - row.decided_at.getTime() >= UNDO_WINDOW_HOURS * 3_600_000) return { err: fail('action_not_undoable', 409) };
       await c.query('SAVEPOINT undo');
       try {
         const r = await handler.undo(c, { pool: d.pool, userId: a.userId, dataProfileId: a.dataProfileId, timezone: DEFAULT_TZ, now: now() }, { id: row.id, kind: row.kind, payload: row.payload, targetId: row.target_id, baseVersion: row.base_version }, row.undo_data);
@@ -543,13 +576,29 @@ export function createAssistantModule(d: AssistantDeps): AssistantModule {
           const u = ctx.auth!.userId;
           const n = await d.pool.query<{ n: number }>('SELECT count(*)::int AS n FROM assistant_memories WHERE user_id = $1', [u]);
           if ((n.rows[0]?.n ?? 0) >= MAX_MEMORIES) return fail('memory_limit', 409);
-          await d.pool.query("INSERT INTO assistant_memories (id, user_id, content, source) VALUES ($1, $2, $3, 'user')", [randomUUID(), u, content]);
+          const category = typeof b.category === 'string' && (MEMORY_CATEGORIES as readonly string[]).includes(b.category) ? b.category : 'other';
+          await d.pool.query("INSERT INTO assistant_memories (id, user_id, content, source, category, confirmed) VALUES ($1, $2, $3, 'user', $4, true)", [randomUUID(), u, content, category]);
           return { status: 201, body: { memories: await S.listMemories(d.pool, u) } };
         },
       });
       router.add({ method: 'DELETE', path: `${P}/memories`, auth: 'session', handler: async (ctx) => {
         const r = await d.pool.query('DELETE FROM assistant_memories WHERE user_id = $1', [ctx.auth!.userId]);
         return { status: 200, body: { deleted: r.rowCount ?? 0 } };
+      } });
+      // Fase 06: editar, categorizar, confirmar uma inferência ou mudar a validade de uma preferência.
+      router.add({ method: 'PATCH', path: `${P}/memories/:id`, auth: 'session', handler: async (ctx) => {
+        if (!S.isUuid(ctx.params.id)) return fail('not_found', 404);
+        const p = memoryPatchSchema.safeParse(await bodyOf(ctx, 2048));
+        if (!p.success) throw new ApiError('validation_failed', { content: `Use de 1 a ${MAX_MEMORY_CHARS} caracteres.` });
+        const x = p.data;
+        const content = x.content?.replace(/\s+/g, ' ').trim();
+        const r = await d.pool.query(
+          `UPDATE assistant_memories SET content = coalesce($3, content), category = coalesce($4, category), confirmed = CASE WHEN $5::boolean OR $3::text IS NOT NULL THEN true ELSE confirmed END,
+                  expires_on = CASE WHEN $6::boolean THEN $7::date ELSE expires_on END, source = CASE WHEN $3::text IS NOT NULL THEN 'user' ELSE source END, updated_at = now()
+            WHERE user_id = $1 AND id = $2`,
+          [ctx.auth!.userId, ctx.params.id, content ?? null, x.category ?? null, x.confirmed === true, x.expiresOn !== undefined, x.expiresOn ?? null],
+        );
+        return r.rowCount ? { status: 200, body: { memories: await S.listMemories(d.pool, ctx.auth!.userId) } } : fail('not_found', 404);
       } });
       router.add({ method: 'DELETE', path: `${P}/memories/:id`, auth: 'session', handler: async (ctx) => {
         if (!S.isUuid(ctx.params.id)) return fail('not_found', 404);

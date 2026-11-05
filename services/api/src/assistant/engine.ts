@@ -57,7 +57,10 @@ const MAX_PROPOSALS_PER_TURN = 3;
 
 export const toolSpecs = (): ToolSpec[] => [...TOOLS.values()].map((t) => ({ name: t.name, description: `${t.kind === 'write' ? '[PROPOSTA — exige aprovação] ' : ''}${t.description}`, parameters: t.parameters }));
 
-export function buildInstructions(o: { today: string; timezone: string; memories: string[]; summary: string | null }): string {
+export function buildInstructions(o: { today: string; timezone: string; memories: (string | { content: string; confirmed?: boolean; category?: string })[]; summary: string | null }): string {
+  const mems = o.memories.map((m) => (typeof m === 'string' ? { content: m, confirmed: true } : m));
+  const confirmed = mems.filter((m) => m.confirmed !== false);
+  const inferred = mems.filter((m) => m.confirmed === false);
   const available = MODULES.filter((m) => m.status === 'available' && m.id !== 'assistant_memory').map((m) => m.name);
   const planned = MODULES.filter((m) => m.status === 'planned').map((m) => m.name);
   return [
@@ -84,6 +87,15 @@ export function buildInstructions(o: { today: string; timezone: string; memories
     '- Bíblia: NUNCA cite versículos de memória. Todo texto bíblico vem de get_bible_passage, search_bible, find_bible_passages_by_theme ou get_bible_verse_of_day, com a referência e a tradução (BPM) junto; se a ferramenta não achar, diga que não encontrou e não invente. Para explicar uma passagem, leia o contexto ao redor (o capítulo).',
     '- Bíblia: separe claramente o TEXTO (o que a passagem diz), o CONTEXTO histórico/literário, as INTERPRETAÇÕES (diga que tradições cristãs diferentes leem de formas diferentes; não imponha uma teologia nem presuma a denominação da pessoa) e a REFLEXÃO pessoal sugerida. Nunca diga que algo é uma mensagem de Deus para a pessoa nem faça previsões espirituais. Não avalie a fé ou a vida espiritual de ninguém.',
     '- Bíblia: reflexões do diário são privadas; use get_bible_reflections SÓ quando a pessoa pedir para consultar o que escreveu. Para salvar uma reflexão use propose_save_bible_reflection apenas quando ela pedir, na voz dela. Planos: propose_create_bible_plan/propose_update_bible_plan (consulte get_bible_plans); metas: propose_create_bible_goal; favoritos: propose_add_bible_favorite; horários de leitura na rotina: propose_schedule_knowledge_routine. Atraso em plano é informativo, nunca cobre.',
+    '',
+    '## Visão integrada (Fase 06)',
+    '- Perguntas que cruzam áreas ("como foi minha semana?", "estou mantendo treino e alimentação?", "quanto estudei em 30 dias?", "quais hábitos estão ficando para trás?", "compare treinos com alimentação") → use get_life_overview com o período certo; aprofunde com as ferramentas do módulo só se precisar. Não peça a mesma consulta duas vezes.',
+    '- Na resposta, rotule claramente: **Registrado** (veio dos registros), **Planejado** (agenda/planejamento, ainda não é feito), **Sem dados** (ausência de registro, que NÃO é desempenho ruim nem prova de que não aconteceu), **Estimativa** (cálculo aproximado, diga a base) e **Sugestão** (sua).',
+    '- Nunca afirme que uma atividade foi concluída, uma refeição consumida ou um progresso alcançado sem registro. Item com horário passado e sem registro continua "planejado". Coincidências entre áreas não são causa.',
+    '- Organizar a semana/rotina ("monte minha rotina de segunda a sexta", "organize minha semana com treinos e estudo", "quero acordar mais cedo e ler todo dia"): 1) get_personal_context e get_week_agenda; 2) identifique conflitos e sobrecarga (check_schedule_conflicts); 3) pergunte SÓ o essencial que faltar (ex.: horário de trabalho/aula), em uma mensagem; 4) proponha com propose_life_plan (várias áreas, cada etapa com a ferramenta do módulo) ou propose_schedule_items (só agenda); 5) explique a prévia em poucas linhas. Respeite descanso entre treinos do mesmo grupo muscular, horários de refeição e limitações salvas. Não crie itens que já existem (consulte antes).',
+    '- Treino × alimentação: para montar/ajustar fichas consulte list_routines/get_routine e list_recent_workouts; para refeições use get_nutrition_goals (restrições!), list_recent_meals ("o que costumo comer") e search_foods (valores do catálogo, nunca inventados). Diga as limitações (ex.: dias sem registro). Recomendação não é prescrição médica ou nutricional; nada de restrição extrema nem treino incompatível com limitações informadas.',
+    '- Preferências persistentes: só proponha guardar (propose_save_preference) quando a pessoa pedir para lembrar, ou uma dedução útil e estável marcada inferred true. Não guarde frases soltas da conversa nem o que já está nos registros. Preferência INFERIDA é hipótese: confirme antes de usar como certeza.',
+    '',
     '- Depois de propor, diga em uma frase que a proposta está no cartão abaixo aguardando aprovação. Nunca diga que algo foi criado, salvo ou alterado antes de um aviso do app confirmando a aprovação.',
     '- Só proponha alterações quando a pessoa pedir ou concordar. Para alterar uma ficha, consulte-a antes (get_routine) e use os IDs exatos.',
     '- Avisos marcados como "[Aviso automático do app]" são registros do próprio app (ex.: proposta aprovada e aplicada).',
@@ -91,7 +103,8 @@ export function buildInstructions(o: { today: string; timezone: string; memories
     '## Segurança',
     '- Você não dá diagnóstico médico nem prescrição nutricional. Em caso de dor, lesão ou condição de saúde, recomende procurar um profissional.',
     '- Não peça nem exponha dados pessoais desnecessários.',
-    ...(o.memories.length ? ['', '## Preferências salvas pela pessoa (ela pediu para lembrar; não são registros de treino)', ...o.memories.map((m) => `- ${m}`)] : []),
+    ...(confirmed.length ? ['', '## Preferências salvas pela pessoa (confirmadas; não são registros)', ...confirmed.map((m) => `- ${m.content}`)] : []),
+    ...(inferred.length ? ['', '## Inferências guardadas (deduzidas pela IA, NÃO confirmadas pela pessoa; trate como hipótese)', ...inferred.map((m) => `- ${m.content}`)] : []),
     ...(o.summary ? ['', '## Resumo das mensagens antigas desta conversa (gerado automaticamente pela IA; pode conter imprecisões; NÃO é registro)', o.summary] : []),
   ].join('\n');
 }
@@ -127,7 +140,8 @@ export async function runTurn(d: EngineDeps, t: TurnInput, summaryUpto: number):
   const now = d.now();
   const day = utcDay(now);
   const ctx: ToolContext = { pool: d.pool, userId: t.userId, dataProfileId: t.dataProfileId, timezone: t.timezone, now, ...(t.photo ? { photo: { analyze: t.photo.analyze } } : {}) };
-  const memories = (await listMemories(d.pool, t.userId)).map((m) => m.content);
+  const today0 = localDate(now, t.timezone);
+  const memories = (await listMemories(d.pool, t.userId)).filter((m) => !m.expiresOn || m.expiresOn >= today0).map((m) => ({ content: m.content, confirmed: m.confirmed, category: m.category }));
   const instructions = buildInstructions({ today: localDate(now, t.timezone), timezone: t.timezone, memories, summary: t.summary });
   const input = await historyItems(d.pool, t.userId, t.conversationId, lim.historyMessages, lim.historyChars, summaryUpto, t.photo?.messageId);
   const specs = toolSpecs();

@@ -636,12 +636,12 @@ describe('arquitetura do modo nuvem (P21)', () => {
 });
 
 describe('arquitetura do RPG pessoal (Life Fase 01)', () => {
-  it('modo conta com 5 itens (Início, Missões, Evolução, IA, Mais); navegação local inalterada; telas sob demanda', () => {
+  it('modo conta com 5 itens (Início, Semana, Evolução, IA, Mais); navegação local inalterada; telas sob demanda', () => {
     const nav = readFileSync(join(ROOT, 'cloud/life/nav.ts'), 'utf8');
     expect((nav.match(/^\s*\{ to: '\//gm) ?? []).length).toBe(5);
-    for (const l of ['Início', 'Missões', 'Evolução', 'IA', 'Mais']) expect(nav).toContain(`label: '${l}'`);
+    for (const l of ['Início', 'Semana', 'Evolução', 'IA', 'Mais']) expect(nav).toContain(`label: '${l}'`);
     const app = readFileSync(join(ROOT, 'App.tsx'), 'utf8');
-    for (const r of ['/missoes', '/jornada', '/mais', '/treinar']) expect(app).toContain(`path="${r}"`);
+    for (const r of ['/missoes', '/jornada', '/mais', '/treinar', '/semana', '/minha-evolucao']) expect(app).toContain(`path="${r}"`);
     expect(app).toMatch(/lazy\(\(\) => import\('@\/cloud\/life\/LifeHomePage'\)\)/);
   });
 });

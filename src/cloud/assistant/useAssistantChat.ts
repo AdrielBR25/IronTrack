@@ -2,7 +2,7 @@
 // fica o que está na tela. Antes de perguntar e de aprovar uma proposta, sincroniza o aparelho para a IA ler os
 // registros atuais e para a aprovação não esbarrar numa versão antiga.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ASSISTANT_ERROR_MESSAGES, type ActionView, type AssistantStatusView, type ConversationSummaryView, type MessageView, type StreamEvent } from '@shared/assistant/protocol.ts';
+import { ASSISTANT_ERROR_MESSAGES, type ActionView, type ApproveBody, type AssistantStatusView, type ConversationSummaryView, type MessageView, type StreamEvent } from '@shared/assistant/protocol.ts';
 import { ApiClientError, assistantApi } from '../api';
 import { getSyncEngine } from '../syncEngine';
 import { invalidateLife } from '../life/api';
@@ -189,10 +189,10 @@ export function useAssistantChat() {
   const stop = useCallback(() => ctrl.current?.abort(), []);
 
   const decide = useCallback(
-    async (id: string, approve: boolean): Promise<ActionView | null> => {
+    async (id: string, approve: boolean, body?: ApproveBody): Promise<ActionView | null> => {
       try {
         if (approve) await syncQuick(8000);
-        const { action } = approve ? await assistantApi.approve(id) : await assistantApi.reject(id);
+        const { action } = approve ? await assistantApi.approve(id, body) : await assistantApi.reject(id);
         setActions((a) => ({ ...a, [id]: action }));
         // Traz a ficha nova/alterada para o aparelho; telas do RPG recarregam.
         if (approve) void getSyncEngine()?.syncNow();

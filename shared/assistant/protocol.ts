@@ -93,7 +93,47 @@ export const updateRoutineArgsSchema = z
   .strict();
 export type UpdateRoutineArgs = z.infer<typeof updateRoutineArgsSchema>;
 
-export const savePreferenceArgsSchema = z.object({ content: z.string().trim().min(3).max(MAX_MEMORY_CHARS) }).strict();
+// Fase 06: preferências com categoria; `inferred` = a IA deduziu (fica marcada como inferência até a pessoa confirmar);
+// `expiresOn` para prioridades da semana.
+export const MEMORY_CATEGORIES = ['goal', 'food', 'schedule', 'training', 'study', 'week_priority', 'habit', 'health', 'other'] as const;
+export type MemoryCategory = (typeof MEMORY_CATEGORIES)[number];
+export const MEMORY_CATEGORY_LABEL: Record<MemoryCategory, string> = {
+  goal: 'Objetivo pessoal',
+  food: 'Alimentação',
+  schedule: 'Horários e rotina',
+  training: 'Treino',
+  study: 'Estudos',
+  week_priority: 'Prioridade da semana',
+  habit: 'Hábitos',
+  health: 'Saúde e limitações',
+  other: 'Outros',
+};
+export const savePreferenceArgsSchema = z
+  .object({
+    content: z.string().trim().min(3).max(MAX_MEMORY_CHARS),
+    category: z.enum(MEMORY_CATEGORIES).nullish(),
+    inferred: z.boolean().nullish(),
+    expiresOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+  })
+  .strict();
+export const memoryPatchSchema = z
+  .object({
+    content: z.string().trim().min(1).max(MAX_MEMORY_CHARS).optional(),
+    category: z.enum(MEMORY_CATEGORIES).optional(),
+    confirmed: z.literal(true).optional(),
+    expiresOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  })
+  .strict()
+  .refine((p) => Object.keys(p).length > 0, { message: 'nada para alterar' });
+
+/** Fase 06: aprovação com edição. `skip` = etapas que a pessoa desmarcou; `times` = horários ajustados na prévia. */
+export const approveBodySchema = z
+  .object({
+    skip: z.array(z.number().int().min(0).max(40)).max(40).optional(),
+    times: z.array(z.object({ step: z.number().int().min(0).max(40), item: z.number().int().min(0).max(60), startTime: z.string().regex(/^([01][0-9]|2[0-3]):[0-5][0-9]$/).nullable() }).strict()).max(60).optional(),
+  })
+  .strict();
+export type ApproveBody = z.infer<typeof approveBodySchema>;
 
 // ------------------------------------------------------------------ visões devolvidas ao app
 
@@ -127,10 +167,14 @@ export type ActionKind =
   | 'update_bible_plan'
   | 'create_bible_goal'
   | 'add_bible_favorite'
-  | 'save_bible_reflection';
-export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'expired' | 'failed' | 'reverted';
+  | 'save_bible_reflection'
+  // Fase 06: agenda e planejamento multimódulo
+  | 'create_planner_items'
+  | 'apply_life_plan';
+/** `partial` (Fase 06): parte das etapas de um plano aplicada, parte não. */
+export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'expired' | 'failed' | 'reverted' | 'partial';
 /** Onde a proposta aplicada gravou (para o app abrir o item). */
-export type ActionCollection = 'routines' | 'memories' | 'habits' | 'life_routines' | 'missions' | 'meals' | 'foods' | 'nutrition_goals' | 'meal_plan' | 'books' | 'subjects' | 'knowledge_goals' | 'knowledge_sessions' | 'bible_plans' | 'bible_goals' | 'bible_marks' | 'bible_reflections';
+export type ActionCollection = 'routines' | 'memories' | 'habits' | 'life_routines' | 'missions' | 'meals' | 'foods' | 'nutrition_goals' | 'meal_plan' | 'books' | 'subjects' | 'knowledge_goals' | 'knowledge_sessions' | 'bible_plans' | 'bible_goals' | 'bible_marks' | 'bible_reflections' | 'planner' | 'plan';
 /** Prazo para desfazer uma proposta aplicada (Fase 01). */
 export const UNDO_WINDOW_HOURS = 168;
 
@@ -163,6 +207,20 @@ export interface ActionView {
   /** Fase 01: aplicada, dentro do prazo e com o necessário para desfazer. */
   undoable: boolean;
   revertedAt: string | null;
+  /** Fase 06: etapas de um plano multimódulo (cada uma usa o mesmo mecanismo de aprovação do seu módulo). */
+  steps?: ActionStepView[];
+}
+
+export interface ActionStepView {
+  index: number;
+  kind: ActionKind;
+  title: string;
+  preview: PreviewSection[];
+  status: 'pending' | 'applied' | 'failed' | 'skipped' | 'reverted';
+  error: string | null;
+  result: { collection: ActionCollection; entityId: string } | null;
+  /** Só etapas de agenda: os itens (para ajustar horários na prévia). */
+  items?: { date: string; startTime: string | null; title: string }[];
 }
 
 export interface ToolUseView {
@@ -207,6 +265,12 @@ export interface MemoryView {
   content: string;
   source: 'user' | 'ai_approved';
   createdAt: string;
+  /** Fase 06 */
+  category: MemoryCategory;
+  /** false = inferência da IA guardada com aprovação, ainda não confirmada pela pessoa. */
+  confirmed: boolean;
+  expiresOn: string | null;
+  updatedAt: string | null;
 }
 
 export interface AssistantModelView {
@@ -300,6 +364,7 @@ export const ASSISTANT_ERROR_MESSAGES: Record<string, string> = {
   action_undo_stale: 'O item mudou depois da alteração da IA. Desfaça manualmente para não perder o que mudou.',
   action_undo_blocked: 'Uma das missões já foi concluída; desfazer apagaria XP legítimo. Cancele manualmente as outras.',
   memory_limit: 'Limite de memórias atingido. Apague alguma antes de salvar outra.',
+  action_partial: 'Parte do plano não foi aplicada. Veja as etapas abaixo e tente de novo as que falharam.',
   internal_error: 'Erro interno. Nada foi alterado.',
   // Fase 03: fotos
   photo_notice_required: 'Confirme o aviso sobre o envio de fotos antes da primeira análise.',

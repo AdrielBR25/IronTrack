@@ -5,7 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Camera, Check, CircleAlert, History, ImageOff, Loader2, MessageSquarePlus, Pencil, SendHorizontal, Shield, Sparkles, Square, Trash2, Undo2, Wrench, X } from 'lucide-react';
-import { MAX_USER_MESSAGE_CHARS, type ActionView, type MessageView } from '@shared/assistant/protocol.ts';
+import { MAX_USER_MESSAGE_CHARS, type ActionView, type ApproveBody, type MessageView } from '@shared/assistant/protocol.ts';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -21,11 +21,11 @@ import { PhotoPrepError, preparePhoto, type PreparedPhoto } from '../nutrition/p
 import { errorMessage, useAssistantChat, type AssistantChat, type LiveTool } from './useAssistantChat';
 
 export const SUGGESTIONS = [
+  'Como foi minha última semana em treinos, alimentação e estudos?',
+  'Organize minha semana de segunda a sexta.',
+  'O que ainda falta hoje?',
+  'Tenho conflitos de horário nesta semana?',
   'Como foi minha evolução no supino nos últimos três meses?',
-  'Quais missões ainda faltam hoje?',
-  'Crie uma rotina matinal para mim.',
-  'Qual foi meu treino mais recente?',
-  'Quais metas ainda não cumpri?',
   'Com base nos meus registros, o que posso melhorar?',
 ];
 
@@ -51,10 +51,10 @@ function NoticeDialog({ chat }: { chat: AssistantChat }) {
           <DialogDescription asChild>
             <div className="space-y-2 text-sm">
               <p>
-                Suas mensagens e os dados de treino que o assistente consultar para responder são enviados pelo servidor do IronTrack à <strong>OpenAI</strong>, que os
-                processa para gerar a resposta. O histórico das conversas fica salvo na sua conta.
+                Suas mensagens, as fotos que você anexar e os registros que a IA consultar para responder são enviados pelo servidor do IronTrack à <strong>OpenAI</strong>,
+                que os processa para gerar a resposta. O histórico das conversas fica salvo na sua conta.
               </p>
-              <p>O assistente só lê o necessário para cada pergunta e nunca altera seus registros sem você aprovar. Fotos não são enviadas.</p>
+              <p>A IA só lê o necessário para cada pergunta e nunca altera seus registros sem você aprovar.</p>
               <p>
                 Detalhes, retenção e como apagar tudo:{' '}
                 <Link to="/assistente/privacidade" className="font-medium text-primary underline underline-offset-2">
@@ -206,10 +206,90 @@ const RESULT_LINK: Record<string, { to: string; label: string }> = {
   bible_goals: { to: '/biblia/metas', label: 'Ver metas' },
   bible_marks: { to: '/biblia/favoritos', label: 'Ver favoritos' },
   bible_reflections: { to: '/biblia/diario', label: 'Ver diário' },
+  planner: { to: '/semana', label: 'Ver Minha Semana' },
+  plan: { to: '/semana', label: 'Ver Minha Semana' },
+  memories: { to: '/assistente/privacidade', label: 'Ver preferências' },
 };
 
-function ProposalCard({ action, onDecide, onUndo }: { action: ActionView; onDecide: (id: string, approve: boolean) => Promise<ActionView | null>; onUndo: (id: string) => Promise<ActionView | null> }) {
+const STEP_STATUS: Record<NonNullable<ActionView['steps']>[number]['status'], { label: string; cls: string }> = {
+  pending: { label: 'Aguardando', cls: 'text-muted-foreground' },
+  applied: { label: 'Gravada', cls: 'text-emerald-600 dark:text-emerald-400' },
+  failed: { label: 'Falhou', cls: 'text-destructive' },
+  skipped: { label: 'Ignorada', cls: 'text-muted-foreground' },
+  reverted: { label: 'Desfeita', cls: 'text-muted-foreground' },
+};
+
+/** Etapas de um plano multi-módulo: na prévia a pessoa desmarca etapas e ajusta horários; depois vê o resultado de cada uma. */
+function PlanSteps({ action, skip, setSkip, times, setTimes }: { action: ActionView; skip: Set<number>; setSkip: (s: Set<number>) => void; times: Record<string, string>; setTimes: (t: Record<string, string>) => void }) {
+  const pending = action.status === 'pending';
+  return (
+    <ol className="space-y-2" data-testid="assistant-plan-steps">
+      {(action.steps ?? []).map((st) => {
+        const off = pending && skip.has(st.index);
+        return (
+          <li key={st.index} className={cn('rounded-xl border p-2.5', off && 'opacity-50')} data-testid="assistant-plan-step" data-status={st.status}>
+            <div className="flex items-start gap-2">
+              {pending ? (
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 accent-[hsl(var(--primary))]"
+                  checked={!skip.has(st.index)}
+                  aria-label={`Incluir etapa: ${st.title}`}
+                  onChange={(e) => {
+                    const n = new Set(skip);
+                    if (e.target.checked) n.delete(st.index);
+                    else n.add(st.index);
+                    setSkip(n);
+                  }}
+                />
+              ) : (
+                <span className={cn('mt-0.5 w-14 shrink-0 text-[11px] font-semibold', STEP_STATUS[st.status].cls)}>{STEP_STATUS[st.status].label}</span>
+              )}
+              <div className="min-w-0 flex-1 space-y-1">
+                <p className="text-xs font-semibold">{st.title}</p>
+                {st.preview.flatMap((sec) => sec.lines).slice(0, 6).map((l, j) => (
+                  <p key={j} className={cn('text-[11px] leading-snug', LINE_STYLE[l.kind])}>
+                    {LINE_MARK[l.kind]} {l.text}
+                  </p>
+                ))}
+                {pending && !off && st.items?.length ? (
+                  <div className="grid gap-1 pt-1">
+                    {st.items.map((it, k) => (
+                      <label key={k} className="flex items-center gap-2 text-[11px]">
+                        <span className="min-w-0 flex-1 truncate">
+                          {it.date.split('-').reverse().slice(0, 2).join('/')} · {it.title}
+                        </span>
+                        <input
+                          type="time"
+                          className="h-7 rounded-md border bg-background px-1.5 text-[11px]"
+                          value={times[`${st.index}:${k}`] ?? it.startTime ?? ''}
+                          aria-label={`Horário de ${it.title}`}
+                          onChange={(e) => setTimes({ ...times, [`${st.index}:${k}`]: e.target.value })}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
+                {st.error && <p className="text-[11px] text-destructive">{st.error}</p>}
+                {st.status === 'applied' && st.result && RESULT_LINK[st.result.collection] && (
+                  <Link to={RESULT_LINK[st.result.collection].to} className="text-[11px] font-medium text-primary">
+                    {RESULT_LINK[st.result.collection].label}
+                  </Link>
+                )}
+              </div>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function ProposalCard({ action, onDecide, onUndo }: { action: ActionView; onDecide: (id: string, approve: boolean, body?: ApproveBody) => Promise<ActionView | null>; onUndo: (id: string) => Promise<ActionView | null> }) {
   const [busy, setBusy] = useState<'approve' | 'reject' | 'undo' | null>(null);
+  const [skip, setSkip] = useState<Set<number>>(new Set());
+  const [times, setTimes] = useState<Record<string, string>>({});
+  const isPlan = !!action.steps?.length;
   const undo = async () => {
     setBusy('undo');
     const r = await onUndo(action.id);
@@ -218,11 +298,22 @@ function ProposalCard({ action, onDecide, onUndo }: { action: ActionView; onDeci
   };
   const decide = async (approve: boolean) => {
     setBusy(approve ? 'approve' : 'reject');
-    const r = await onDecide(action.id, approve);
+    const body: ApproveBody | undefined = approve && isPlan
+      ? {
+          skip: [...skip],
+          times: Object.entries(times).map(([k, v]) => {
+            const [step, item] = k.split(':').map(Number);
+            return { step, item, startTime: v || null };
+          }),
+        }
+      : undefined;
+    const r = await onDecide(action.id, approve, body);
     setBusy(null);
-    if (r?.status === 'applied') toast.success('Alteração aplicada.');
+    if (r?.status === 'applied') toast.success(isPlan ? 'Plano aplicado.' : 'Alteração aplicada.');
+    else if (r?.status === 'partial') toast.warning('Só parte do plano foi gravada. Veja as etapas.');
   };
   const pending = action.status === 'pending';
+  const allSkipped = isPlan && (action.steps ?? []).every((st) => skip.has(st.index));
   return (
     <Card className={cn('w-full max-w-[92%] space-y-3 border-primary/40 p-3.5', !pending && 'opacity-90')} data-testid="assistant-proposal" data-status={action.status}>
       <div className="flex items-start justify-between gap-2">
@@ -230,8 +321,8 @@ function ProposalCard({ action, onDecide, onUndo }: { action: ActionView; onDeci
           <p className="text-[11px] font-semibold uppercase tracking-wide text-primary">Proposta da IA · precisa da sua aprovação</p>
           <p className="mt-0.5 text-sm font-semibold">{action.title}</p>
         </div>
-        <Badge variant={action.status === 'applied' ? 'default' : action.status === 'pending' ? 'warn' : 'outline'} className="shrink-0">
-          {{ pending: 'Aguardando', applied: 'Aplicada', rejected: 'Cancelada', expired: 'Expirada', failed: 'Não aplicada', reverted: 'Desfeita' }[action.status]}
+        <Badge variant={action.status === 'applied' ? 'default' : action.status === 'pending' || action.status === 'partial' ? 'warn' : 'outline'} className="shrink-0">
+          {{ pending: 'Aguardando', applied: 'Aplicada', partial: 'Parcial', rejected: 'Cancelada', expired: 'Expirada', failed: 'Não aplicada', reverted: 'Desfeita' }[action.status]}
         </Badge>
       </div>
       {action.rationale && (
@@ -257,13 +348,26 @@ function ProposalCard({ action, onDecide, onUndo }: { action: ActionView; onDeci
           </div>
         ))}
       </div>
+      {isPlan && <PlanSteps action={action} skip={skip} setSkip={setSkip} times={times} setTimes={setTimes} />}
       {action.error && <p className="text-xs text-destructive">{action.error}</p>}
+      {action.status === 'partial' && (
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" disabled={!!busy} onClick={() => void decide(true)} data-testid="assistant-plan-retry">
+            {busy === 'approve' ? <Loader2 className="animate-spin" aria-hidden /> : <Check aria-hidden />} Tentar de novo as etapas que faltaram
+          </Button>
+          {action.undoable && (
+            <Button variant="ghost" size="sm" disabled={!!busy} onClick={() => void undo()}>
+              {busy === 'undo' ? <Loader2 className="animate-spin" aria-hidden /> : <Undo2 aria-hidden />} Desfazer o que foi gravado
+            </Button>
+          )}
+        </div>
+      )}
       {pending ? (
         <div className="flex gap-2">
           <Button variant="secondary" className="flex-1" disabled={!!busy} onClick={() => void decide(false)} data-testid="assistant-proposal-reject">
             {busy === 'reject' ? <Loader2 className="animate-spin" aria-hidden /> : <X aria-hidden />} Cancelar
           </Button>
-          <Button className="flex-1" disabled={!!busy} onClick={() => void decide(true)} data-testid="assistant-proposal-approve">
+          <Button className="flex-1" disabled={!!busy || allSkipped} onClick={() => void decide(true)} data-testid="assistant-proposal-approve">
             {busy === 'approve' ? <Loader2 className="animate-spin" aria-hidden /> : <Check aria-hidden />} Aprovar e aplicar
           </Button>
         </div>

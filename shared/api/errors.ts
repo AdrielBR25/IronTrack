@@ -39,6 +39,7 @@ export const API_ERRORS = {
   bible_ref_invalid: { status: 422, message: 'Referência bíblica inexistente nesta tradução.' },
   bible_date_not_allowed: { status: 422, message: 'Só é possível registrar leituras dos últimos 30 dias, nunca no futuro.' },
   bible_plan_inactive: { status: 409, message: 'Este plano está pausado, arquivado ou concluído.' },
+  planner_duplicate: { status: 409, message: 'Já existe uma atividade igual neste dia e horário.' },
   service_unavailable: { status: 503, message: 'Serviço temporariamente indisponível.' },
   timeout: { status: 504, message: 'O servidor demorou demais para responder.' },
   internal_error: { status: 500, message: 'Erro interno. Nada foi alterado.' },

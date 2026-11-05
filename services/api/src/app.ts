@@ -22,6 +22,7 @@ import { lifeRoutes } from './life/module.ts';
 import { nutritionRoutes } from './nutrition/module.ts';
 import { knowledgeRoutes } from './knowledge/module.ts';
 import { bibleRoutes } from './bible/module.ts';
+import { plannerRoutes } from './planner/module.ts';
 
 export interface ApiOptions {
   cfg: ApiConfig;
@@ -83,6 +84,7 @@ export function createApi(o: ApiOptions): Api {
   nutritionRoutes(router, { pool, ...(o.lifeNow ? { now: o.lifeNow } : {}) });
   knowledgeRoutes(router, { pool, ...(o.lifeNow ? { now: o.lifeNow } : {}) });
   bibleRoutes(router, { pool, ...(o.lifeNow ? { now: o.lifeNow } : {}) });
+  plannerRoutes(router, { pool, ...(o.lifeNow ? { now: o.lifeNow } : {}) });
   ai.register(router);
   assistant.register(router);
   if (cfg.testMode && cfg.env !== 'production' && mailer instanceof TestMailbox) testRoutes(router, mailer);
