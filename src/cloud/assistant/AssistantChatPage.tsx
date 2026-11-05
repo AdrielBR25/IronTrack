@@ -202,6 +202,10 @@ const RESULT_LINK: Record<string, { to: string; label: string }> = {
   subjects: { to: '/conhecimento/estudos', label: 'Ver estudos' },
   knowledge_goals: { to: '/conhecimento/metas', label: 'Ver metas' },
   knowledge_sessions: { to: '/conhecimento', label: 'Ver conhecimento' },
+  bible_plans: { to: '/biblia/planos', label: 'Ver planos' },
+  bible_goals: { to: '/biblia/metas', label: 'Ver metas' },
+  bible_marks: { to: '/biblia/favoritos', label: 'Ver favoritos' },
+  bible_reflections: { to: '/biblia/diario', label: 'Ver diário' },
 };
 
 function ProposalCard({ action, onDecide, onUndo }: { action: ActionView; onDecide: (id: string, approve: boolean) => Promise<ActionView | null>; onUndo: (id: string) => Promise<ActionView | null> }) {

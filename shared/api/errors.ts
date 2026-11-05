@@ -35,6 +35,10 @@ export const API_ERRORS = {
   knowledge_timer_missing: { status: 404, message: 'Esta sessão já foi encerrada ou descartada (talvez em outro aparelho).' },
   knowledge_date_not_allowed: { status: 422, message: 'Data fora do período permitido para registros.' },
   knowledge_pages: { status: 422, message: 'Página fora do total de páginas do livro.' },
+  // IronTrack Life (Fase 05): Bíblia
+  bible_ref_invalid: { status: 422, message: 'Referência bíblica inexistente nesta tradução.' },
+  bible_date_not_allowed: { status: 422, message: 'Só é possível registrar leituras dos últimos 30 dias, nunca no futuro.' },
+  bible_plan_inactive: { status: 409, message: 'Este plano está pausado, arquivado ou concluído.' },
   service_unavailable: { status: 503, message: 'Serviço temporariamente indisponível.' },
   timeout: { status: 504, message: 'O servidor demorou demais para responder.' },
   internal_error: { status: 500, message: 'Erro interno. Nada foi alterado.' },

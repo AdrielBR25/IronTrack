@@ -28,6 +28,7 @@ import { ApiError, readJson, type RequestCtx, type Router } from '../http/core.t
 import { addDays } from '../assistant/tools/time.ts';
 import { lifeTx, type LifeTx } from '../life/engine.ts';
 import * as K from './service.ts';
+import { finishHook } from '../bible/service.ts';
 
 export interface KnowledgeDeps {
   pool: Pool;
@@ -188,7 +189,8 @@ export function knowledgeRoutes(router: Router, d: KnowledgeDeps): void {
   router.add({ method: 'POST', path: `${P}/timer/:id/finish`, auth: 'session', handler: async (ctx) => {
     const f = parse(timerFinishSchema, await body(ctx));
     return mutate(ctx, async (t) => {
-      const r = await K.finishTimer(t, ctx.params.id, f);
+      // Fase 05: um cronômetro bíblico encerrado por aqui vira sessão bíblica (sem capítulos dados como lidos).
+      const r = await K.finishTimer(t, ctx.params.id, f, finishHook(t, null));
       return { ...r, session: (await K.sessionViews(t.c, t.userId, { ids: [r.id] }))[0] ?? null };
     });
   } });

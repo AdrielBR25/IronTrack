@@ -11,7 +11,7 @@ export const KNOWLEDGE_PROTOCOL = 'irontrack.life.knowledge.v1';
 
 // ------------------------------------------------------------------ vocabulário
 
-/** Módulos que reaproveitam este motor. 'bible' fica reservado para a Fase 05 (nada grava 'bible' ainda). */
+/** Módulos que reaproveitam este motor. 'bible' = Fase 05 (leitura bíblica: shared/bible/protocol.ts). */
 export const KNOWLEDGE_MODULES = ['knowledge', 'bible'] as const;
 export type KnowledgeModule = (typeof KNOWLEDGE_MODULES)[number];
 
@@ -50,7 +50,7 @@ export const GOAL_SCOPES = ['reading', 'study', 'focus', 'any'] as const;
 export type GoalScope = (typeof GOAL_SCOPES)[number];
 export const GOAL_PERIODS = ['daily', 'weekly', 'by_date'] as const;
 export type GoalPeriod = (typeof GOAL_PERIODS)[number];
-export const GOAL_METRIC_UNIT: Record<GoalMetric, string> = { minutes: 'min', pages: 'páginas', sessions: 'sessões', days: 'dias', book_finish: '' };
+export const GOAL_METRIC_UNIT: Record<GoalMetric | 'chapters' | 'plan_finish', string> = { minutes: 'min', pages: 'páginas', sessions: 'sessões', days: 'dias', book_finish: '', chapters: 'capítulos', plan_finish: '' };
 
 // ------------------------------------------------------------------ limites e regras do cronômetro
 
@@ -251,6 +251,8 @@ export interface TimerView {
   label: string | null;
   /** Nome do livro/matéria/tópico para exibir. */
   title: string;
+  /** Fase 05: capítulo bíblico de início ("JHN.3") quando module = 'bible'. */
+  ref: string | null;
   plannedSec: number | null;
   pomodoro: PomodoroConfig | null;
   sound: boolean;
@@ -569,6 +571,8 @@ export interface SessionView {
   topicId: string | null;
   label: string | null;
   title: string;
+  /** Fase 05: trecho bíblico ("JHN.3" ou "JHN.3-JHN.5") quando module = 'bible'. */
+  ref: string | null;
   date: string;
   startedAt: string | null;
   endedAt: string | null;
@@ -600,7 +604,12 @@ export interface NoteView {
 export interface GoalView {
   id: string;
   title: string;
-  metric: GoalMetric;
+  /** Fase 05: metas bíblicas também usam 'chapters' e 'plan_finish'. */
+  metric: GoalMetric | 'chapters' | 'plan_finish';
+  module: KnowledgeModule;
+  /** Fase 05: livro bíblico ("PRO") e plano de leitura (metas bíblicas). */
+  ref: string | null;
+  planId: string | null;
   scope: GoalScope;
   subjectId: string | null;
   bookId: string | null;

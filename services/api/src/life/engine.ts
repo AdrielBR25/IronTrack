@@ -103,9 +103,10 @@ export async function settle(t: LifeTx): Promise<void> {
 
 // ------------------------------------------------------------------ livro-razão
 
-export type Source = 'habit' | 'mission' | 'workout' | 'routine' | 'achievement' | 'legacy' | 'nutrition' | 'knowledge';
+export type Source = 'habit' | 'mission' | 'workout' | 'routine' | 'achievement' | 'legacy' | 'nutrition' | 'knowledge' | 'bible';
 // Fase 02: registro alimentar ('nutrition') também entra no teto diário. Fase 04: leitura/estudos ('knowledge') também.
-const CAPPED: readonly Source[] = ['habit', 'mission', 'workout', 'routine', 'nutrition', 'knowledge'];
+// Fase 05: leitura bíblica ('bible') também.
+const CAPPED: readonly Source[] = ['habit', 'mission', 'workout', 'routine', 'nutrition', 'knowledge', 'bible'];
 
 export interface GrantInput {
   source: Source;
@@ -308,6 +309,14 @@ export async function achievementProgress(c: PoolClient, userId: string, today: 
   const studyMin = await one("SELECT (coalesce(sum(active_sec), 0) / 60)::int AS n FROM knowledge_sessions WHERE user_id = $1 AND module = 'knowledge' AND kind = 'study'");
   const hasStudy = studyMin > 0 || (await one('SELECT count(*)::int AS n FROM knowledge_subjects WHERE user_id = $1')) > 0;
   const streak = await streakOf(c, userId, today);
+  // Fase 05: Bíblia. Leitura = capítulo registrado (leitor, plano, sessão) ou sessão de leitura bíblica. Disponível só
+  // para quem usa a área (sem dados, as conquistas não aparecem como "pendentes").
+  const bibleDays = await one(
+    "SELECT count(*)::int AS n FROM (SELECT date FROM bible_chapter_logs WHERE user_id = $1 UNION SELECT date FROM knowledge_sessions WHERE user_id = $1 AND module = 'bible' AND active_sec >= 60) d",
+  );
+  const bibleChapters = await one('SELECT count(*)::int AS n FROM (SELECT DISTINCT book, chapter FROM bible_chapter_logs WHERE user_id = $1) x');
+  const biblePlans = await one("SELECT count(*)::int AS n FROM bible_plans WHERE user_id = $1 AND status = 'completed'");
+  const hasBible = bibleDays > 0 || (await one('SELECT count(*)::int AS n FROM bible_plans WHERE user_id = $1')) > 0;
   const diaryDays = await one(`SELECT count(DISTINCT day)::int AS n FROM life_xp_events WHERE user_id = $1 AND source = 'nutrition' AND source_key LIKE 'nutrition:day:%' AND ${ACTIVE_GRANT}`);
   const hasNutrition = diaryDays > 0 || (await one('SELECT count(*)::int AS n FROM nutrition_meals WHERE user_id = $1')) > 0;
   return {
@@ -319,6 +328,10 @@ export async function achievementProgress(c: PoolClient, userId: string, today: 
     nutrition_week: { value: Math.min(diaryDays, 7), target: 7, available: hasNutrition },
     first_book: { value: Math.min(booksDone, 1), target: 1, available: hasBooks },
     study_10h: { value: Math.min(studyMin, 600), target: 600, available: hasStudy },
+    bible_first: { value: Math.min(bibleDays, 1), target: 1, available: hasBible },
+    bible_plan: { value: Math.min(biblePlans, 1), target: 1, available: hasBible },
+    bible_week: { value: Math.min(bibleDays, 7), target: 7, available: hasBible },
+    bible_10_chapters: { value: Math.min(bibleChapters, 10), target: 10, available: hasBible },
   };
 }
 

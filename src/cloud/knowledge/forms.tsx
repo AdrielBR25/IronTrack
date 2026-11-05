@@ -400,7 +400,7 @@ export function GoalDialog({ open, onOpenChange, goal }: { open: boolean; onOpen
     if (goal)
       setF({
         title: goal.title,
-        metric: goal.metric,
+        metric: goal.metric as GoalMetric,
         period: goal.period,
         scope: goal.scope,
         target: String(goal.target),

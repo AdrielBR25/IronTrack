@@ -122,10 +122,15 @@ export type ActionKind =
   | 'create_topics'
   | 'create_study_plan'
   | 'update_knowledge_goals'
-  | 'schedule_knowledge_routine';
+  | 'schedule_knowledge_routine'
+  | 'create_bible_plan'
+  | 'update_bible_plan'
+  | 'create_bible_goal'
+  | 'add_bible_favorite'
+  | 'save_bible_reflection';
 export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'expired' | 'failed' | 'reverted';
 /** Onde a proposta aplicada gravou (para o app abrir o item). */
-export type ActionCollection = 'routines' | 'memories' | 'habits' | 'life_routines' | 'missions' | 'meals' | 'foods' | 'nutrition_goals' | 'meal_plan' | 'books' | 'subjects' | 'knowledge_goals' | 'knowledge_sessions';
+export type ActionCollection = 'routines' | 'memories' | 'habits' | 'life_routines' | 'missions' | 'meals' | 'foods' | 'nutrition_goals' | 'meal_plan' | 'books' | 'subjects' | 'knowledge_goals' | 'knowledge_sessions' | 'bible_plans' | 'bible_goals' | 'bible_marks' | 'bible_reflections';
 /** Prazo para desfazer uma proposta aplicada (Fase 01). */
 export const UNDO_WINDOW_HOURS = 168;
 

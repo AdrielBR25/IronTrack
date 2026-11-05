@@ -60,6 +60,7 @@ import { ApiError } from '../http/core.ts';
 import { addDays, localDate, mondayOf } from '../assistant/tools/time.ts';
 import { activeGrant, grant, recomputeMission, reverse, scheduledOn, weekday, type LifeTx, type MissionRow } from '../life/engine.ts';
 import { getHabit, getRoutine, logHabit, routineSnapshot, updateRoutine, createRoutine } from '../life/service.ts';
+import { BIBLE_REWARD } from '../../../../shared/bible/protocol.ts';
 
 type Q = Pick<PoolClient, 'query'>;
 const isUuid = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
@@ -554,7 +555,11 @@ export interface SessionRow {
   created_at: Date;
 }
 
-const sessionKey = (s: Pick<SessionRow, 'id' | 'origin'>) => (s.origin === 'timer' ? `knowledge:session:${s.id}` : `knowledge:manual:${s.id}`);
+/** Chave do XP da sessão. Fase 05: leitura bíblica tem chaves e origem próprias ('bible'), atributo Espiritualidade. */
+export const sessionKey = (s: Pick<SessionRow, 'id' | 'origin' | 'module'>) => {
+  const p = s.module === 'bible' ? 'bible' : 'knowledge';
+  return s.origin === 'timer' ? `${p}:session:${s.id}` : `${p}:manual:${s.id}`;
+};
 
 export function sessionView(s: SessionRow, xp = 0): SessionView {
   return {
@@ -568,6 +573,7 @@ export function sessionView(s: SessionRow, xp = 0): SessionView {
     topicId: s.topic_id,
     label: s.label,
     title: s.title,
+    ref: s.ref,
     date: s.date,
     startedAt: iso(s.started_at),
     endedAt: iso(s.ended_at),
@@ -590,7 +596,7 @@ export async function getSession(c: Q, userId: string, id: string, lock = false)
   return (await c.query<SessionRow>(`SELECT * FROM knowledge_sessions WHERE user_id = $1 AND id = $2${lock ? ' FOR UPDATE' : ''}`, [userId, id])).rows[0] ?? null;
 }
 
-export async function sessionViews(c: Q, userId: string, f: { from?: string; to?: string; bookId?: string; subjectId?: string; kind?: SessionKind; ids?: string[]; limit?: number } = {}): Promise<SessionView[]> {
+export async function sessionViews(c: Q, userId: string, f: { from?: string; to?: string; bookId?: string; subjectId?: string; kind?: SessionKind; ids?: string[]; limit?: number; module?: KnowledgeModule | 'all' } = {}): Promise<SessionView[]> {
   const p: unknown[] = [userId];
   const w: string[] = [];
   const add = (sql: string, v: unknown) => {
@@ -603,6 +609,9 @@ export async function sessionViews(c: Q, userId: string, f: { from?: string; to?
   if (f.subjectId) add('subject_id = ?', isUuid(f.subjectId) ? f.subjectId : null);
   if (f.kind) add('kind = ?', f.kind);
   if (f.ids) add('id = ANY(?)', f.ids.filter(isUuid));
+  // Fase 05: listas do Conhecimento não misturam leitura bíblica (e vice-versa). Busca por id vale para os dois.
+  const mod = f.module ?? (f.ids ? 'all' : MODULE);
+  if (mod !== 'all') add('module = ?', mod);
   const lim = Math.min(500, Math.max(1, f.limit ?? 200));
   const rows = (await c.query<SessionRow>(`SELECT * FROM knowledge_sessions WHERE user_id = $1 ${w.map((x) => `AND ${x}`).join(' ')} ORDER BY date DESC, coalesce(started_at, created_at) DESC LIMIT ${lim}`, p)).rows;
   if (!rows.length) return [];
@@ -613,6 +622,9 @@ export async function sessionViews(c: Q, userId: string, f: { from?: string; to?
 
 interface NewSession {
   id: string;
+  /** Fase 05: 'bible' + ref (trecho de capítulos). Padrão: 'knowledge'. */
+  module?: KnowledgeModule;
+  ref?: string | null;
   clientId: string | null;
   kind: SessionKind;
   mode: TimerMode | 'manual';
@@ -667,11 +679,11 @@ async function insertSession(t: LifeTx, s: NewSession): Promise<SessionRow> {
   }
   const r = await t.c.query<SessionRow>(
     `INSERT INTO knowledge_sessions (id, user_id, module, kind, mode, origin, book_id, subject_id, topic_id, label, title, date, started_at, ended_at, active_sec, pause_sec, excluded_sec, focus_blocks,
-       page_before, page_start, page_end, pages_read, note, segments, client_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25) RETURNING *`,
+       page_before, page_start, page_end, pages_read, note, segments, client_id, ref)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26) RETURNING *`,
     [
-      s.id, t.userId, MODULE, s.kind, s.mode, s.origin, s.target.bookId, s.target.subjectId, s.target.topicId, s.target.label, s.target.title, s.date, s.startedAt, s.endedAt,
-      Math.min(36000, s.activeSec), s.pauseSec, s.excludedSec, s.focusBlocks, pageBefore, pageStart, pageEnd, pagesRead, s.note, s.segments ? JSON.stringify(s.segments) : null, s.clientId,
+      s.id, t.userId, s.module ?? MODULE, s.kind, s.mode, s.origin, s.target.bookId, s.target.subjectId, s.target.topicId, s.target.label, s.target.title, s.date, s.startedAt, s.endedAt,
+      Math.min(36000, s.activeSec), s.pauseSec, s.excludedSec, s.focusBlocks, pageBefore, pageStart, pageEnd, pagesRead, s.note, s.segments ? JSON.stringify(s.segments) : null, s.clientId, s.ref ?? null,
     ],
   );
   if (s.target.topicId) await t.c.query("UPDATE knowledge_topics SET status = 'studying', version = version + 1, updated_at = now() WHERE user_id = $1 AND id = $2 AND status = 'pending'", [t.userId, s.target.topicId]);
@@ -685,13 +697,22 @@ function checkManualDate(t: LifeTx, date: string): void {
   if (date > t.today || date < addDays(t.today, -KNOWLEDGE_LIMITS.manualPastDays)) throw new ApiError('knowledge_date_not_allowed');
 }
 
-export async function createManualSession(t: LifeTx, m: ManualSession, origin: 'manual' | 'ai', id: string = randomUUID()): Promise<{ id: string; existed: boolean }> {
+export async function createManualSession(
+  t: LifeTx,
+  m: ManualSession,
+  origin: 'manual' | 'ai',
+  id: string = randomUUID(),
+  bible?: { ref: string; title: string; before?: (sessionId: string) => Promise<void> },
+): Promise<{ id: string; existed: boolean }> {
   const ex = await t.c.query<{ id: string }>('SELECT id FROM knowledge_sessions WHERE user_id = $1 AND client_id = $2', [t.userId, m.clientId]);
   if (ex.rows[0]) return { id: ex.rows[0].id, existed: true };
   checkManualDate(t, m.date);
-  const target = await resolveTarget(t.c, t.userId, m.kind, m);
+  const target = bible ? { bookId: null, subjectId: null, topicId: null, label: null, title: bible.title.slice(0, 160) } : await resolveTarget(t.c, t.userId, m.kind, m);
+  if (bible?.before) await bible.before(id);
   const row = await insertSession(t, {
     id,
+    module: bible ? 'bible' : 'knowledge',
+    ref: bible?.ref ?? null,
     clientId: m.clientId,
     kind: m.kind,
     mode: 'manual',
@@ -751,6 +772,8 @@ export async function deleteSession(t: LifeTx, id: string): Promise<SessionRow> 
     await t.c.query('UPDATE knowledge_books SET current_page = $4, version = version + 1, updated_at = now() WHERE user_id = $1 AND id = $2 AND current_page = $3 AND status <> \'done\'', [t.userId, s.book_id, s.page_end, s.page_before]);
   }
   await reverse(t, sessionKey(s), `Sessão excluída: ${s.title}`.slice(0, 200));
+  // Fase 05: capítulos registrados por esta sessão saem junto (o registro do capítulo era o efeito dela).
+  if (s.module === 'bible') await t.c.query('DELETE FROM bible_chapter_logs WHERE user_id = $1 AND session_id = $2', [t.userId, id]);
   // Registro na missão vinculada (se houver) sai junto; a missão recalcula (e estorna, se deixar de estar concluída).
   const me = await t.c.query<{ mission_id: string }>('DELETE FROM life_mission_entries WHERE user_id = $1 AND source_key = $2 RETURNING mission_id', [t.userId, `knowledge:session:${id}`]);
   for (const x of me.rows) {
@@ -786,16 +809,18 @@ export async function syncSessionReward(t: LifeTx, s: SessionRow): Promise<void>
   if (existing && existing.amount === desired) return;
   if (existing) await reverse(t, key, `Sessão ajustada: ${s.title}`.slice(0, 200));
   if (desired <= 0) return;
+  const bible = s.module === 'bible';
+  const src = bible ? 'bible' : 'knowledge';
   const used = (await t.c.query<{ all: number; manual: number }>(
-    "SELECT coalesce(sum(amount), 0)::int AS all, coalesce(sum(amount) FILTER (WHERE source_key LIKE 'knowledge:manual:%'), 0)::int AS manual FROM life_xp_events WHERE user_id = $1 AND day = $2 AND source = 'knowledge' AND (source_key LIKE 'knowledge:session:%' OR source_key LIKE 'knowledge:manual:%')",
-    [t.userId, s.date],
+    `SELECT coalesce(sum(amount), 0)::int AS all, coalesce(sum(amount) FILTER (WHERE source_key LIKE '${src}:manual:%'), 0)::int AS manual FROM life_xp_events WHERE user_id = $1 AND day = $2 AND source = $3 AND (source_key LIKE '${src}:session:%' OR source_key LIKE '${src}:manual:%')`,
+    [t.userId, s.date, src],
   )).rows[0];
-  let amount = Math.min(desired, Math.max(0, KNOWLEDGE_REWARD.sessionsDailyMax - used.all));
+  let amount = Math.min(desired, Math.max(0, (bible ? BIBLE_REWARD.sessionsDailyMax : KNOWLEDGE_REWARD.sessionsDailyMax) - used.all));
   if (s.origin !== 'timer') amount = Math.min(amount, Math.max(0, KNOWLEDGE_REWARD.manualDailyMax - used.manual));
-  const attribute = s.kind === 'focus' && !s.book_id && !s.subject_id ? 'discipline' : 'knowledge';
-  const label = s.kind === 'reading' ? 'Leitura' : s.kind === 'study' ? 'Estudo' : 'Foco';
+  const attribute = bible ? 'spirituality' : s.kind === 'focus' && !s.book_id && !s.subject_id ? 'discipline' : 'knowledge';
+  const label = bible ? 'Leitura bíblica' : s.kind === 'reading' ? 'Leitura' : s.kind === 'study' ? 'Estudo' : 'Foco';
   const min = Math.floor(s.active_sec / 60);
-  await grant(t, { source: 'knowledge', key, sourceId: s.id, attribute, requested: amount, day: s.date, reason: `${label}${s.origin === 'timer' ? '' : ' (registro manual)'}: ${s.title} · ${min} min`.slice(0, 200) });
+  await grant(t, { source: src, key, sourceId: s.id, attribute, requested: amount, day: s.date, reason: `${label}${s.origin === 'timer' ? '' : ' (registro manual)'}: ${s.title} · ${min} min`.slice(0, 200) });
 }
 
 // ------------------------------------------------------------------ metas
@@ -815,6 +840,9 @@ export interface GoalRow {
   preferred_time: string | null;
   habit_id: string | null;
   mission_id: string | null;
+  /** Fase 05 (module = 'bible'): livro ("PRO") e plano. */
+  ref: string | null;
+  plan_id: string | null;
   status: GoalView['status'];
   starts_on: string;
   origin: 'user' | 'ai';
@@ -850,13 +878,24 @@ function goalFilter(g: GoalRow, p: unknown[]): string {
     p.push(g.book_id);
     w.push(`book_id = $${p.length}`);
   }
+  if (g.module === 'bible' && g.ref) {
+    // Sessões cujo trecho começa ou termina no livro ("PRO.3", "PRO.1-PRO.3", "PSA.150-PRO.1").
+    p.push(`${g.ref}.%`);
+    p.push(`%-${g.ref}.%`);
+    w.push(`(ref LIKE $${p.length - 1} OR ref LIKE $${p.length})`);
+  }
   return w.join(' AND ');
 }
 
-export const goalMatches = (g: GoalRow, s: Pick<SessionRow, 'kind' | 'subject_id' | 'book_id' | 'module'>) =>
-  g.module === s.module && (g.scope === 'any' || g.scope === s.kind) && (!g.subject_id || g.subject_id === s.subject_id) && (!g.book_id || g.book_id === s.book_id);
+export const goalMatches = (g: GoalRow, s: Pick<SessionRow, 'kind' | 'subject_id' | 'book_id' | 'module'> & { ref?: string | null }) =>
+  g.module === s.module &&
+  (g.scope === 'any' || g.scope === s.kind) &&
+  (!g.subject_id || g.subject_id === s.subject_id) &&
+  (!g.book_id || g.book_id === s.book_id) &&
+  (!(g.module === 'bible' && g.ref) || !!s.ref?.split('-').some((k) => k.startsWith(`${g.ref}.`)));
 
 export async function goalProgress(c: Q, userId: string, g: GoalRow, start: string, end: string): Promise<number> {
+  if (g.module === 'bible') return bibleGoalProgress(c, userId, g, start, end);
   if (g.metric === 'book_finish') {
     const b = g.book_id ? await getBook(c, userId, g.book_id) : null;
     return b && b.status === 'done' && b.finished_on && b.finished_on <= (g.due_date ?? b.finished_on) ? 1 : 0;
@@ -865,6 +904,32 @@ export async function goalProgress(c: Q, userId: string, g: GoalRow, start: stri
   const f = goalFilter(g, p);
   const agg = g.metric === 'minutes' ? 'coalesce(sum(active_sec), 0) / 60' : g.metric === 'pages' ? 'coalesce(sum(pages_read), 0)' : g.metric === 'sessions' ? 'count(*) FILTER (WHERE active_sec >= 60 OR pages_read > 0)' : 'count(DISTINCT date)';
   return Number((await c.query<{ n: number }>(`SELECT (${agg})::int AS n FROM knowledge_sessions WHERE user_id = $1 AND date BETWEEN $2 AND $3 AND ${f}`, p)).rows[0].n);
+}
+
+/**
+ * Fase 05: progresso das metas bíblicas. Capítulos e dias contam os capítulos REGISTRADOS (leitor, plano, sessão) e as
+ * sessões de leitura bíblica; minutos e sessões, só as sessões. Livro opcional (ref). Nada é contado à mão.
+ */
+async function bibleGoalProgress(c: Q, userId: string, g: GoalRow, start: string, end: string): Promise<number> {
+  const one = async (sql: string, p: unknown[]) => Number((await c.query<{ n: number }>(sql, p)).rows[0]?.n ?? 0);
+  if (g.metric === 'plan_finish') {
+    if (!g.plan_id) return 0;
+    return one("SELECT count(*)::int AS n FROM bible_plans WHERE user_id = $1 AND id = $2 AND status = 'completed' AND completed_on <= $3", [userId, g.plan_id, g.due_date ?? end]);
+  }
+  const bookLog = g.ref ? ' AND book = $4' : '';
+  const lp = g.ref ? [userId, start, end, g.ref] : [userId, start, end];
+  if (g.metric === 'chapters') return one(`SELECT count(*)::int AS n FROM bible_chapter_logs WHERE user_id = $1 AND date BETWEEN $2 AND $3${bookLog}`, lp);
+  const p: unknown[] = [userId, start, end];
+  const f = goalFilter(g, p);
+  if (g.metric === 'days') {
+    return one(
+      `SELECT count(*)::int AS n FROM (SELECT date FROM knowledge_sessions WHERE user_id = $1 AND date BETWEEN $2 AND $3 AND ${f}
+         UNION SELECT date FROM bible_chapter_logs WHERE user_id = $1 AND date BETWEEN $2 AND $3${g.ref ? ` AND book = $${p.length + 1}` : ''}) d`,
+      g.ref ? [...p, g.ref] : p,
+    );
+  }
+  const agg = g.metric === 'minutes' ? 'coalesce(sum(active_sec), 0) / 60' : 'count(*) FILTER (WHERE active_sec >= 60)';
+  return one(`SELECT (${agg})::int AS n FROM knowledge_sessions WHERE user_id = $1 AND date BETWEEN $2 AND $3 AND ${f}`, p);
 }
 
 const goalKey = (g: Pick<GoalRow, 'id'>, start: string) => `knowledge:goal:${g.id}:${start}`;
@@ -924,8 +989,8 @@ async function settleGoal(t: LifeTx, g: GoalRow, per: { start: string; end: stri
     if (per.end < addDays(t.today, -1)) return;
     const linked = habitPays || !!g.mission_id;
     const day = per.end < t.today ? per.end : per.date <= t.today ? (per.date > per.start ? per.date : t.today < per.end ? t.today : per.end) : t.today;
-    const attribute = g.metric === 'book_finish' ? 'knowledge' : 'discipline';
-    await grant(t, { source: 'knowledge', key, sourceId: g.id, attribute, requested: linked ? 0 : goalXp(g.period), day: day > t.today ? t.today : day, reason: `Meta cumprida: ${g.title}${linked ? ' (XP pelo vínculo)' : ''}`.slice(0, 200) });
+    const attribute = g.module === 'bible' ? 'spirituality' : g.metric === 'book_finish' ? 'knowledge' : 'discipline';
+    await grant(t, { source: g.module === 'bible' ? 'bible' : 'knowledge', key, sourceId: g.id, attribute, requested: linked ? 0 : goalXp(g.period), day: day > t.today ? t.today : day, reason: `Meta cumprida: ${g.title}${linked ? ' (XP pelo vínculo)' : ''}`.slice(0, 200) });
     return;
   }
   if (existing) await reverse(t, key, `Meta deixou de estar cumprida: ${g.title}`.slice(0, 200));
@@ -938,7 +1003,14 @@ async function feedMission(t: LifeTx, s: SessionRow): Promise<void> {
   for (const g of goals) {
     const m = (await t.c.query<MissionRow>('SELECT * FROM life_missions WHERE user_id = $1 AND id = $2 FOR UPDATE', [t.userId, g.mission_id])).rows[0];
     if (!m || m.metric !== 'manual' || m.status !== 'active' || s.date < m.starts_on || s.date > m.ends_on) continue;
-    const amount = m.unit === 'minutes' ? Math.floor(s.active_sec / 60) : m.unit === 'pages' ? s.pages_read : 1;
+    const amount =
+      m.unit === 'minutes'
+        ? Math.floor(s.active_sec / 60)
+        : m.unit === 'pages'
+          ? s.module === 'bible' ? 0 : s.pages_read
+          : m.unit === 'chapters'
+            ? s.module === 'bible' ? Number((await t.c.query<{ n: number }>('SELECT count(*)::int AS n FROM bible_chapter_logs WHERE user_id = $1 AND session_id = $2', [t.userId, s.id])).rows[0].n) : 0
+            : 1;
     if (amount <= 0) continue;
     const r = await t.c.query(
       `INSERT INTO life_mission_entries (id, user_id, mission_id, date, amount, note, source_key) VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -950,7 +1022,8 @@ async function feedMission(t: LifeTx, s: SessionRow): Promise<void> {
   }
 }
 
-async function validateGoalLinks(t: LifeTx, g: { habitId?: string | null; missionId?: string | null; subjectId?: string | null; bookId?: string | null; period?: string }): Promise<void> {
+async function validateGoalLinks(t: LifeTx, g: { habitId?: string | null; missionId?: string | null; subjectId?: string | null; bookId?: string | null; period?: string; planId?: string | null }): Promise<void> {
+  if (g.planId && !(await t.c.query('SELECT 1 FROM bible_plans WHERE user_id = $1 AND id = $2', [t.userId, g.planId])).rowCount) throw new ApiError('validation_failed', { planId: 'Plano não encontrado.' });
   if (g.subjectId && !(await getSubject(t.c, t.userId, g.subjectId))) throw new ApiError('validation_failed', { subjectId: 'Matéria não encontrada.' });
   if (g.bookId && !(await getBook(t.c, t.userId, g.bookId))) throw new ApiError('validation_failed', { bookId: 'Livro não encontrado.' });
   if (g.habitId) {
@@ -974,17 +1047,20 @@ export async function defaultGoalTitle(c: Q, userId: string, g: GoalInput): Prom
   return (g.metric === 'pages' ? `Ler ${qty} ${book ? `de ${what} ` : ''}${per}` : `${verb} ${subject || book ? `${what} ` : ''}${qty} ${per}`).replace(/\s+/g, ' ').slice(0, 80);
 }
 
-export async function createGoal(t: LifeTx, g: GoalInput, origin: 'user' | 'ai', id: string = randomUUID()): Promise<GoalRow> {
+/** Meta como gravada: a da Fase 04 ou, na Fase 05, a bíblica (module = 'bible', métricas chapters/plan_finish, livro e plano). */
+export type AnyGoalInput = Omit<GoalInput, 'metric'> & { metric: GoalRow['metric']; module?: KnowledgeModule; ref?: string | null; planId?: string | null };
+
+export async function createGoal(t: LifeTx, g: AnyGoalInput, origin: 'user' | 'ai', id: string = randomUUID()): Promise<GoalRow> {
   const n = (await t.c.query<{ n: number }>("SELECT count(*)::int AS n FROM knowledge_goals WHERE user_id = $1 AND status IN ('active', 'paused')", [t.userId])).rows[0].n;
   if (n >= KNOWLEDGE_LIMITS.goals) throw new ApiError('life_limit');
   await validateGoalLinks(t, g);
   if (g.dueDate && g.dueDate < t.today) throw new ApiError('validation_failed', { dueDate: 'O prazo já passou.' });
-  const title = g.title ?? (await defaultGoalTitle(t.c, t.userId, g));
+  const title = g.title ?? (await defaultGoalTitle(t.c, t.userId, g as GoalInput));
   const row = (
     await t.c.query<GoalRow>(
-      `INSERT INTO knowledge_goals (id, user_id, title, metric, scope, subject_id, book_id, period, target, days, due_date, preferred_time, habit_id, mission_id, starts_on, origin)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING *`,
-      [id, t.userId, title, g.metric, g.scope, g.subjectId ?? null, g.bookId ?? null, g.period, g.target, g.days, g.dueDate ?? null, g.preferredTime ?? null, g.habitId ?? null, g.missionId ?? null, t.today, origin],
+      `INSERT INTO knowledge_goals (id, user_id, title, metric, scope, subject_id, book_id, period, target, days, due_date, preferred_time, habit_id, mission_id, starts_on, origin, module, ref, plan_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING *`,
+      [id, t.userId, title, g.metric, g.scope, g.subjectId ?? null, g.bookId ?? null, g.period, g.target, g.days, g.dueDate ?? null, g.preferredTime ?? null, g.habitId ?? null, g.missionId ?? null, t.today, origin, g.module ?? 'knowledge', g.ref ?? null, g.planId ?? null],
     )
   ).rows[0];
   await recomputeGoals(t, [t.today], { goalId: row.id });
@@ -1006,7 +1082,7 @@ export async function updateGoal(t: LifeTx, id: string, p: GoalPatch, version?: 
       t.userId,
       id,
       p.title ?? before.title,
-      before.metric === 'book_finish' ? 1 : p.target ?? before.target,
+      before.metric === 'book_finish' || before.metric === 'plan_finish' ? 1 : p.target ?? before.target,
       p.days ?? before.days,
       p.dueDate !== undefined ? p.dueDate : before.due_date,
       p.preferredTime !== undefined ? p.preferredTime : before.preferred_time,
@@ -1034,19 +1110,22 @@ export async function deleteGoal(t: LifeTx, id: string): Promise<GoalRow> {
 export async function restoreGoal(t: LifeTx, g: GoalRow): Promise<void> {
   await t.c.query('DELETE FROM knowledge_goals WHERE user_id = $1 AND id = $2', [t.userId, g.id]);
   await t.c.query(
-    `INSERT INTO knowledge_goals (id, user_id, module, title, metric, scope, subject_id, book_id, period, target, days, due_date, preferred_time, habit_id, mission_id, status, starts_on, origin, version)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
-    [g.id, t.userId, g.module, g.title, g.metric, g.scope, g.subject_id, g.book_id, g.period, g.target, g.days, g.due_date, g.preferred_time, g.habit_id, g.mission_id, g.status, g.starts_on, g.origin, g.version + 1],
+    `INSERT INTO knowledge_goals (id, user_id, module, title, metric, scope, subject_id, book_id, period, target, days, due_date, preferred_time, habit_id, mission_id, status, starts_on, origin, version, ref, plan_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
+    [g.id, t.userId, g.module, g.title, g.metric, g.scope, g.subject_id, g.book_id, g.period, g.target, g.days, g.due_date, g.preferred_time, g.habit_id, g.mission_id, g.status, g.starts_on, g.origin, g.version + 1, g.ref, g.plan_id],
   );
   await recomputeGoals(t, [t.today, addDays(t.today, -1)], { goalId: g.id });
 }
 
-export async function goalViews(c: Q, userId: string, today: string, opts: { includeArchived?: boolean; ids?: string[] } = {}): Promise<GoalView[]> {
+export async function goalViews(c: Q, userId: string, today: string, opts: { includeArchived?: boolean; ids?: string[]; module?: KnowledgeModule } = {}): Promise<GoalView[]> {
   const p: unknown[] = [userId];
   let w = opts.includeArchived ? '' : " AND status <> 'archived'";
   if (opts.ids) {
     p.push(opts.ids.filter(isUuid));
     w += ` AND id = ANY($${p.length})`;
+  } else {
+    p.push(opts.module ?? MODULE);
+    w += ` AND module = $${p.length}`;
   }
   const rows = (await c.query<GoalRow>(`SELECT * FROM knowledge_goals WHERE user_id = $1${w} ORDER BY array_position(ARRAY['active','paused','completed','archived'], status), created_at`, p)).rows;
   const out: GoalView[] = [];
@@ -1076,6 +1155,9 @@ export async function goalViews(c: Q, userId: string, today: string, opts: { inc
       scope: g.scope,
       subjectId: g.subject_id,
       bookId: g.book_id,
+      module: g.module,
+      ref: g.ref,
+      planId: g.plan_id,
       period: g.period,
       target: g.target,
       days: g.days,
@@ -1131,6 +1213,7 @@ interface TimerRow {
   topic_id: string | null;
   label: string | null;
   title: string;
+  ref: string | null;
   planned_sec: number | null;
   pomodoro: PomodoroConfig | null;
   sound: boolean;
@@ -1176,6 +1259,7 @@ function timerView(r: TimerRow, now: number): TimerView {
     topicId: r.topic_id,
     label: r.label,
     title: r.title,
+    ref: r.ref,
     plannedSec: r.planned_sec,
     pomodoro: r.pomodoro,
     sound: r.sound,
@@ -1204,21 +1288,22 @@ export async function currentTimer(c: Q, userId: string, now: number): Promise<T
   return r ? timerView(r, now) : null;
 }
 
-export async function startTimer(t: LifeTx, s: TimerStart): Promise<TimerView> {
+/** `bible` (Fase 05): o mesmo cronômetro numa leitura bíblica (module = 'bible', ref = capítulo, título pronto). */
+export async function startTimer(t: LifeTx, s: TimerStart, bible?: { ref: string; title: string }): Promise<TimerView> {
   const cur = await getTimer(t.c, t.userId, true);
   if (cur) {
     if (cur.id === s.id) return timerView(cur, t.now);
     throw new ApiError('knowledge_timer_active');
   }
   if (await getSession(t.c, t.userId, s.id)) throw new ApiError('knowledge_timer_missing');
-  const target = await resolveTarget(t.c, t.userId, s.kind, s);
+  const target = bible ? { bookId: null, subjectId: null, topicId: null, label: null, title: bible.title.slice(0, 160) } : await resolveTarget(t.c, t.userId, s.kind, s);
   const book = target.bookId ? await getBook(t.c, t.userId, target.bookId) : null;
   const now = t.now;
   const state: TimerState = { segments: [{ s: now, e: null }], seen: [[now, now]], phase: 'focus', phaseStartedAt: now, focusDone: 0 };
   const r = await t.c.query<TimerRow>(
-    `INSERT INTO knowledge_timers (user_id, id, module, kind, mode, book_id, subject_id, topic_id, label, title, planned_sec, pomodoro, sound, start_page, state, started_at, last_seen_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $16) RETURNING *`,
-    [t.userId, s.id, MODULE, s.kind, s.mode, target.bookId, target.subjectId, target.topicId, target.label, target.title, s.mode === 'countdown' ? (s.plannedMin ?? 25) * 60 : null, s.mode === 'pomodoro' ? JSON.stringify(s.pomodoro) : null, s.sound, book?.current_page ?? null, JSON.stringify(state), new Date(now)],
+    `INSERT INTO knowledge_timers (user_id, id, module, kind, mode, book_id, subject_id, topic_id, label, title, planned_sec, pomodoro, sound, start_page, state, started_at, last_seen_at, ref)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $16, $17) RETURNING *`,
+    [t.userId, s.id, bible ? 'bible' : MODULE, bible ? 'reading' : s.kind, s.mode, target.bookId, target.subjectId, target.topicId, target.label, target.title, s.mode === 'countdown' ? (s.plannedMin ?? 25) * 60 : null, s.mode === 'pomodoro' ? JSON.stringify(s.pomodoro) : null, s.sound, book?.current_page ?? null, JSON.stringify(state), new Date(now), bible?.ref ?? null],
   );
   return timerView(r.rows[0], now);
 }
@@ -1289,10 +1374,20 @@ export async function discardTimer(t: LifeTx, id: string): Promise<void> {
 }
 
 /** Encerra: fecha o trecho aberto, calcula o tempo que conta, grava a sessão (id = id do cronômetro) e recompensa. */
-export async function finishTimer(t: LifeTx, id: string, f: TimerFinish): Promise<{ id: string; existed: boolean; excludedSec: number }> {
+/**
+ * `bible` (Fase 05): chamado antes de gravar a sessão de um cronômetro bíblico; registra os capítulos alcançados (com
+ * session_id = id) e devolve o trecho/título da sessão. Sem ele, a sessão bíblica guarda o capítulo de início.
+ */
+export async function finishTimer(
+  t: LifeTx,
+  id: string,
+  f: TimerFinish,
+  bible?: (timer: { id: string; ref: string | null; title: string; date: string }) => Promise<{ ref: string | null; title: string }>,
+): Promise<{ id: string; existed: boolean; excludedSec: number; module: KnowledgeModule }> {
   const r = await getTimer(t.c, t.userId, true);
   if (!r || r.id !== id) {
-    if (await getSession(t.c, t.userId, id)) return { id, existed: true, excludedSec: 0 };
+    const done = await getSession(t.c, t.userId, id);
+    if (done) return { id, existed: true, excludedSec: 0, module: done.module };
     throw new ApiError('knowledge_timer_missing');
   }
   const st = r.state;
@@ -1308,14 +1403,23 @@ export async function finishTimer(t: LifeTx, id: string, f: TimerFinish): Promis
   const wall = Math.max(0, Math.round((end - startedAt.getTime()) / 1000));
   const target: Target = { bookId: r.book_id, subjectId: r.subject_id, topicId: r.topic_id, label: r.label, title: r.title };
   await t.c.query('DELETE FROM knowledge_timers WHERE user_id = $1', [t.userId]);
+  const date = localDate(startedAt.getTime(), t.tz);
+  let ref = r.ref;
+  if (r.module === 'bible' && bible) {
+    const b = await bible({ id: r.id, ref: r.ref, title: r.title, date });
+    ref = b.ref;
+    target.title = b.title.slice(0, 160);
+  }
   await insertSession(t, {
     id: r.id,
+    module: r.module,
+    ref,
     clientId: null,
     kind: r.kind,
     mode: r.mode,
     origin: 'timer',
     target,
-    date: localDate(startedAt.getTime(), t.tz),
+    date,
     startedAt,
     endedAt: new Date(end),
     activeSec,
@@ -1328,7 +1432,7 @@ export async function finishTimer(t: LifeTx, id: string, f: TimerFinish): Promis
     finishBook: f.finishBook,
     note: f.note,
   });
-  return { id: r.id, existed: false, excludedSec: act.excludedSec };
+  return { id: r.id, existed: false, excludedSec: act.excludedSec, module: r.module };
 }
 
 // ------------------------------------------------------------------ painel e estatísticas

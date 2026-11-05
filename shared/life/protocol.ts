@@ -151,6 +151,11 @@ export const ACHIEVEMENTS = [
   { code: 'nutrition_week', title: 'Uma semana de diário alimentar', description: 'Registre o diário alimentar em 7 dias diferentes.', attribute: 'health', module: 'nutrition' },
   { code: 'first_book', title: 'Primeiro livro concluído', description: 'Conclua um livro da sua biblioteca.', attribute: 'knowledge', module: 'reading' },
   { code: 'study_10h', title: 'Dez horas de estudo', description: 'Some 10 horas em sessões de estudo.', attribute: 'knowledge', module: 'reading' },
+  // Fase 05 (Bíblia): só registros reais de leitura; nada sobre crenças, orações ou o conteúdo das reflexões.
+  { code: 'bible_first', title: 'Primeira leitura bíblica', description: 'Registre a primeira leitura na área Bíblia.', attribute: 'spirituality', module: 'bible' },
+  { code: 'bible_plan', title: 'Primeiro plano de leitura concluído', description: 'Conclua um plano de leitura bíblica.', attribute: 'spirituality', module: 'bible' },
+  { code: 'bible_week', title: 'Sete dias com leitura bíblica', description: 'Registre leitura bíblica em 7 dias diferentes (não precisam ser seguidos).', attribute: 'spirituality', module: 'bible' },
+  { code: 'bible_10_chapters', title: 'Dez capítulos lidos', description: 'Registre 10 capítulos diferentes da Bíblia.', attribute: 'spirituality', module: 'bible' },
 ] as const satisfies readonly { code: string; title: string; description: string; attribute: Attribute; module: string | null }[];
 export type AchievementCode = (typeof ACHIEVEMENTS)[number]['code'];
 
@@ -392,7 +397,7 @@ export interface MissionEntryView {
 export interface XpEventView {
   id: string;
   kind: 'grant' | 'reversal';
-  source: 'habit' | 'mission' | 'workout' | 'routine' | 'achievement' | 'legacy' | 'nutrition' | 'knowledge';
+  source: 'habit' | 'mission' | 'workout' | 'routine' | 'achievement' | 'legacy' | 'nutrition' | 'knowledge' | 'bible';
   attribute: Attribute | null;
   amount: number;
   requested: number;
@@ -462,7 +467,7 @@ export const FUTURE_MODULES = [
   { id: 'nutrition', name: 'Alimentação', status: 'planned', contract: 'irontrack.life.nutrition.v0', notes: 'refeições, macros, foto da refeição (reconhecimento) → eventos meal_logged' },
   { id: 'meal_photo', name: 'Refeição por foto', status: 'planned', contract: 'irontrack.life.mealPhoto.v0', notes: 'anexos do assistente (attachments) → proposta de registro de refeição' },
   { id: 'reading', name: 'Leitura e estudos', status: 'available', contract: 'irontrack.life.knowledge.v1', notes: 'Fase 04: livros, matérias, sessões com cronômetro, metas (shared/knowledge/protocol.ts)' },
-  { id: 'bible', name: 'Bíblia e reflexões', status: 'planned', contract: 'irontrack.life.bible.v0', notes: 'planos de leitura, capítulos, reflexões → eventos bible_chapter' },
+  { id: 'bible', name: 'Bíblia e reflexões', status: 'available', contract: 'irontrack.life.bible.v1', notes: 'Fase 05: leitor (BPM, domínio público), versículo do dia, planos, reflexões, sessões module=bible (shared/bible/protocol.ts)' },
   { id: 'long_term_goals', name: 'Metas de longo prazo', status: 'planned', contract: 'irontrack.life.longGoals.v0', notes: 'metas de meses/anos decompostas em missões especiais' },
 ] as const;
 

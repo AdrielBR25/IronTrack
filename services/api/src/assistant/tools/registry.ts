@@ -8,6 +8,7 @@ import { bodyModule, goalsModule } from './progress.ts';
 import { lifeModule } from './life.ts';
 import { nutritionModule } from './nutrition.ts';
 import { knowledgeModule } from './knowledge.ts';
+import { bibleModule } from './bible.ts';
 import { trainingModule } from './training.ts';
 import { ToolError, type ActionHandler, type AiModuleDef, type AiTool, type WriteTool } from './types.ts';
 
@@ -50,12 +51,13 @@ const PLANNED: AiModuleDef[] = [
   // Fase 02: alimentação passou a existir (nutritionModule).
   // Fase 01: hábitos, rotinas, missões, XP, níveis e conquistas passaram a existir (lifeModule).
   // Fase 04: leitura e estudos passaram a existir (knowledgeModule).
-  { id: 'reflections', name: 'Bíblia, reflexões e metas de longo prazo', status: 'planned', scope: 'planos de leitura bíblica, versículos, reflexões, metas de meses/anos (Fase 05: vai reaproveitar sessões, metas e anotações do Conhecimento)', tools: [], actions: [] },
+  // Fase 05: Bíblia, planos de leitura e diário espiritual passaram a existir (bibleModule).
+  { id: 'long_term', name: 'Metas de longo prazo', status: 'planned', scope: 'metas de meses/anos que conectam treino, alimentação, conhecimento e Bíblia', tools: [], actions: [] },
   // Fase 03: foto de refeição passou a existir (analyze_meal_photo no nutritionModule). Rótulo por foto: planejado.
   { id: 'label_photo', name: 'Leitura de rótulos nutricionais por foto', status: 'planned', scope: 'foto do rótulo → alimento próprio revisado (preparado no contrato de visão, ainda sem ferramenta)', tools: [], actions: [] },
 ];
 
-export const MODULES: readonly AiModuleDef[] = [trainingModule, goalsModule, bodyModule, lifeModule, nutritionModule, knowledgeModule, memoryModule, ...PLANNED];
+export const MODULES: readonly AiModuleDef[] = [trainingModule, goalsModule, bodyModule, lifeModule, nutritionModule, knowledgeModule, bibleModule, memoryModule, ...PLANNED];
 
 const listModules: AiTool = {
   kind: 'read',
