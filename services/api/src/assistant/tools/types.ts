@@ -6,6 +6,7 @@
 import type { z } from 'zod';
 import type { ActionCollection, ActionKind, PreviewSection } from '../../../../../shared/assistant/protocol.ts';
 import type { Pool, PoolClient } from '../../db/pool.ts';
+import type { PhotoAnalysisView } from '../../../../../shared/nutrition/vision.ts';
 
 export interface ToolContext {
   pool: Pool;
@@ -15,6 +16,11 @@ export interface ToolContext {
   /** Fuso da pessoa (validado) para datas locais. */
   timezone: string;
   now: number;
+  /**
+   * Fase 03: foto anexada à mensagem ATUAL (só existe durante esta resposta; nunca é gravada). `analyze` chama a
+   * visão uma única vez por resposta (resultado em cache), com os mesmos limites da tela Alimentação.
+   */
+  photo?: { analyze: () => Promise<PhotoAnalysisView> };
 }
 
 interface ToolBase<S extends z.ZodTypeAny> {

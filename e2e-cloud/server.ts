@@ -33,7 +33,15 @@ const provider = createServer((req, res) => {
     }
     // Fase 00: OpenAI simulada (Responses API com streaming e ferramentas) para o assistente central.
     if (req.url === '/openai/v1/responses' && req.method === 'POST' && req.headers.authorization?.startsWith('Bearer sk-proj-e2e')) {
-      openAiReply(JSON.parse(body), res);
+      const parsed = JSON.parse(body);
+      // Fase 03: análise de foto (saída estruturada, sem streaming). Prato fixo: arroz, feijão, frango, alface e um molho
+      // que não dá para identificar (precisa de revisão).
+      if (parsed.text?.format?.type === 'json_schema') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ id: 'resp_v', status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: JSON.stringify(E2E_PLATE) }] }], usage: { input_tokens: 1200, output_tokens: 250 } }));
+        return;
+      }
+      openAiReply(parsed, res);
       return;
     }
     if (req.method !== 'POST' || req.url !== '/v1/messages' || !req.headers['x-api-key']) {
@@ -46,6 +54,21 @@ const provider = createServer((req, res) => {
     res.end(JSON.stringify({ id: 'msg_teste', type: 'message', role: 'assistant', model: 'claude-haiku-5-5', content: [{ type: 'text', text: `Resposta do provedor simulado (${n} caracteres recebidos).` }], stop_reason: 'end_turn', usage: { input_tokens: 30, output_tokens: 12 } }));
   });
 });
+
+const E2E_PLATE = {
+  contem_comida: true,
+  qualidade_imagem: 'boa',
+  itens: [
+    { nome: 'arroz branco', termos_busca: ['arroz tipo 1 cozido'], preparo: 'cozido', papel: 'principal', quantidade: 150, quantidade_min: 120, quantidade_max: 180, unidade: 'g', confianca: 'alta', observacao: null },
+    { nome: 'feijão carioca', termos_busca: ['feijão carioca cozido'], preparo: 'cozido', papel: 'principal', quantidade: 120, quantidade_min: 100, quantidade_max: 140, unidade: 'g', confianca: 'alta', observacao: null },
+    { nome: 'peito de frango', termos_busca: ['frango peito grelhado'], preparo: 'grelhado', papel: 'principal', quantidade: 160, quantidade_min: 130, quantidade_max: 190, unidade: 'g', confianca: 'media', observacao: null },
+    { nome: 'alface', termos_busca: ['alface crua'], preparo: 'cru', papel: 'acompanhamento', quantidade: 40, quantidade_min: 20, quantidade_max: 60, unidade: 'g', confianca: 'media', observacao: null },
+    { nome: 'molho da casa', termos_busca: ['molho especial e2e'], preparo: 'nao_identificado', papel: 'molho', quantidade: null, quantidade_min: null, quantidade_max: null, unidade: 'g', confianca: 'baixa', observacao: 'Base do molho incerta.' },
+  ],
+  observacoes_caloricas: ['O frango pode ter sido preparado com óleo.'],
+  nao_identificado: [],
+  resumo: 'Prato com arroz, feijão, frango grelhado e salada.',
+};
 
 /** "Modelo" roteirizado: pede uma ficha quando a pessoa pede, consulta a evolução quando perguntam do supino, senão responde texto. */
 function openAiReply(body: { input: { role?: string; type?: string; content?: string; output?: string }[] }, res: import('node:http').ServerResponse) {

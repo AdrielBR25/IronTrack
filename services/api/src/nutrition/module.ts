@@ -150,7 +150,7 @@ export function nutritionRoutes(router: Router, d: NutritionDeps): void {
   // ---------------------------------------------------------------- refeições
   router.add({ method: 'POST', path: `${P}/meals`, auth: 'session', handler: async (ctx) => {
     const m = parse(mealInputSchema, await body(ctx));
-    return mutate(ctx, async (t) => ({ ...(await N.createMeal(t, m, 'user')), date: m.date }), 201);
+    return mutate(ctx, async (t) => ({ ...(await N.createMeal(t, m, m.origin === 'photo' ? 'photo' : 'user')), date: m.date }), 201);
   } });
   router.add({ method: 'PATCH', path: `${P}/meals/:id`, auth: 'session', handler: async (ctx) => {
     const b = parse(versioned(mealPatchSchema), await body(ctx));

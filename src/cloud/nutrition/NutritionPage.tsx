@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { BarChart3, CalendarRange, Search, ChevronRight, Copy, Droplet, Minus, Plus, Repeat2, Settings2, Sparkles, Target, UtensilsCrossed } from 'lucide-react';
+import { BarChart3, Camera, CalendarRange, Search, ChevronRight, ScanLine, Copy, Droplet, Minus, Plus, Repeat2, Settings2, Sparkles, Target, UtensilsCrossed } from 'lucide-react';
 import { MEAL_KIND_LABEL, NUTRITION_REWARD, type MealKind, type MealView } from '@shared/nutrition/protocol.ts';
 import { PageHeader } from '@/components/AppLayout';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,7 @@ import { emitReward, useLifeQuery } from '../life/api';
 import { lifeError } from '../life/forms';
 import { nutritionApi } from './api';
 import { MealEditor, type MealEditorTarget } from './MealEditor';
+import { MealPhotoFlow } from './photo/MealPhotoFlow';
 import { CalorieRing, KIND_ICON, KIND_ORDER, MacroBar, MealCard, WeekStrip, addDays, dayLabel, kcal, localToday, mondayOf, nowHHMM } from './ui';
 
 function Section({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
@@ -42,6 +43,7 @@ export default function NutritionPage() {
   const quick = useLifeQuery(() => nutritionApi.quick().then((r) => r.quick));
   const [editor, setEditor] = useState<MealEditorTarget | null>(null);
   const [copyOpen, setCopyOpen] = useState(false);
+  const [photoOpen, setPhotoOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const shown = useRef(false);
 
@@ -55,6 +57,11 @@ export default function NutritionPage() {
     if (params.get('registrar') && d) {
       setEditor({ date: d.date });
       params.delete('registrar');
+      setParams(params, { replace: true });
+    }
+    if (params.get('foto') && d) {
+      setPhotoOpen(true);
+      params.delete('foto');
       setParams(params, { replace: true });
     }
   }, [params, d, setParams]);
@@ -147,6 +154,22 @@ export default function NutritionPage() {
           )}
         </CardContent>
       </Card>
+
+      <button
+        type="button"
+        onClick={() => setPhotoOpen(true)}
+        className="group relative flex w-full items-center gap-3 overflow-hidden rounded-3xl border border-primary/30 bg-gradient-to-r from-primary/20 via-primary/[0.07] to-card p-4 text-left shadow-[0_10px_30px_-18px_hsl(var(--primary)/0.9)] active:scale-[0.99]"
+        data-testid="photo-open"
+      >
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/30">
+          <Camera className="h-6 w-6" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block font-semibold">Analisar refeição com IA</span>
+          <span className="block text-xs text-muted-foreground">Fotografe o prato: alimentos, porções e macros para você revisar</span>
+        </span>
+        <ScanLine className="h-5 w-5 shrink-0 text-primary transition-transform group-active:scale-90" />
+      </button>
 
       {!isFuture && <Water date={d.date} ml={d.water.ml} goal={d.water.goalMl} />}
 
@@ -259,6 +282,16 @@ export default function NutritionPage() {
       </button>
 
       <MealEditor target={editor} today={today} onClose={() => setEditor(null)} />
+      <MealPhotoFlow
+        open={photoOpen}
+        date={d.date}
+        today={today}
+        onClose={() => setPhotoOpen(false)}
+        onManual={(o) => {
+          setPhotoOpen(false);
+          setEditor({ date: o.date, ...(o.kind ? { kind: o.kind } : {}) });
+        }}
+      />
       <CopyDayDialog open={copyOpen} onClose={() => setCopyOpen(false)} date={d.date} today={today} hasMeals={d.meals.length > 0} />
     </div>
   );

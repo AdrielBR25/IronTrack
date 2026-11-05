@@ -50,7 +50,8 @@ const PLANNED: AiModuleDef[] = [
   // Fase 01: hábitos, rotinas, missões, XP, níveis e conquistas passaram a existir (lifeModule).
   { id: 'learning', name: 'Leitura e estudos', status: 'planned', scope: 'livros, leituras, sessões de estudo', tools: [], actions: [] },
   { id: 'reflections', name: 'Bíblia, reflexões e metas de longo prazo', status: 'planned', scope: 'planos de leitura bíblica, diário, reflexões, metas de meses/anos', tools: [], actions: [] },
-  { id: 'meal_photo', name: 'Reconhecimento de refeições por foto', status: 'planned', scope: 'foto da refeição → rascunho revisado → registro (Fase 03; hoje só texto)', tools: [], actions: [] },
+  // Fase 03: foto de refeição passou a existir (analyze_meal_photo no nutritionModule). Rótulo por foto: planejado.
+  { id: 'label_photo', name: 'Leitura de rótulos nutricionais por foto', status: 'planned', scope: 'foto do rótulo → alimento próprio revisado (preparado no contrato de visão, ainda sem ferramenta)', tools: [], actions: [] },
 ];
 
 export const MODULES: readonly AiModuleDef[] = [trainingModule, goalsModule, bodyModule, lifeModule, nutritionModule, memoryModule, ...PLANNED];
@@ -59,7 +60,7 @@ const listModules: AiTool = {
   kind: 'read',
   name: 'list_app_modules',
   label: 'Consultando os módulos do app',
-  description: 'Lista os módulos do IronTrack e se já estão disponíveis para a IA ou só planejados. Use quando perguntarem sobre algo fora de treino, metas, medidas, RPG e alimentação (ex.: leitura de livros, foto de refeição).',
+  description: 'Lista os módulos do IronTrack e se já estão disponíveis para a IA ou só planejados. Use quando perguntarem sobre algo fora de treino, metas, medidas, RPG e alimentação (ex.: leitura de livros, foto de rótulo).',
   parameters: { type: 'object', properties: {}, additionalProperties: false },
   args: z.object({}).strict(),
   async run() {

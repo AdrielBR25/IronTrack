@@ -170,6 +170,8 @@ export interface MessageView {
   model: string | null;
   tools: ToolUseView[];
   actionIds: string[];
+  /** Fase 03: marca de anexos (a imagem em si nunca é guardada). */
+  attachments: { type: 'image'; stored: false }[];
 }
 
 export interface ConversationSummaryView {
@@ -230,13 +232,28 @@ export type StreamEvent =
   | { type: 'done'; message: MessageView; usage: { inputTokens: number; outputTokens: number } }
   | { type: 'error'; code: string; message: string; message_id?: string };
 
+export const MAX_ATTACHMENTS = 1;
+export const messageAttachmentSchema = z
+  .object({
+    type: z.literal('image'),
+    purpose: z.enum(['meal', 'label']).default('meal'),
+    // Até PHOTO_LIMITS.maxBytes (3,5 MB) em base64.
+    dataUrl: z.string().min(32).max(4_700_064),
+  })
+  .strict();
+/** Corpo máximo da mensagem com foto (texto + imagem em base64); abaixo dos 5 MB do Caddy do irontrack-web. */
+export const MAX_MESSAGE_BODY_BYTES = 4_900_000;
+
 export const sendMessageSchema = z
   .object({
     content: z.string().max(MAX_USER_MESSAGE_CHARS * 2),
     model: z.string().max(80).optional(),
     timezone: z.string().max(64).optional(),
-    /** Reservado para anexos/imagens (fase futura). Hoje só aceita lista vazia. */
-    attachments: z.array(z.unknown()).max(0).optional(),
+    /**
+     * Fase 03: até 1 foto de refeição por mensagem (data URL JPEG/PNG, já reduzida no aparelho). A foto é usada só
+     * nesta resposta (ferramenta analyze_meal_photo) e NÃO é guardada: o histórico registra apenas que houve foto.
+     */
+    attachments: z.array(messageAttachmentSchema).max(MAX_ATTACHMENTS).optional(),
   })
   .strict();
 
@@ -271,4 +288,16 @@ export const ASSISTANT_ERROR_MESSAGES: Record<string, string> = {
   action_undo_blocked: 'Uma das missões já foi concluída; desfazer apagaria XP legítimo. Cancele manualmente as outras.',
   memory_limit: 'Limite de memórias atingido. Apague alguma antes de salvar outra.',
   internal_error: 'Erro interno. Nada foi alterado.',
+  // Fase 03: fotos
+  photo_notice_required: 'Confirme o aviso sobre o envio de fotos antes da primeira análise.',
+  photo_invalid: 'Não consegui ler esta imagem. Use uma foto JPEG ou PNG.',
+  photo_too_large: 'Foto grande demais. Tente outra ou tire uma nova.',
+  photo_too_small: 'A imagem é pequena demais para identificar os alimentos.',
+  photo_daily_limit: 'Você atingiu o limite de análises de foto de hoje. Registre manualmente ou tente amanhã.',
+  photo_busy: 'Aguarde a análise anterior terminar.',
+  photo_purpose_planned: 'A leitura de rótulos por foto ainda não está disponível.',
+  vision_disabled: 'A análise de fotos está desativada neste servidor.',
+  vision_model_unsupported: 'O modelo configurado no servidor não aceita imagens. Ajuste o modelo de análise de fotos.',
+  vision_incomplete: 'A IA não conseguiu concluir a análise desta foto. Tente de novo ou registre manualmente.',
+  payload_too_large: 'Foto grande demais para enviar.',
 };

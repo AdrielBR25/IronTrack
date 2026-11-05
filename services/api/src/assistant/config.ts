@@ -35,6 +35,24 @@ const limitsSchema = z
   })
   .strict();
 
+/**
+ * Fase 03: análise de fotos (visão). Modelo próprio porque nem todo modelo de chat aceita imagem; a configuração fica
+ * no servidor (o app nunca escolhe o modelo nem vê a chave). `detail` = fidelidade da imagem na OpenAI.
+ */
+export const visionConfigSchema = z
+  .object({
+    $comment: z.string().optional(),
+    enabled: z.boolean(),
+    model: z.string().regex(/^[A-Za-z0-9._:-]{1,80}$/),
+    reasoningEffort: effort.optional(),
+    detail: z.enum(['low', 'high', 'auto', 'original']),
+    maxOutputTokens: z.number().int().min(256).max(16_000),
+    photosPerDay: z.number().int().min(1).max(1_000),
+    timeoutMs: z.number().int().min(5_000).max(120_000),
+  })
+  .strict();
+export type VisionConfig = z.infer<typeof visionConfigSchema>;
+
 export const assistantConfigSchema = z
   .object({
     $comment: z.string().optional(),
@@ -48,6 +66,7 @@ export const assistantConfigSchema = z
     summaryModel: z.string(),
     models: z.array(modelSchema).min(1).max(10),
     limits: limitsSchema,
+    vision: visionConfigSchema.optional(),
   })
   .strict()
   .superRefine((c, ctx) => {
@@ -73,8 +92,14 @@ export function loadAssistantConfig(env: Record<string, string | undefined>): { 
   const r = assistantConfigSchema.safeParse(raw);
   if (!r.success) return { config: null, errors: r.error.issues.map((i) => `assistente: ${i.path.join('.') || '(raiz)'} ${i.message}`) };
   if (env.NODE_ENV === 'production' && r.data.baseUrl && !r.data.baseUrl.startsWith('https://')) return { config: null, errors: ['assistente: baseUrl (produção exige https)'] };
-  if (env.ASSISTANT_ENABLED === 'false') return { config: { ...r.data, enabled: false }, errors: [] };
-  return { config: r.data, errors: [] };
+  let config = r.data;
+  if (config.vision && env.ASSISTANT_VISION_MODEL) {
+    if (!/^[A-Za-z0-9._:-]{1,80}$/.test(env.ASSISTANT_VISION_MODEL)) return { config: null, errors: ['assistente: ASSISTANT_VISION_MODEL inválido'] };
+    config = { ...config, vision: { ...config.vision, model: env.ASSISTANT_VISION_MODEL } };
+  }
+  if (config.vision && env.ASSISTANT_VISION_ENABLED === 'false') config = { ...config, vision: { ...config.vision, enabled: false } };
+  if (env.ASSISTANT_ENABLED === 'false') return { config: { ...config, enabled: false }, errors: [] };
+  return { config, errors: [] };
 }
 
 /** Formato de chave da API da OpenAI ("sk-..."; inclui chaves de projeto "sk-proj-..."). Pega valor colado errado. */

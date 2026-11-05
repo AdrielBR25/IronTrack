@@ -302,8 +302,11 @@ const createMealArgs = z
     time: HHMM.nullish(),
     items: z.array(aiItem).min(1).max(NUTRITION_LIMITS.itemsPerMeal),
     rationale: z.string().trim().max(600).nullish(),
+    fromPhoto: z.boolean().nullish(),
   })
   .strict();
+const FROM_PHOTO_JSON = { type: ['boolean', 'null'], description: 'true quando os itens vieram de analyze_meal_photo (a refeição fica marcada como origem foto).' };
+const PHOTO_LINE = { kind: 'info' as const, text: 'Itens estimados a partir da foto: quantidades aproximadas, confira antes de aprovar.' };
 const MEAL_JSON_PROPS = {
   date: { type: ['string', 'null'], description: 'yyyy-mm-dd (padrão hoje)' },
   kind: { type: 'string', enum: [...MEAL_KINDS], description: 'breakfast=café da manhã, lunch=almoço, snack=lanche, dinner=jantar, supper=ceia, custom=personalizada (use name).' },
@@ -323,7 +326,7 @@ const proposeCreateMeal: WriteTool<typeof createMealArgs> = {
   name: 'propose_create_meal',
   label: 'Preparando a refeição',
   description: 'Prepara a PROPOSTA de registrar uma refeição consumida (status consumed) ou planejar uma (status planned), com alimentos e quantidades em g/ml. Para acrescentar a uma refeição que já existe no dia, use propose_add_foods_to_meal. A pessoa aprova antes de salvar.',
-  parameters: { type: 'object', properties: { ...MEAL_JSON_PROPS, status: { type: 'string', enum: ['consumed', 'planned'] }, rationale: { type: ['string', 'null'] } }, required: ['kind', 'status', 'items'], additionalProperties: false },
+  parameters: { type: 'object', properties: { ...MEAL_JSON_PROPS, status: { type: 'string', enum: ['consumed', 'planned'] }, rationale: { type: ['string', 'null'] }, fromPhoto: FROM_PHOTO_JSON }, required: ['kind', 'status', 'items'], additionalProperties: false },
   args: createMealArgs,
   async prepare(ctx, a) {
     const date = a.date ?? (await todayOf(ctx));
@@ -331,19 +334,19 @@ const proposeCreateMeal: WriteTool<typeof createMealArgs> = {
     const { resolved, lines, totals } = await resolveAiItems(ctx, a.items);
     const meal: MealInput = { clientId: null, date, kind: a.kind, name: a.name ?? null, time: a.time ?? null, status: a.status, notes: null, items: asItems(resolved) };
     const title = `${a.status === 'planned' ? 'Planejar' : 'Registrar'} ${mealLabel(a.kind, a.name).toLowerCase()} de ${dateBr(date)}`;
-    return { kind: 'create_meal', title, rationale: a.rationale ?? null, payload: { meal, resolved, id: randomUUID() }, preview: [{ title: `${mealLabel(a.kind, a.name)}${a.time ? ` · ${a.time}` : ''} · ${a.status === 'planned' ? 'planejada' : 'consumida'}`, lines: [...lines, { kind: 'info', text: `Total: ${macroText(totals)}` }] }], targetId: null, baseVersion: null };
+    return { kind: 'create_meal', title, rationale: a.rationale ?? null, payload: { meal, resolved, id: randomUUID(), origin: a.fromPhoto ? 'photo' : 'ai' }, preview: [{ title: `${mealLabel(a.kind, a.name)}${a.time ? ` · ${a.time}` : ''} · ${a.status === 'planned' ? 'planejada' : 'consumida'}`, lines: [...lines, { kind: 'info', text: `Total: ${macroText(totals)}` }, ...(a.fromPhoto ? [PHOTO_LINE] : [])] }], targetId: null, baseVersion: null };
   },
 };
 
 const addItemsArgs = z
-  .object({ date: ISO.nullish(), kind: z.enum(MEAL_KINDS), status: z.enum(['consumed', 'planned']).default('consumed'), items: z.array(aiItem).min(1).max(20), rationale: z.string().trim().max(600).nullish() })
+  .object({ date: ISO.nullish(), kind: z.enum(MEAL_KINDS), status: z.enum(['consumed', 'planned']).default('consumed'), items: z.array(aiItem).min(1).max(20), rationale: z.string().trim().max(600).nullish(), fromPhoto: z.boolean().nullish() })
   .strict();
 const proposeAddItems: WriteTool<typeof addItemsArgs> = {
   kind: 'write',
   name: 'propose_add_foods_to_meal',
   label: 'Preparando os alimentos do diário',
   description: 'Prepara a PROPOSTA de adicionar alimentos ao diário numa refeição do dia (ex.: "adicione no meu almoço 150 g de arroz, 120 g de feijão e 160 g de frango"). Se já existe a refeição desse tipo no dia, acrescenta nela; senão cria. Quantidades em g/ml.',
-  parameters: { type: 'object', properties: { date: MEAL_JSON_PROPS.date, kind: MEAL_JSON_PROPS.kind, status: { type: 'string', enum: ['consumed', 'planned'] }, items: { type: 'array', minItems: 1, maxItems: 20, items: ITEM_JSON }, rationale: { type: ['string', 'null'] } }, required: ['kind', 'items'], additionalProperties: false },
+  parameters: { type: 'object', properties: { date: MEAL_JSON_PROPS.date, kind: MEAL_JSON_PROPS.kind, status: { type: 'string', enum: ['consumed', 'planned'] }, items: { type: 'array', minItems: 1, maxItems: 20, items: ITEM_JSON }, rationale: { type: ['string', 'null'] }, fromPhoto: FROM_PHOTO_JSON }, required: ['kind', 'items'], additionalProperties: false },
   args: addItemsArgs,
   async prepare(ctx, a) {
     const date = a.date ?? (await todayOf(ctx));
@@ -355,8 +358,8 @@ const proposeAddItems: WriteTool<typeof addItemsArgs> = {
       kind: 'add_meal_items',
       title: `Adicionar ${resolved.length} alimento(s) ao ${label.toLowerCase()} de ${dateBr(date)}`,
       rationale: a.rationale ?? null,
-      payload: { date, kind: a.kind, status: a.status, resolved, mealId: existing?.id ?? null, newId: randomUUID() },
-      preview: [{ title: existing ? `${label} (já registrado: acrescentar)` : `${label} (nova refeição ${a.status === 'planned' ? 'planejada' : 'consumida'})`, lines: [...lines, { kind: 'info', text: `Acréscimo: ${macroText(totals)}` }] }],
+      payload: { date, kind: a.kind, status: a.status, resolved, mealId: existing?.id ?? null, newId: randomUUID(), origin: a.fromPhoto ? 'photo' : 'ai' },
+      preview: [{ title: existing ? `${label} (já registrado: acrescentar)` : `${label} (nova refeição ${a.status === 'planned' ? 'planejada' : 'consumida'})`, lines: [...lines, { kind: 'info', text: `Acréscimo: ${macroText(totals)}` }, ...(a.fromPhoto ? [PHOTO_LINE] : [])] }],
       targetId: existing?.id ?? null,
       baseVersion: existing?.version ?? null,
     };
@@ -631,8 +634,8 @@ const createdUndo = async (t: LifeTx, ids: string[], versions: Record<string, nu
 const mealCreate: ActionHandler = {
   kind: 'create_meal',
   async apply(c, ctx, action) {
-    const { meal, resolved, id } = action.payload as { meal: MealInput; resolved: N.ResolvedItem[]; id: string };
-    const r = await inLife(c, ctx, (t) => N.createMeal(t, meal, 'ai', { id, resolved }));
+    const { meal, resolved, id, origin } = action.payload as { meal: MealInput; resolved: N.ResolvedItem[]; id: string; origin?: 'ai' | 'photo' };
+    const r = await inLife(c, ctx, (t) => N.createMeal(t, meal, origin === 'photo' ? 'photo' : 'ai', { id, resolved }));
     const v = (await N.getMeal(c, ctx.userId, r.id))!.version;
     return { collection: 'meals', entityId: r.id, summary: `${mealLabel(meal.kind, meal.name)} de ${dateBr(meal.date)} ${meal.status === 'planned' ? 'planejado' : 'registrado'} (${r0(N.resolvedTotals(resolved).kcal)} kcal).`, undo: { ids: [r.id], versions: { [r.id]: v }, date: meal.date } };
   },
@@ -646,7 +649,7 @@ const mealCreate: ActionHandler = {
 const mealAddItems: ActionHandler = {
   kind: 'add_meal_items',
   async apply(c, ctx, action) {
-    const p = action.payload as { date: string; kind: MealKind; status: MealStatus; resolved: N.ResolvedItem[]; mealId: string | null; newId: string };
+    const p = action.payload as { date: string; kind: MealKind; status: MealStatus; resolved: N.ResolvedItem[]; mealId: string | null; newId: string; origin?: 'ai' | 'photo' };
     return inLife(c, ctx, async (t) => {
       if (p.mealId) {
         const s = await N.mealSnapshot(t.c, t.userId, p.mealId, true);
@@ -654,7 +657,7 @@ const mealAddItems: ActionHandler = {
         const r = await N.updateMeal(t, s.row.id, { items: asItems([...s.items, ...p.resolved]) }, s.row.version);
         return { collection: 'meals' as const, entityId: s.row.id, summary: `${p.resolved.length} alimento(s) adicionados ao ${mealLabel(s.row.kind, s.row.name).toLowerCase()}.`, undo: { restore: r.before, version: r.after.version } };
       }
-      const r = await N.createMeal(t, { clientId: null, date: p.date, kind: p.kind, name: null, time: null, status: p.status, notes: null, items: asItems(p.resolved) }, 'ai', { id: p.newId, resolved: p.resolved });
+      const r = await N.createMeal(t, { clientId: null, date: p.date, kind: p.kind, name: null, time: null, status: p.status, notes: null, items: asItems(p.resolved) }, p.origin === 'photo' ? 'photo' : 'ai', { id: p.newId, resolved: p.resolved });
       return { collection: 'meals' as const, entityId: r.id, summary: `${mealLabel(p.kind)} de ${dateBr(p.date)} registrado com ${p.resolved.length} alimento(s).`, undo: { ids: [r.id], versions: { [r.id]: 1 } } };
     });
   },
@@ -792,11 +795,51 @@ const planUpdate: ActionHandler = {
   },
 };
 
+
+// ------------------------------------------------------------------ Fase 03: foto da refeição
+
+const analyzePhotoArgs = z.object({}).strict();
+const analyzeMealPhoto: ReadTool<typeof analyzePhotoArgs> = {
+  kind: 'read',
+  name: 'analyze_meal_photo',
+  label: 'Analisando a foto da refeição',
+  description:
+    'Analisa a FOTO DE REFEIÇÃO anexada à mensagem atual: identifica os alimentos visíveis, estima as porções e procura cada um no catálogo (TACO/alimentos da pessoa). Os totais de calorias e macros são calculados pelo app a partir do catálogo. Só funciona quando a pessoa anexou uma foto NESTA mensagem. Não salva nada.',
+  parameters: { type: 'object', properties: {}, additionalProperties: false },
+  args: analyzePhotoArgs,
+  async run(ctx) {
+    if (!ctx.photo) throw new ToolError('no_photo', 'Não há foto anexada nesta mensagem. Peça para a pessoa anexar a foto (ícone de câmera) junto com o pedido.');
+    const a = await ctx.photo.analyze();
+    return {
+      status: a.status,
+      qualidade: a.imageQuality,
+      resumo: a.summary,
+      itens: a.items.map((i) => ({
+        identificado: i.label,
+        foodRef: i.match?.ref ?? null,
+        alimento: i.match?.name ?? null,
+        quantidade: i.quantity,
+        unidade: i.unit,
+        faixa: i.range,
+        confianca: i.confidenceLevel,
+        revisar: i.needsReview,
+        aviso: i.warning,
+        ...(i.match && i.quantity ? { estimativa: mx(itemMacros(i.match.per100, i.quantity)) } : {}),
+      })),
+      total_estimado: mx(a.totals),
+      completude: a.completeness,
+      observacoes_caloricas: a.calorieNotes,
+      nao_identificado: a.uncertain,
+      note: 'Estimativa visual: quantidades aproximadas; valores do catálogo (TACO) calculados pelo app. Itens sem foodRef ou sem quantidade não entram no total. Para registrar, mostre os itens e use propose_create_meal/propose_add_foods_to_meal com fromPhoto true e os foodRef acima — só se a pessoa pediu para registrar.',
+    };
+  },
+};
+
 export const nutritionModule: AiModuleDef = {
   id: 'nutrition',
   name: 'Alimentação: diário, alimentos, metas e planejamento',
   status: 'available',
-  scope: 'diário alimentar (refeições consumidas e planejadas), alimentos do catálogo TACO e cadastrados, calorias e macronutrientes, metas nutricionais, água, planejamento alimentar, comparação planejado × consumido',
-  tools: [getDiary, listRecentMeals, searchFoods, getGoals, getPlan, getTotals, compareGoals, proposeCreateMeal, proposeAddItems, proposeUpdateMeal, proposeCreateFood, proposeGoals, proposeCreatePlan, proposeUpdatePlan],
+  scope: 'diário alimentar (refeições consumidas e planejadas), alimentos do catálogo TACO e cadastrados, calorias e macronutrientes, metas nutricionais, água, planejamento alimentar, comparação planejado × consumido, análise de foto de refeição (estimativa revisável)',
+  tools: [analyzeMealPhoto, getDiary, listRecentMeals, searchFoods, getGoals, getPlan, getTotals, compareGoals, proposeCreateMeal, proposeAddItems, proposeUpdateMeal, proposeCreateFood, proposeGoals, proposeCreatePlan, proposeUpdatePlan],
   actions: [mealCreate, mealAddItems, mealUpdate, foodCreate, goalsUpdate, planCreate, planUpdate],
 };

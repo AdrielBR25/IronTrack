@@ -185,7 +185,7 @@ export const assistantApi = {
   rename: (id: string, title: string) => apiRequest<{ title: string }>('PATCH', `/assistant/conversations/${encodeURIComponent(id)}`, { title }),
   remove: (id: string) => apiRequest<void>('DELETE', `/assistant/conversations/${encodeURIComponent(id)}`),
   removeAll: () => apiRequest<{ deleted: number }>('DELETE', '/assistant/conversations'),
-  send: (conversationId: string | null, body: { content: string; model?: string; timezone?: string }, onEvent: (ev: StreamEvent) => void, signal: AbortSignal) =>
+  send: (conversationId: string | null, body: { content: string; model?: string; timezone?: string; attachments?: { type: 'image'; purpose: 'meal'; dataUrl: string }[] }, onEvent: (ev: StreamEvent) => void, signal: AbortSignal) =>
     apiStream(`/assistant/conversations/${conversationId ? encodeURIComponent(conversationId) : 'new'}/messages`, body, (e) => onEvent(e as StreamEvent), signal),
   action: (id: string) => apiRequest<{ action: ActionView }>('GET', `/assistant/actions/${encodeURIComponent(id)}`),
   approve: (id: string) => apiRequest<{ action: ActionView }>('POST', `/assistant/actions/${encodeURIComponent(id)}/approve`, {}),

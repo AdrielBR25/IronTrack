@@ -11,6 +11,7 @@ import {
   MAX_MEMORY_CHARS,
   MAX_MEMORIES,
   MAX_TITLE_CHARS,
+  MAX_MESSAGE_BODY_BYTES,
   MAX_USER_MESSAGE_CHARS,
   sendMessageSchema,
   type AssistantAvailability,
@@ -30,6 +31,10 @@ import { ACTION_HANDLERS, MODULES } from './tools/registry.ts';
 import { isValidTimezone } from './tools/time.ts';
 import { ToolError } from './tools/types.ts';
 import { StaleError } from './tools/training.ts';
+import { PHOTO_LIMITS, PHOTO_NOTICE_VERSION, VISION_PURPOSE_STATUS, photoAnalyzeSchema, type PhotoAnalysisView, type VisionStatusView } from '../../../../shared/nutrition/vision.ts';
+import { buildPhotoAnalysis } from '../nutrition/photo.ts';
+import { ImageError, readImageDataUrl, type CleanImage } from './image.ts';
+import { VisionError, createVisionRunner, photosToday } from './vision.ts';
 
 export interface AssistantDeps {
   cfg: ApiConfig;
@@ -99,8 +104,76 @@ export function createAssistantModule(d: AssistantDeps): AssistantModule {
   };
 
   async function settings(userId: string) {
-    const r = await d.pool.query<{ notice_version: number | null; notice_accepted_at: Date | null }>('SELECT notice_version, notice_accepted_at FROM assistant_settings WHERE user_id = $1', [userId]);
+    const r = await d.pool.query<{ notice_version: number | null; notice_accepted_at: Date | null; photo_notice_version: number | null }>('SELECT notice_version, notice_accepted_at, photo_notice_version FROM assistant_settings WHERE user_id = $1', [userId]);
     return r.rows[0] ?? null;
+  }
+
+  // ---------------------------------------------------------------- Fase 03: visão (fotos de refeição)
+  const vision = config ? createVisionRunner({ pool: d.pool, cfg: config, fetch: fetchFn, apiKey: () => (availability() === 'ok' ? rawKey() : undefined), now, log: d.log }) : null;
+  /** Motivo fixo quando a análise de fotos não pode ser usada por esta conta (null = disponível). */
+  const visionBlock = (ctx: RequestCtx): string | null => {
+    if (!config || !config.enabled || !config.vision || !config.vision.enabled) return 'vision_disabled';
+    const av = availability();
+    if (av === 'auth_failed') return 'provider_auth_failed';
+    if (av !== 'ok') return 'provider_unavailable';
+    if (d.cfg.ai.requireVerifiedEmail && !ctx.auth!.emailVerified) return 'email_not_verified';
+    return null;
+  };
+  const VISION_STATUS: Record<string, number> = {
+    photo_invalid: 400, photo_too_small: 400, photo_too_large: 413, payload_too_large: 413, photo_notice_required: 409, photo_busy: 409, photo_daily_limit: 429, daily_limit: 429,
+    photo_purpose_planned: 400, vision_disabled: 503, provider_unavailable: 503, provider_auth_failed: 503, provider_billing: 503, provider_forbidden: 503, model_unavailable: 503,
+    vision_model_unsupported: 503, provider_rate_limited: 429, provider_unreachable: 502, provider_failure: 502, invalid_response: 502, vision_incomplete: 502, content_filtered: 422, timeout: 504, cancelled: 499, email_not_verified: 403,
+  };
+  const visionErrorCode = (e: unknown): string => (e instanceof ImageError || e instanceof VisionError || isGatewayError(e) ? e.code : 'internal_error');
+  /** Imagem → análise da OpenAI → rascunho com alimentos do catálogo (sem gravar nada). */
+  async function analyzePhoto(userId: string, img: CleanImage, o: { note: string | null; kind?: PhotoAnalysisView['suggestedKind']; signal?: AbortSignal }): Promise<PhotoAnalysisView> {
+    const r = await vision!(userId, img, { note: o.note, purpose: 'meal', ...(o.signal ? { signal: o.signal } : {}) });
+    record('ok', r.model, 'turn');
+    return buildPhotoAnalysis(d.pool as never, userId, r.output, { model: r.model, kind: o.kind ?? null });
+  }
+
+  async function visionStatus(ctx: RequestCtx): Promise<VisionStatusView> {
+    const u = ctx.auth!.userId;
+    const block = visionBlock(ctx);
+    const s = await settings(u);
+    const day = utcDay(now());
+    return {
+      available: !block,
+      reason: block ? (ASSISTANT_ERROR_MESSAGES[block] ?? null) : null,
+      notice: { version: PHOTO_NOTICE_VERSION, accepted: (s?.photo_notice_version ?? 0) >= PHOTO_NOTICE_VERSION },
+      limits: { photosPerDay: config?.vision?.photosPerDay ?? 0, maxBytes: PHOTO_LIMITS.maxBytes, targetSide: PHOTO_LIMITS.targetSide },
+      usage: { day, photos: await photosToday(d.pool, u, day) },
+      purposes: VISION_PURPOSE_STATUS,
+    };
+  }
+
+  /** POST /api/v1/assistant/vision/meal — análise avulsa (tela Alimentação). Devolve um rascunho; nada é salvo. */
+  async function visionMeal(ctx: RequestCtx) {
+    const a = ctx.auth!;
+    const block = visionBlock(ctx);
+    if (block) return fail(block, VISION_STATUS[block] ?? 503);
+    let raw: unknown;
+    try {
+      raw = await readJson(ctx, MAX_MESSAGE_BODY_BYTES);
+    } catch (e) {
+      if (isApiError(e) && e.code === 'payload_too_large') return fail('photo_too_large', 413);
+      throw e;
+    }
+    const parsed = photoAnalyzeSchema.safeParse(raw);
+    if (!parsed.success) return fail(parsed.error.issues.some((i) => i.path[0] === 'image' && i.code === 'too_big') ? 'photo_too_large' : 'photo_invalid', 400);
+    if (parsed.data.purpose !== 'meal') return fail('photo_purpose_planned', 400);
+    const s = await settings(a.userId);
+    if ((s?.photo_notice_version ?? 0) < PHOTO_NOTICE_VERSION) return fail('photo_notice_required', 409);
+    try {
+      const img = readImageDataUrl(parsed.data.image);
+      const analysis = await analyzePhoto(a.userId, img, { note: parsed.data.note, kind: parsed.data.kind ?? null, signal: ctx.signal });
+      return { status: 200, body: { analysis } };
+    } catch (e) {
+      const code = visionErrorCode(e);
+      if (code === 'internal_error') throw e;
+      if (isGatewayError(e)) record(e.code, config!.vision!.model, 'turn');
+      return fail(code, VISION_STATUS[code] ?? 502);
+    }
   }
 
   async function statusView(ctx: RequestCtx): Promise<AssistantStatusView> {
@@ -135,8 +208,8 @@ export function createAssistantModule(d: AssistantDeps): AssistantModule {
     if (d.cfg.ai.requireVerifiedEmail && !a.emailVerified) return fail('email_not_verified', 403);
     const av = availability();
     if (av !== 'ok') return fail(av === 'auth_failed' ? 'provider_auth_failed' : 'provider_unavailable', 503);
-    const parsed = sendMessageSchema.safeParse(await bodyOf(ctx, 64 * 1024));
-    if (!parsed.success) return fail('message_too_long', 400);
+    const parsed = sendMessageSchema.safeParse(await bodyOf(ctx, MAX_MESSAGE_BODY_BYTES));
+    if (!parsed.success) return fail(parsed.error.issues.some((i) => i.path[0] === 'attachments') ? 'photo_invalid' : 'message_too_long', 400);
     const content = parsed.data.content.trim();
     if (!content) return fail('message_empty', 400);
     if (content.length > MAX_USER_MESSAGE_CHARS) return fail('message_too_long', 400);
@@ -145,6 +218,21 @@ export function createAssistantModule(d: AssistantDeps): AssistantModule {
     const s = await settings(a.userId);
     if ((s?.notice_version ?? 0) < ASSISTANT_NOTICE_VERSION) return fail('notice_required', 409);
     const timezone = isValidTimezone(parsed.data.timezone) ? parsed.data.timezone : DEFAULT_TZ;
+    // Fase 03: foto anexada. Validada antes de tudo; vive só na memória desta resposta.
+    let photoImg: CleanImage | null = null;
+    const att = parsed.data.attachments?.[0];
+    if (att) {
+      if (att.purpose !== 'meal') return fail('photo_purpose_planned', 400);
+      const vb = visionBlock(ctx);
+      if (vb) return fail(vb, VISION_STATUS[vb] ?? 503);
+      if ((s?.photo_notice_version ?? 0) < PHOTO_NOTICE_VERSION) return fail('photo_notice_required', 409);
+      try {
+        photoImg = readImageDataUrl(att.dataUrl);
+      } catch (e) {
+        if (e instanceof ImageError) return fail(e.code, VISION_STATUS[e.code] ?? 400);
+        throw e;
+      }
+    }
 
     let conv = ctx.params.id === 'new' ? null : await S.getConversation(d.pool, a.userId, ctx.params.id);
     if (ctx.params.id !== 'new' && !conv) return fail('not_found', 404);
@@ -174,7 +262,22 @@ export function createAssistantModule(d: AssistantDeps): AssistantModule {
         conv = await S.createConversation(d.pool, a.userId, autoTitle(content));
         created = true;
       }
-      const userMsg = await S.insertMessage(d.pool, { userId: a.userId, conversationId: conv.id, role: 'user', content });
+      const userMsg = await S.insertMessage(d.pool, { userId: a.userId, conversationId: conv.id, role: 'user', content, photos: photoImg ? 1 : 0 });
+      let photoTurn: { messageId: string; analyze: () => Promise<PhotoAnalysisView> } | undefined;
+      if (photoImg) {
+        const img = photoImg;
+        let cached: Promise<PhotoAnalysisView> | null = null;
+        photoTurn = {
+          messageId: userMsg.id,
+          // Uma análise por resposta (cache): repetir a ferramenta não gasta outra foto do limite.
+          analyze: () =>
+            (cached ??= analyzePhoto(a.userId, img, { note: null, signal: ctx.signal }).catch((e) => {
+              const code = visionErrorCode(e);
+              if (code === 'internal_error') throw e;
+              throw new ToolError(code, `Não foi possível analisar a foto: ${ASSISTANT_ERROR_MESSAGES[code] ?? code}`);
+            })),
+        };
+      }
       res.statusCode = 200;
       res.setHeader('content-type', 'text/event-stream; charset=utf-8');
       res.setHeader('cache-control', 'no-store');
@@ -190,7 +293,7 @@ export function createAssistantModule(d: AssistantDeps): AssistantModule {
       const deps: EngineDeps = { pool: d.pool, cfg: config, provider, fetch: fetchFn, apiKey: rawKey()!, now, log: d.log };
       let out;
       try {
-        out = await runTurn(deps, { userId: a.userId, dataProfileId: a.dataProfileId, conversationId: conv.id, summary: conv.summary, model, timezone, signal: turnCtrl.signal, emit }, Number(conv.summary_upto));
+        out = await runTurn(deps, { userId: a.userId, dataProfileId: a.dataProfileId, conversationId: conv.id, summary: conv.summary, model, timezone, signal: turnCtrl.signal, emit, ...(photoTurn ? { photo: photoTurn } : {}) }, Number(conv.summary_upto));
       } finally {
         clearTimeout(turnTimer);
         ctx.signal.removeEventListener('abort', onAbort);
@@ -341,7 +444,8 @@ export function createAssistantModule(d: AssistantDeps): AssistantModule {
           : av === 'invalid_key_format'
             ? `variável ${config.apiKeyEnv} presente, mas o valor não tem o formato de uma chave de API da OpenAI (sk-…)`
             : `chave em ${config.apiKeyEnv} configurada; ainda não validada (use "Testar" no app)`;
-      return [`Assistente: ${config.displayName} — ${what}; modelos: ${config.models.map((m) => m.id).join(', ')}.`];
+      const v = config.vision;
+      return [`Assistente: ${config.displayName} — ${what}; modelos: ${config.models.map((m) => m.id).join(', ')}; fotos: ${v?.enabled ? `${v.model} (detail ${v.detail}, ${v.photosPerDay}/dia)` : 'desativado'}.`];
     },
     register(router) {
       const P = '/api/v1/assistant';
@@ -403,7 +507,23 @@ export function createAssistantModule(d: AssistantDeps): AssistantModule {
         },
       });
       // O streaming tem tempo próprio (turnTimeoutMs); o limite geral da requisição fica acima dele.
-      router.add({ method: 'POST', path: `${P}/conversations/:id/messages`, auth: 'session', maxBody: 64 * 1024, timeoutMs: (config?.limits.turnTimeoutMs ?? 80_000) + 10_000, handler: send });
+      router.add({ method: 'GET', path: `${P}/vision/status`, auth: 'session', handler: async (ctx) => ({ status: 200, body: { vision: await visionStatus(ctx) } }) });
+      router.add({
+        method: 'POST',
+        path: `${P}/vision/notice`,
+        auth: 'session',
+        handler: async (ctx) => {
+          const b = await bodyOf(ctx, 256);
+          if (b.version !== PHOTO_NOTICE_VERSION) throw new ApiError('bad_request');
+          await d.pool.query(
+            'INSERT INTO assistant_settings (user_id, photo_notice_version, photo_notice_accepted_at) VALUES ($1, $2, now()) ON CONFLICT (user_id) DO UPDATE SET photo_notice_version = $2, photo_notice_accepted_at = now(), updated_at = now()',
+            [ctx.auth!.userId, PHOTO_NOTICE_VERSION],
+          );
+          return { status: 200, body: { vision: await visionStatus(ctx) } };
+        },
+      });
+      router.add({ method: 'POST', path: `${P}/vision/meal`, auth: 'session', maxBody: MAX_MESSAGE_BODY_BYTES, timeoutMs: (config?.vision?.timeoutMs ?? 45_000) + 15_000, handler: visionMeal });
+      router.add({ method: 'POST', path: `${P}/conversations/:id/messages`, auth: 'session', maxBody: MAX_MESSAGE_BODY_BYTES, timeoutMs: (config?.limits.turnTimeoutMs ?? 80_000) + 10_000, handler: send });
       router.add({ method: 'GET', path: `${P}/actions/:id`, auth: 'session', handler: async (ctx) => {
         const r = await S.getAction(d.pool, ctx.auth!.userId, ctx.params.id);
         return r ? { status: 200, body: { action: S.actionView(r, now()) } } : fail('not_found', 404);

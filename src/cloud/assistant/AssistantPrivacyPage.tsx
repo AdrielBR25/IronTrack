@@ -159,6 +159,24 @@ export default function AssistantPrivacyPage() {
         </CardContent>
       </Card>
 
+      <Card data-testid="privacy-photos">
+        <CardHeader>
+          <CardTitle>Fotos de refeições</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm text-muted-foreground">
+          <p>
+            A foto só sai do aparelho quando você toca em <em>Analisar</em> (em Alimentação) ou envia a mensagem com a foto anexada ao Assistente. Antes do envio, o app
+            reduz a imagem e o servidor remove os metadados (localização, data, modelo do aparelho). O servidor do IronTrack envia a foto à OpenAI, que identifica os
+            alimentos e estima as porções; as calorias e os macros são calculados pelo app com a tabela TACO.
+          </p>
+          <p>
+            A foto <strong className="text-foreground">não é guardada</strong>: nem no servidor, nem no histórico das conversas, nem nos registros de uso. Junto com ela vai
+            só a observação que você escrever, nunca o seu histórico. O resultado é uma estimativa: nada entra no diário sem a sua confirmação.
+          </p>
+          <p>Há um limite diário de análises por conta para controlar custos. O registro manual continua sempre disponível.</p>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>Preferências salvas</CardTitle>

@@ -275,8 +275,9 @@ function guessKind(): MealKind {
 
 type Tab = 'recent' | 'fav' | 'saved';
 
-function FoodPicker({ onPick, onSaved, onDone, count }: { onPick: (f: FoodView, q?: number) => void; onSaved: (s: SavedMealView) => void; onDone: () => void; count: number }) {
-  const [q, setQ] = useState('');
+/** Busca de alimentos (exportada para a revisão da foto, Fase 03: sem a aba de refeições salvas quando `onSaved` falta). */
+export function FoodPicker({ onPick, onSaved, onDone, count, initialQuery = '', doneLabel }: { onPick: (f: FoodView, q?: number) => void; onSaved?: (s: SavedMealView) => void; onDone: () => void; count: number; initialQuery?: string; doneLabel?: string }) {
+  const [q, setQ] = useState(initialQuery);
   const [tab, setTab] = useState<Tab>('recent');
   const [results, setResults] = useState<FoodView[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -319,7 +320,7 @@ function FoodPicker({ onPick, onSaved, onDone, count }: { onPick: (f: FoodView, 
           options={[
             { value: 'recent', label: 'Recentes' },
             { value: 'fav', label: 'Favoritos' },
-            { value: 'saved', label: 'Refeições' },
+            ...(onSaved ? [{ value: 'saved' as const, label: 'Refeições' }] : []),
           ]}
           aria-label="Atalhos"
         />
@@ -328,7 +329,7 @@ function FoodPicker({ onPick, onSaved, onDone, count }: { onPick: (f: FoodView, 
         {!results && tab === 'saved' ? (
           qd?.savedMeals.length ? (
             qd.savedMeals.map((s) => (
-              <button key={s.id} type="button" onClick={() => onSaved(s)} className="flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left active:bg-accent">
+              <button key={s.id} type="button" onClick={() => onSaved?.(s)} className="flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left active:bg-accent">
                 <Star className="h-4 w-4 shrink-0 text-primary" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium">{s.name}</span>
@@ -348,7 +349,7 @@ function FoodPicker({ onPick, onSaved, onDone, count }: { onPick: (f: FoodView, 
       </div>
       {count > 0 && (
         <button type="button" onClick={onDone} className="w-full text-center text-xs font-medium text-primary">
-          {count} alimento(s) na refeição · revisar
+          {doneLabel ?? `${count} alimento(s) na refeição · revisar`}
         </button>
       )}
     </div>

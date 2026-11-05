@@ -7,9 +7,27 @@
   "defaultModel": "gpt-6.1-terra",
   "summaryModel": "gpt-6-luna",
   "models": [
-    { "id": "gpt-6.1-terra", "displayName": "GPT-6.1 Terra", "description": "Equilibrado: bom raciocínio com custo baixo (padrão).", "reasoningEffort": "low", "maxOutputTokens": 4000 },
-    { "id": "gpt-6-luna", "displayName": "GPT-6 Luna", "description": "Mais rápido e barato, para perguntas simples.", "reasoningEffort": "none", "maxOutputTokens": 3000 },
-    { "id": "gpt-6.1-sol", "displayName": "GPT-6.1 Sol", "description": "Análises mais profundas (custo maior).", "reasoningEffort": "low", "maxOutputTokens": 6000 }
+    {
+      "id": "gpt-6.1-terra",
+      "displayName": "GPT-6.1 Terra",
+      "description": "Equilibrado: bom raciocínio com custo baixo (padrão).",
+      "reasoningEffort": "low",
+      "maxOutputTokens": 4000
+    },
+    {
+      "id": "gpt-6-luna",
+      "displayName": "GPT-6 Luna",
+      "description": "Mais rápido e barato, para perguntas simples.",
+      "reasoningEffort": "none",
+      "maxOutputTokens": 3000
+    },
+    {
+      "id": "gpt-6.1-sol",
+      "displayName": "GPT-6.1 Sol",
+      "description": "Análises mais profundas (custo maior).",
+      "reasoningEffort": "low",
+      "maxOutputTokens": 6000
+    }
   ],
   "limits": {
     "messagesPerMinute": 8,
@@ -26,5 +44,15 @@
     "maxToolOutputChars": 12000,
     "maxProviderResponseBytes": 4194304,
     "actionTtlHours": 48
+  },
+  "vision": {
+    "$comment": "Fase 03: análise de foto de refeição. Modelo SEPARADO do chat (nem todo modelo aceita imagem). Troque com ASSISTANT_VISION_MODEL sem mexer no código; desative com ASSISTANT_VISION_ENABLED=false.",
+    "enabled": true,
+    "model": "gpt-6.1-terra",
+    "reasoningEffort": "low",
+    "detail": "high",
+    "maxOutputTokens": 2000,
+    "photosPerDay": 20,
+    "timeoutMs": 45000
   }
 }

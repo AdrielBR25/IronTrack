@@ -109,8 +109,9 @@ desconhecido ou argumento inválido volta como erro ao modelo sem executar nada.
 ## 7. Módulos futuros
 
 `tools/registry.ts` declara os contratos. **Ativo desde a Fase 01:** RPG pessoal (hábitos, rotinas, missões,
-XP/níveis/conquistas), ver `docs/RPG_DESENVOLVIMENTO.md`. Ainda `planned`: alimentação/nutrição (incluindo foto da
-refeição), leitura e estudos, reflexões e metas pessoais. Para ativar um módulo: criar o arquivo de ferramentas
+XP/níveis/conquistas), ver `docs/RPG_DESENVOLVIMENTO.md`. **Ativo desde a Fase 02:** alimentação. **Fase 03:** foto de refeição
+(`analyze_meal_photo`, anexo de imagem na mensagem; ver `docs/ALIMENTACAO_FOTO.md`). Ainda `planned`: leitura de rótulos por
+foto, leitura e estudos, reflexões e metas pessoais. Para ativar um módulo: criar o arquivo de ferramentas
 (`ReadTool`/`WriteTool`), os `ActionHandler` das escritas (com `apply` e `undo`), incluir o tipo em `ActionKind` e no
 CHECK de `assistant_actions.kind` (nova migração) e trocar o status para `available`.
 
@@ -125,7 +126,7 @@ desfazer em até 7 dias; se o item mudou depois, a reversão é recusada (`actio
 `#/assistente` (modo conta): chat com streaming, Markdown seguro (elementos React, links só http/https em nova aba),
 indicador de processamento com a ferramenta em uso, parar resposta, erros elegantes, contador para mensagens longas,
 seleção de modelo, lista de conversas (abrir, renomear, apagar), cartão de proposta com prévia e aprovação, botão de
-anexo visível porém desativado (o protocolo reserva `attachments`, hoje recusado se não vier vazio).
+câmera para anexar 1 foto de refeição por mensagem (Fase 03; a foto não é guardada, só a marca de que houve foto).
 `#/assistente/privacidade`: detalhes do processamento, preferências salvas, apagar conversas e preferências.
 
 ## 9. Testes

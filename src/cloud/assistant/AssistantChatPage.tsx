@@ -4,7 +4,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Check, CircleAlert, History, Loader2, MessageSquarePlus, Paperclip, Pencil, SendHorizontal, Shield, Sparkles, Square, Trash2, Undo2, Wrench, X } from 'lucide-react';
+import { Camera, Check, CircleAlert, History, ImageOff, Loader2, MessageSquarePlus, Pencil, SendHorizontal, Shield, Sparkles, Square, Trash2, Undo2, Wrench, X } from 'lucide-react';
 import { MAX_USER_MESSAGE_CHARS, type ActionView, type MessageView } from '@shared/assistant/protocol.ts';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,11 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input, NativeSelect, Textarea } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { Markdown } from './Markdown';
-import { useAssistantChat, type AssistantChat, type LiveTool } from './useAssistantChat';
+import { PHOTO_NOTICE_VERSION } from '@shared/nutrition/vision.ts';
+import { nutritionApi } from '../nutrition/api';
+import { PhotoNotice } from '../nutrition/photo/MealPhotoFlow';
+import { PhotoPrepError, preparePhoto, type PreparedPhoto } from '../nutrition/photo/image';
+import { errorMessage, useAssistantChat, type AssistantChat, type LiveTool } from './useAssistantChat';
 
 export const SUGGESTIONS = [
   'Como foi minha evolução no supino nos últimos três meses?',
@@ -296,8 +300,16 @@ function Message({ m, chat }: { m: MessageView; chat: AssistantChat }) {
     );
   if (m.role === 'user')
     return (
-      <li className="flex justify-end" data-testid="assistant-user">
+      <li className="flex flex-col items-end gap-1" data-testid="assistant-user">
         <span className="sr-only">Você:</span>
+        {(m.attachments?.length ?? 0) > 0 &&
+          (chat.photoPreviews[m.id] ? (
+            <img src={chat.photoPreviews[m.id]} alt="Foto enviada" className="max-h-40 max-w-[60%] rounded-2xl border object-cover" />
+          ) : (
+            <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground" data-testid="assistant-photo-gone">
+              <ImageOff className="h-3 w-3" /> Foto enviada (não guardada)
+            </span>
+          ))}
         <p className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-primary/15 px-3.5 py-2.5 text-sm [overflow-wrap:anywhere]">{m.content}</p>
       </li>
     );
@@ -368,11 +380,47 @@ export default function AssistantChatPage() {
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
   }, [draft]);
 
+  // Fase 03: foto de refeição anexada (preparada no aparelho; enviada só com a mensagem; não é guardada).
+  const [photo, setPhoto] = useState<PreparedPhoto | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoNotice, setPhotoNotice] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const pickPhoto = async () => {
+    if (photoBusy || busy) return;
+    setPhotoBusy(true);
+    try {
+      const v = (await nutritionApi.visionStatus()).vision;
+      if (!v.available) return void toast.error(v.reason ?? 'A análise de fotos não está disponível agora.');
+      if (!v.notice.accepted) return void setPhotoNotice(true);
+      fileInput.current?.click();
+    } catch (e) {
+      toast.error(errorMessage(e).message);
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+  const onPhotoFile = async (f: File | undefined) => {
+    if (!f) return;
+    setPhotoBusy(true);
+    try {
+      setPhoto(await preparePhoto(f));
+    } catch (e) {
+      toast.error(e instanceof PhotoPrepError ? e.message : 'Não consegui abrir esta imagem.');
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
   const submit = async (text = draft) => {
-    if (!text.trim() || busy || over || blocked) return;
+    if ((!text.trim() && !photo) || busy || over || blocked) return;
+    const sent = photo;
     setDraft('');
-    const ok = await chat.send(text);
-    if (!ok) setDraft(text);
+    setPhoto(null);
+    const ok = await chat.send(text, sent ? { dataUrl: sent.dataUrl } : null);
+    if (!ok) {
+      setDraft(text);
+      setPhoto(sent);
+    }
   };
 
   return (
@@ -474,6 +522,25 @@ export default function AssistantChatPage() {
           void submit();
         }}
       >
+        {photo && (
+          <div className="flex items-center gap-2 px-1 pb-1.5" data-testid="assistant-photo-chip">
+            <img src={photo.dataUrl} alt="Foto anexada" className="h-14 w-14 rounded-xl border object-cover" />
+            <div className="min-w-0 flex-1 text-[11px] text-muted-foreground">
+              <p className="font-medium text-foreground">Foto da refeição</p>
+              <p>Enviada só com esta mensagem; não fica guardada.</p>
+              <div className="mt-1 flex flex-wrap gap-1">
+                {['Quanto de proteína tem nesse prato?', 'Analise e coloque no meu almoço.'].map((q) => (
+                  <button key={q} type="button" className="rounded-full bg-secondary px-2 py-0.5 text-[11px] text-foreground" onClick={() => setDraft(q)}>
+                    {q}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <Button type="button" variant="ghost" size="icon-sm" aria-label="Remover foto" onClick={() => setPhoto(null)}>
+              <X />
+            </Button>
+          </div>
+        )}
         <label htmlFor="assistant-input" className="sr-only">
           Mensagem para o assistente
         </label>
@@ -497,8 +564,9 @@ export default function AssistantChatPage() {
           data-testid="assistant-input"
         />
         <div className="flex items-center gap-1.5 px-1 pt-1">
-          <Button type="button" variant="ghost" size="icon-sm" disabled aria-label="Anexar arquivo ou imagem (em breve)" title="Anexos e imagens chegam em uma próxima fase">
-            <Paperclip />
+          <input ref={fileInput} type="file" accept="image/*,.heic,.heif" className="sr-only" tabIndex={-1} aria-hidden onChange={(e) => { void onPhotoFile(e.target.files?.[0]); e.target.value = ''; }} data-testid="assistant-photo-input" />
+          <Button type="button" variant="ghost" size="icon-sm" disabled={!!blocked || busy || photoBusy} aria-label="Anexar foto da refeição" title="Foto da refeição para a IA analisar" onClick={() => void pickPhoto()} data-testid="assistant-attach">
+            {photoBusy ? <Loader2 className="animate-spin" /> : <Camera />}
           </Button>
           {s && s.models.length > 1 && (
             <NativeSelect value={chat.model ?? ''} onChange={(e) => chat.setModel(e.target.value)} disabled={busy} aria-label="Modelo da IA" className="h-9 w-auto max-w-[11rem] text-xs" data-testid="assistant-model">
@@ -517,7 +585,7 @@ export default function AssistantChatPage() {
               <Square />
             </Button>
           ) : (
-            <Button type="submit" size="icon-sm" aria-label="Enviar" disabled={!draft.trim() || over || !!blocked} data-testid="assistant-send">
+            <Button type="submit" size="icon-sm" aria-label="Enviar" disabled={(!draft.trim() && !photo) || over || !!blocked} data-testid="assistant-send">
               <SendHorizontal />
             </Button>
           )}
@@ -531,6 +599,20 @@ export default function AssistantChatPage() {
       </p>
 
       <ConversationsDialog chat={chat} open={listOpen} onOpenChange={setListOpen} />
+      <Dialog open={photoNotice} onOpenChange={setPhotoNotice}>
+        <DialogContent className="sm:max-w-md">
+          {photoNotice && (
+            <PhotoNotice
+              onCancel={() => setPhotoNotice(false)}
+              onAccept={async () => {
+                await nutritionApi.acceptPhotoNotice(PHOTO_NOTICE_VERSION);
+                setPhotoNotice(false);
+                fileInput.current?.click();
+              }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
       <NoticeDialog chat={chat} />
     </div>
   );

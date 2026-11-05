@@ -3,6 +3,8 @@
 // Usa a mesma invalidação do RPG: registrar uma refeição atualiza missões, XP e o Início.
 import type { RewardOutcome } from '@shared/life/protocol.ts';
 import type { DaySummaryView, DayView, EstimateInput, EstimateView, FoodView, GoalsInput, GoalsView, MealDraftItem, MealInput, MealPatch, MealStatus, MealKind, MealView, QuickView, SavedMealView, StatsView, CustomFoodInput } from '@shared/nutrition/protocol.ts';
+import type { MealKind as Kind } from '@shared/nutrition/protocol.ts';
+import type { PhotoAnalysisView, VisionStatusView } from '@shared/nutrition/vision.ts';
 import { apiRequest } from '../api';
 import { emitReward, invalidateLife, lifeApi } from '../life/api';
 
@@ -58,5 +60,10 @@ export const nutritionApi = {
   goals: () => apiRequest<{ goals: GoalsView | null }>('GET', '/nutrition/goals'),
   saveGoals: (goals: Partial<GoalsInput>, version?: number | null) => plain(apiRequest<{ goals: GoalsView }>('PATCH', `/nutrition/goals?${tz()}`, { goals, ...(version ? { version } : {}) })),
   estimate: (i: EstimateInput) => apiRequest<{ estimate: EstimateView }>('POST', '/nutrition/goals/estimate', i),
+  // Fase 03: foto da refeição (o servidor chama a OpenAI; nada é salvo até a confirmação).
+  visionStatus: () => apiRequest<{ vision: VisionStatusView }>('GET', '/assistant/vision/status', undefined, { timeoutMs: 10_000 }),
+  acceptPhotoNotice: (version: number) => apiRequest<{ vision: VisionStatusView }>('POST', '/assistant/vision/notice', { version }),
+  analyzePhoto: (image: string, o: { note?: string | null; kind?: Kind | null; signal?: AbortSignal } = {}) =>
+    apiRequest<{ analysis: PhotoAnalysisView }>('POST', '/assistant/vision/meal', { image, purpose: 'meal', note: o.note ?? null, kind: o.kind ?? null }, { timeoutMs: 75_000, ...(o.signal ? { signal: o.signal } : {}) }),
   resolveDraft: (items: { label: string; quantity?: number | null }[]) => apiRequest<{ items: MealDraftItem[] }>('POST', '/nutrition/drafts/resolve', { items }),
 };

@@ -1,7 +1,7 @@
 # Alimentação — IronTrack Life, Fase 02
 
 Diário alimentar, metas, planejamento, análises e ferramentas da IA central. Só no modo conta (dados no PostgreSQL,
-por usuário). Não há reconhecimento por foto nesta fase: existe apenas o contrato de rascunho revisável (§8).
+por usuário). Reconhecimento por foto: Fase 03, ver `docs/ALIMENTACAO_FOTO.md`.
 
 ## 1. Telas (rotas)
 
@@ -82,7 +82,7 @@ Mifflin-St Jeor × fator de atividade (1,2/1,375/1,55/1,725). Ganho: +min(300, 1
 abaixo do metabolismo basal estimado nem de 1.500 (M) / 1.200 (F) kcal. Proteína 1,6–1,8 g/kg, gordura ≥ 0,6 g/kg e
 ≥ 25% das kcal, água 35 ml/kg. As premissas aparecem na tela; é ponto de partida, não prescrição.
 
-## 8. Preparação da Fase 03 (foto)
+## 8. Contrato de rascunho (usado pela Fase 03 — foto, ver docs/ALIMENTACAO_FOTO.md)
 
 `MealDraft`/`MealDraftItem` (rótulo, alimento sugerido, candidatos, quantidade, confiança, aviso) e
 `MEAL_PHOTO_CONTRACT` (`storesPhotos: false`, aviso obrigatório antes de enviar imagem a provedor). `POST

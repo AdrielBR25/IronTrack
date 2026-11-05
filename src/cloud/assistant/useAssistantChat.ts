@@ -52,6 +52,8 @@ export function useAssistantChat() {
   const [error, setError] = useState<ChatError | null>(null);
   const [model, setModel] = useState<string | null>(null);
   const [loadingConversation, setLoadingConversation] = useState(false);
+  // Fase 03: miniaturas das fotos enviadas NESTA sessão (só memória da tela; o servidor não guarda a foto).
+  const [photoPreviews, setPhotoPreviews] = useState<Record<string, string>>({});
   const ctrl = useRef<AbortController | null>(null);
   const current = useRef<string | null>(null);
   current.current = conversationId;
@@ -109,14 +111,15 @@ export function useAssistantChat() {
   }, []);
 
   const send = useCallback(
-    async (content: string): Promise<boolean> => {
-      const text = content.trim();
+    async (content: string, photo?: { dataUrl: string } | null): Promise<boolean> => {
+      const text = content.trim() || (photo ? 'Analise esta foto da minha refeição.' : '');
       if (!text || streaming) return false;
       setError(null);
       const c = new AbortController();
       ctrl.current = c;
       setStreaming({ text: '', tools: [] });
-      const optimistic: MessageView = { id: `local-${Date.now()}`, role: 'user', content: text, status: 'complete', createdAt: new Date().toISOString(), model: null, tools: [], actionIds: [] };
+      const optimistic: MessageView = { id: `local-${Date.now()}`, role: 'user', content: text, status: 'complete', createdAt: new Date().toISOString(), model: null, tools: [], actionIds: [], attachments: photo ? [{ type: 'image', stored: false }] : [] };
+      if (photo) setPhotoPreviews((p) => ({ ...p, [optimistic.id]: photo.dataUrl }));
       setMessages((m) => [...m, optimistic]);
       let accepted = false;
       try {
@@ -124,7 +127,7 @@ export function useAssistantChat() {
         let draft = '';
         await assistantApi.send(
           current.current,
-          { content: text, ...(model ? { model } : {}), ...(timezone() ? { timezone: timezone() } : {}) },
+          { content: text, ...(model ? { model } : {}), ...(timezone() ? { timezone: timezone() } : {}), ...(photo ? { attachments: [{ type: 'image' as const, purpose: 'meal' as const, dataUrl: photo.dataUrl }] } : {}) },
           (ev: StreamEvent) => {
             switch (ev.type) {
               case 'start':
@@ -133,6 +136,7 @@ export function useAssistantChat() {
                 current.current = ev.conversationId;
                 setTitle(ev.title);
                 setMessages((m) => m.map((x) => (x.id === optimistic.id ? ev.userMessage : x)));
+                if (photo) setPhotoPreviews((p) => ({ ...p, [ev.userMessage.id]: photo.dataUrl }));
                 if (ev.created) void refreshList();
                 break;
               case 'text':
@@ -156,7 +160,7 @@ export function useAssistantChat() {
               case 'error':
                 setError({ code: ev.code, message: ev.message });
                 if (ev.message_id)
-                  setMessages((m) => [...m, { id: ev.message_id!, role: 'assistant', content: draft, status: ev.code === 'cancelled' ? 'cancelled' : 'error', createdAt: new Date().toISOString(), model, tools: [], actionIds: [] }]);
+                  setMessages((m) => [...m, { id: ev.message_id!, role: 'assistant', content: draft, status: ev.code === 'cancelled' ? 'cancelled' : 'error', createdAt: new Date().toISOString(), model, tools: [], actionIds: [], attachments: [] }]);
                 setStreaming(null);
                 break;
             }
@@ -257,7 +261,7 @@ export function useAssistantChat() {
     setStatus(await assistantApi.acceptNotice(status.notice.version));
   }, [status]);
 
-  return { status, statusError, refreshStatus, conversations, conversationId, title, messages, actions, streaming, error, setError, model, setModel, loadingConversation, open, send, stop, decide, undo, rename, remove, acceptNotice };
+  return { photoPreviews, status, statusError, refreshStatus, conversations, conversationId, title, messages, actions, streaming, error, setError, model, setModel, loadingConversation, open, send, stop, decide, undo, rename, remove, acceptNotice };
 }
 
 export type AssistantChat = ReturnType<typeof useAssistantChat>;

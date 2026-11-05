@@ -257,6 +257,8 @@ Detalhes em [IA_CENTRAL.md](IA_CENTRAL.md). No serviço **irontrack-api** (nunca
 | `AI_REQUIRE_VERIFIED_EMAIL` | não | `false` enquanto o e-mail (Resend) não estiver configurado; senão o assistente pede e-mail confirmado. |
 | `ASSISTANT_ENABLED` | não | `false` desliga o assistente central. |
 | `ASSISTANT_CONFIG_JSON` | não | substitui `services/api/config/assistant.json` (modelos e limites). |
+| `ASSISTANT_VISION_MODEL` | não | Fase 03: troca o modelo da análise de fotos de refeição (padrão `gpt-6.1-terra`). Precisa aceitar imagem e saída estruturada. |
+| `ASSISTANT_VISION_ENABLED` | não | `false` desliga só a análise de fotos (o registro manual e o chat continuam). |
 
 A migração `0002_assistant.sql` cria só tabelas novas e roda no preDeploy, como a 0001. Depois de implantar, o log de
 inicialização mostra `Assistente: OpenAI — chave em OPENAI_API_KEY configurada; ainda não validada`.

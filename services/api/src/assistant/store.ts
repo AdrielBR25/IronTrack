@@ -26,6 +26,7 @@ interface MsgRow {
   model: string | null;
   tools: ToolUseView[];
   action_ids: string[];
+  attachments?: unknown[];
   created_at: Date;
 }
 
@@ -50,7 +51,7 @@ export interface ActionRow {
 }
 
 export const convView = (r: ConvRow): ConversationSummaryView => ({ id: r.id, title: r.title, createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(), messageCount: r.message_count ?? 0 });
-export const msgView = (r: MsgRow): MessageView => ({ id: r.id, role: r.role, content: r.content, status: r.status, createdAt: r.created_at.toISOString(), model: r.model, tools: r.tools ?? [], actionIds: r.action_ids ?? [] });
+export const msgView = (r: MsgRow): MessageView => ({ id: r.id, role: r.role, content: r.content, status: r.status, createdAt: r.created_at.toISOString(), model: r.model, tools: r.tools ?? [], actionIds: r.action_ids ?? [], attachments: Array.isArray(r.attachments) ? r.attachments.map(() => ({ type: 'image' as const, stored: false as const })) : [] });
 export function actionView(r: ActionRow, now: number): ActionView {
   const expired = r.status === 'pending' && r.expires_at.getTime() <= now;
   return {
@@ -103,12 +104,14 @@ export async function recentMessages(q: Q, userId: string, conversationId: strin
 
 export async function insertMessage(
   q: Q,
-  m: { userId: string; conversationId: string; role: MessageRole; content: string; status?: MessageView['status']; model?: string | null; tools?: ToolUseView[]; actionIds?: string[]; inputTokens?: number; outputTokens?: number },
+  m: { userId: string; conversationId: string; role: MessageRole; content: string; status?: MessageView['status']; model?: string | null; tools?: ToolUseView[]; actionIds?: string[]; inputTokens?: number; outputTokens?: number; photos?: number },
 ): Promise<MsgRow> {
+  // Fase 03: só a MARCA de que houve foto (nunca a imagem).
+  const att = Array.from({ length: m.photos ?? 0 }, () => ({ type: 'image', stored: false }));
   const r = await q.query<MsgRow>(
-    `INSERT INTO assistant_messages (id, conversation_id, user_id, role, content, status, model, tools, action_ids, input_tokens, output_tokens)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-    [randomUUID(), m.conversationId, m.userId, m.role, m.content.slice(0, 40_000), m.status ?? 'complete', m.model ?? null, JSON.stringify(m.tools ?? []), JSON.stringify(m.actionIds ?? []), m.inputTokens ?? null, m.outputTokens ?? null],
+    `INSERT INTO assistant_messages (id, conversation_id, user_id, role, content, status, model, tools, action_ids, input_tokens, output_tokens, attachments)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+    [randomUUID(), m.conversationId, m.userId, m.role, m.content.slice(0, 40_000), m.status ?? 'complete', m.model ?? null, JSON.stringify(m.tools ?? []), JSON.stringify(m.actionIds ?? []), m.inputTokens ?? null, m.outputTokens ?? null, JSON.stringify(att)],
   );
   await q.query('UPDATE assistant_conversations SET updated_at = now() WHERE id = $1 AND user_id = $2', [m.conversationId, m.userId]);
   return r.rows[0];

@@ -196,6 +196,8 @@ export const mealInputSchema = z
     status: z.enum(MEAL_STATUS),
     notes: optText(300),
     items: z.array(mealItemInputSchema).max(NUTRITION_LIMITS.itemsPerMeal),
+    /** Fase 03: refeição revisada a partir de uma foto (só marca a origem; nada muda no cálculo). */
+    origin: z.enum(['user', 'photo']).nullish(),
   })
   .strict();
 export type MealInput = z.output<typeof mealInputSchema>;
@@ -480,8 +482,8 @@ export const draftResolveSchema = z
   .strict();
 
 export const MEAL_PHOTO_CONTRACT = {
-  id: 'irontrack.life.mealPhoto.v0',
-  status: 'planned',
+  id: 'irontrack.life.mealPhoto.v1',
+  status: 'available',
   flow: ['captura ou envio (com aviso de envio ao provedor)', 'reconhecimento multimodal → MealDraft (origin photo, confidence)', 'revisão e correção', 'confirmação → POST /nutrition/meals (origin photo)'],
   storesPhotos: false,
 } as const;
