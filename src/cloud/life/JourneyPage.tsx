@@ -14,7 +14,7 @@ import { lifeApi, useLifeQuery } from './api';
 import { lifeError, toastLifeError } from './forms';
 import { ATTR_ICON, ATTR_TONE, Bar } from './ui';
 
-const SOURCE_LABEL: Record<XpEventView['source'], string> = { habit: 'Hábito', mission: 'Missão', workout: 'Treino', routine: 'Rotina', achievement: 'Conquista', legacy: 'Histórico' };
+const SOURCE_LABEL: Record<XpEventView['source'], string> = { habit: 'Hábito', mission: 'Missão', workout: 'Treino', routine: 'Rotina', achievement: 'Conquista', legacy: 'Histórico', nutrition: 'Alimentação' };
 
 export default function JourneyPage() {
   const dash = useLifeQuery(() => lifeApi.dashboard());

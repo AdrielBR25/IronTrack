@@ -97,10 +97,27 @@ export const savePreferenceArgsSchema = z.object({ content: z.string().trim().mi
 
 // ------------------------------------------------------------------ visões devolvidas ao app
 
-export type ActionKind = 'create_routine' | 'update_routine' | 'save_preference' | 'create_habit' | 'update_habit' | 'create_life_routine' | 'update_life_routine' | 'create_missions' | 'update_mission';
+export type ActionKind =
+  | 'create_routine'
+  | 'update_routine'
+  | 'save_preference'
+  | 'create_habit'
+  | 'update_habit'
+  | 'create_life_routine'
+  | 'update_life_routine'
+  | 'create_missions'
+  | 'update_mission'
+  // Fase 02: alimentação
+  | 'create_meal'
+  | 'update_meal'
+  | 'add_meal_items'
+  | 'create_food'
+  | 'update_nutrition_goals'
+  | 'create_meal_plan'
+  | 'update_meal_plan';
 export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'expired' | 'failed' | 'reverted';
 /** Onde a proposta aplicada gravou (para o app abrir o item). */
-export type ActionCollection = 'routines' | 'memories' | 'habits' | 'life_routines' | 'missions';
+export type ActionCollection = 'routines' | 'memories' | 'habits' | 'life_routines' | 'missions' | 'meals' | 'foods' | 'nutrition_goals' | 'meal_plan';
 /** Prazo para desfazer uma proposta aplicada (Fase 01). */
 export const UNDO_WINDOW_HOURS = 168;
 

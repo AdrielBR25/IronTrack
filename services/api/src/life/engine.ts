@@ -10,6 +10,7 @@
 //  - Limites: XP por atividade (validação das entradas) e teto diário por dia local (REWARD.dailyCap).
 import { randomUUID } from 'node:crypto';
 import { ACHIEVEMENTS, REWARD, levelFromXp, type Attribute, type RewardOutcome, type Tag } from '../../../../shared/life/protocol.ts';
+import { NUTRITION_REWARD } from '../../../../shared/nutrition/protocol.ts';
 import { withTx, type Pool, type PoolClient } from '../db/pool.ts';
 import { addDays, isValidTimezone, localDate, mondayOf } from '../assistant/tools/time.ts';
 
@@ -102,8 +103,9 @@ export async function settle(t: LifeTx): Promise<void> {
 
 // ------------------------------------------------------------------ livro-razão
 
-type Source = 'habit' | 'mission' | 'workout' | 'routine' | 'achievement' | 'legacy';
-const CAPPED: readonly Source[] = ['habit', 'mission', 'workout', 'routine'];
+type Source = 'habit' | 'mission' | 'workout' | 'routine' | 'achievement' | 'legacy' | 'nutrition';
+// Fase 02: registro alimentar ('nutrition') também entra no teto diário.
+const CAPPED: readonly Source[] = ['habit', 'mission', 'workout', 'routine', 'nutrition'];
 
 export interface GrantInput {
   source: Source;
@@ -172,7 +174,7 @@ export interface MissionRow {
   template: string | null;
   title: string;
   description: string | null;
-  metric: 'habit_completions' | 'habit' | 'workouts' | 'active_days' | 'routine_completions' | 'manual';
+  metric: 'habit_completions' | 'habit' | 'workouts' | 'active_days' | 'routine_completions' | 'manual' | 'nutrition_days';
   habit_id: string | null;
   routine_id: string | null;
   unit: 'times' | 'minutes' | 'pages' | 'chapters' | 'check';
@@ -205,7 +207,10 @@ export async function missionProgress(c: PoolClient, userId: string, m: MissionR
     case 'routine_completions':
       return m.routine_id ? count("source = 'routine' AND source_id = $4", [m.routine_id]) : count("source = 'routine'");
     case 'active_days':
-      return (await c.query<{ n: number }>(`SELECT count(DISTINCT day)::int AS n FROM life_xp_events WHERE user_id = $1 AND day BETWEEN $2 AND $3 AND ${ACTIVE_GRANT} AND source IN ('habit', 'workout', 'routine')`, p)).rows[0].n;
+      return (await c.query<{ n: number }>(`SELECT count(DISTINCT day)::int AS n FROM life_xp_events WHERE user_id = $1 AND day BETWEEN $2 AND $3 AND ${ACTIVE_GRANT} AND source IN ('habit', 'workout', 'routine', 'nutrition')`, p)).rows[0].n;
+    case 'nutrition_days':
+      // Dias com diário alimentar registrado (o lançamento existe mesmo com 0 XP, quando o XP foi do hábito vinculado).
+      return count("source = 'nutrition' AND source_key LIKE 'nutrition:day:%'");
     case 'manual':
       return (await c.query<{ n: number }>('SELECT coalesce(sum(amount), 0)::int AS n FROM life_mission_entries WHERE user_id = $1 AND mission_id = $2', [userId, m.id])).rows[0].n;
   }
@@ -248,7 +253,7 @@ async function refreshMissions(t: LifeTx, days: string[]): Promise<void> {
 /** Dias com atividade válida (concessão ativa de hábito, treino, rotina ou missão). Dias de descanso não quebram. */
 export async function streakOf(c: PoolClient, userId: string, today: string): Promise<{ current: number; best: number; activeToday: boolean; restToday: boolean }> {
   const from = addDays(today, -730);
-  const act = await c.query<{ day: string }>(`SELECT DISTINCT day FROM life_xp_events WHERE user_id = $1 AND day BETWEEN $2 AND $3 AND ${ACTIVE_GRANT} AND source IN ('habit', 'workout', 'routine', 'mission')`, [userId, from, today]);
+  const act = await c.query<{ day: string }>(`SELECT DISTINCT day FROM life_xp_events WHERE user_id = $1 AND day BETWEEN $2 AND $3 AND ${ACTIVE_GRANT} AND source IN ('habit', 'workout', 'routine', 'mission', 'nutrition')`, [userId, from, today]);
   const rest = await c.query<{ date: string }>("SELECT date FROM life_day_marks WHERE user_id = $1 AND kind = 'rest' AND date BETWEEN $2 AND $3", [userId, from, today]);
   const active = new Set(act.rows.map((r) => r.day));
   const rests = new Set(rest.rows.map((r) => r.date));
@@ -294,12 +299,15 @@ export async function achievementProgress(c: PoolClient, userId: string, today: 
           + (SELECT coalesce(sum(e.amount), 0) FROM life_mission_entries e JOIN life_missions m ON m.id = e.mission_id WHERE e.user_id = $1 AND m.tag = 'reading' AND m.unit = 'minutes'))::int AS n`,
   );
   const streak = await streakOf(c, userId, today);
+  const diaryDays = await one(`SELECT count(DISTINCT day)::int AS n FROM life_xp_events WHERE user_id = $1 AND source = 'nutrition' AND source_key LIKE 'nutrition:day:%' AND ${ACTIVE_GRANT}`);
+  const hasNutrition = diaryDays > 0 || (await one('SELECT count(*)::int AS n FROM nutrition_meals WHERE user_id = $1')) > 0;
   return {
     first_mission: { value: Math.min(missions, 1), target: 1, available: true },
     habit_week: { value: Math.min(habitDays, 7), target: 7, available: true },
     ten_workouts: { value: Math.min(workouts, 10), target: 10, available: true },
     reading_100: { value: Math.min(reading, 100), target: 100, available: readingRows > 0 },
     streak_7: { value: Math.min(Math.max(streak.current, streak.best), 7), target: 7, available: true },
+    nutrition_week: { value: Math.min(diaryDays, 7), target: 7, available: hasNutrition },
   };
 }
 
@@ -432,5 +440,8 @@ export async function ensureMissions(t: LifeTx): Promise<void> {
       await add({ type: 'weekly', template: 'weekly_habits', title: `Cumprir ${target} hábitos na semana`, metric: 'habit_completions', routine_id: null, unit: 'times', tag: 'other', target, attribute: 'discipline', xp: clamp(30 + 2 * target, REWARD.mission.weekly.min, REWARD.mission.weekly.max), starts_on: w.start, ends_on: w.end });
     }
   }
+  // Fase 02: diário alimentar (só para quem usa a alimentação: metas definidas ou refeição registrada em 14 dias).
+  const eats = !!(await c.query("SELECT 1 FROM nutrition_goals WHERE user_id = $1 UNION ALL SELECT 1 FROM nutrition_meals WHERE user_id = $1 AND status = 'consumed' AND date >= $2 LIMIT 1", [userId, addDays(today, -14)])).rowCount;
+  if (eats) await add({ type: 'weekly', template: 'weekly_nutrition', title: `Registrar a alimentação em ${NUTRITION_REWARD.weeklyDays} dias`, description: 'Conta o registro, não a quantidade: basta anotar ao menos 2 refeições no dia.', metric: 'nutrition_days', routine_id: null, unit: 'times', tag: 'nutrition', target: NUTRITION_REWARD.weeklyDays, attribute: 'health', xp: NUTRITION_REWARD.weeklyXp, starts_on: w.start, ends_on: w.end });
   if (habits.length || routines.length || recent > 0) await add({ type: 'weekly', template: 'weekly_consistency', title: 'Ter 5 dias ativos na semana', metric: 'active_days', routine_id: null, unit: 'times', tag: 'other', target: 5, attribute: 'discipline', xp: 50, starts_on: w.start, ends_on: w.end });
 }

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, useReducedMotion } from 'framer-motion';
-import { Apple, BedDouble, BookOpen, Check, ChevronDown, ChevronRight, Church, Dumbbell, Flame, History, Loader2, Plus, Sparkles, Trophy } from 'lucide-react';
+import { BedDouble, BookOpen, Check, ChevronDown, ChevronRight, Church, Dumbbell, Flame, History, Loader2, Plus, Sparkles, Trophy } from 'lucide-react';
 import type { DashboardView } from '@shared/life/protocol.ts';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -12,6 +12,7 @@ import { useActiveSession } from '@/hooks/data';
 import { emitReward, lifeApi, useLifeQuery } from './api';
 import { HABIT_TEMPLATES, HabitDialog, MissionDetailDialog, draftFromTemplate, lifeError, toastLifeError, type HabitDraft } from './forms';
 import { Bar, HabitRow, MissionRow, Ring } from './ui';
+import { NutritionHomeCard } from '../nutrition/HomeCard';
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -363,10 +364,13 @@ export default function LifeHomePage() {
         </Section>
       )}
 
+      <Section title="Alimentação">
+        <NutritionHomeCard />
+      </Section>
+
       <Section title="Em breve">
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2">
           {[
-            { id: 'nutrition', name: 'Alimentação', icon: Apple },
             { id: 'reading', name: 'Leitura', icon: BookOpen },
             { id: 'bible', name: 'Bíblia', icon: Church },
           ].map((m) => (

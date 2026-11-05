@@ -39,6 +39,12 @@ const LifeHomePage = lazy(() => import('@/cloud/life/LifeHomePage'));
 const MissionsPage = lazy(() => import('@/cloud/life/MissionsPage'));
 const JourneyPage = lazy(() => import('@/cloud/life/JourneyPage'));
 const MorePage = lazy(() => import('@/cloud/life/MorePage'));
+// Fase 02: alimentação (modo conta).
+const NutritionPage = lazy(() => import('@/cloud/nutrition/NutritionPage'));
+const MealPlannerPage = lazy(() => import('@/cloud/nutrition/PlannerPage'));
+const NutritionAnalysisPage = lazy(() => import('@/cloud/nutrition/AnalysisPage'));
+const NutritionGoalsPage = lazy(() => import('@/cloud/nutrition/GoalsPage'));
+const FoodsPage = lazy(() => import('@/cloud/nutrition/FoodsPage'));
 
 export default function App() {
   const settings = useSettings();
@@ -95,6 +101,11 @@ export default function App() {
               <Route path="/missoes" element={<MissionsPage />} />
               <Route path="/jornada" element={<JourneyPage />} />
               <Route path="/mais" element={<MorePage />} />
+              <Route path="/alimentacao" element={<NutritionPage />} />
+              <Route path="/alimentacao/planejar" element={<MealPlannerPage />} />
+              <Route path="/alimentacao/analise" element={<NutritionAnalysisPage />} />
+              <Route path="/alimentacao/metas" element={<NutritionGoalsPage />} />
+              <Route path="/alimentacao/alimentos" element={<FoodsPage />} />
             </>
           )}
           <Route path="*" element={<HomePage />} />

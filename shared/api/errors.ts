@@ -26,6 +26,10 @@ export const API_ERRORS = {
   life_inactive: { status: 409, message: 'Esta atividade está pausada, arquivada ou encerrada.' },
   life_date_not_allowed: { status: 422, message: 'Só é possível registrar hoje ou ontem.' },
   life_limit: { status: 409, message: 'Limite de itens atingido.' },
+  // IronTrack Life (Fase 02): alimentação
+  nutrition_date_not_allowed: { status: 422, message: 'Data fora do período permitido. Refeições consumidas não podem ficar no futuro.' },
+  nutrition_food_unavailable: { status: 422, message: 'Um dos alimentos não existe mais ou foi arquivado. Escolha outro.' },
+  nutrition_state: { status: 409, message: 'Esta refeição não está no estado esperado. Recarregue e tente de novo.' },
   service_unavailable: { status: 503, message: 'Serviço temporariamente indisponível.' },
   timeout: { status: 504, message: 'O servidor demorou demais para responder.' },
   internal_error: { status: 500, message: 'Erro interno. Nada foi alterado.' },

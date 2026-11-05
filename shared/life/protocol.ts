@@ -54,7 +54,7 @@ export const ROUTINE_KIND_LABEL: Record<RoutineKind, string> = { morning: 'Rotin
 export const MISSION_TYPES = ['daily', 'weekly', 'custom', 'special'] as const;
 export type MissionType = (typeof MISSION_TYPES)[number];
 export const MISSION_TYPE_LABEL: Record<MissionType, string> = { daily: 'Diária', weekly: 'Semanal', custom: 'Personalizada', special: 'Especial' };
-export const MISSION_METRICS = ['habit_completions', 'habit', 'workouts', 'active_days', 'routine_completions', 'manual'] as const;
+export const MISSION_METRICS = ['habit_completions', 'habit', 'workouts', 'active_days', 'routine_completions', 'manual', 'nutrition_days'] as const;
 export type MissionMetric = (typeof MISSION_METRICS)[number];
 export const MISSION_UNITS = ['times', 'minutes', 'pages', 'chapters', 'check'] as const;
 export type MissionUnit = (typeof MISSION_UNITS)[number];
@@ -128,7 +128,7 @@ export const REWARD = {
   /** Bônus único pelos treinos anteriores à ativação: 5 XP por treino, até 500. */
   legacyPerWorkout: 5,
   legacyMax: 500,
-  /** Teto diário (habit, mission, workout, routine). Conquistas e o bônus de histórico ficam fora. */
+  /** Teto diário (habit, mission, workout, routine, nutrition). Conquistas e o bônus de histórico ficam fora. */
   dailyCap: 400,
 } as const;
 
@@ -148,6 +148,7 @@ export const ACHIEVEMENTS = [
   { code: 'ten_workouts', title: 'Dez treinos concluídos', description: 'Conclua 10 treinos (o histórico conta).', attribute: 'strength', module: null },
   { code: 'reading_100', title: 'Primeiros 100 minutos de leitura', description: 'Some 100 minutos em hábitos ou missões de leitura.', attribute: 'knowledge', module: 'reading' },
   { code: 'streak_7', title: 'Sete dias de consistência', description: 'Mantenha 7 dias seguidos de atividades concluídas.', attribute: 'discipline', module: null },
+  { code: 'nutrition_week', title: 'Uma semana de diário alimentar', description: 'Registre o diário alimentar em 7 dias diferentes.', attribute: 'health', module: 'nutrition' },
 ] as const satisfies readonly { code: string; title: string; description: string; attribute: Attribute; module: string | null }[];
 export type AchievementCode = (typeof ACHIEVEMENTS)[number]['code'];
 
@@ -389,7 +390,7 @@ export interface MissionEntryView {
 export interface XpEventView {
   id: string;
   kind: 'grant' | 'reversal';
-  source: 'habit' | 'mission' | 'workout' | 'routine' | 'achievement' | 'legacy';
+  source: 'habit' | 'mission' | 'workout' | 'routine' | 'achievement' | 'legacy' | 'nutrition';
   attribute: Attribute | null;
   amount: number;
   requested: number;

@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { MAX_MEMORIES, savePreferenceArgsSchema } from '../../../../../shared/assistant/protocol.ts';
 import { bodyModule, goalsModule } from './progress.ts';
 import { lifeModule } from './life.ts';
+import { nutritionModule } from './nutrition.ts';
 import { trainingModule } from './training.ts';
 import { ToolError, type ActionHandler, type AiModuleDef, type AiTool, type WriteTool } from './types.ts';
 
@@ -45,20 +46,20 @@ const memoryModule: AiModuleDef = { id: 'assistant_memory', name: 'Preferências
 
 /** Contratos dos módulos futuros (sem ferramentas ainda). Ver docs/IA_CENTRAL.md §7. */
 const PLANNED: AiModuleDef[] = [
-  { id: 'nutrition', name: 'Alimentação e nutrição', status: 'planned', scope: 'refeições, calorias, macronutrientes, plano alimentar', tools: [], actions: [] },
+  // Fase 02: alimentação passou a existir (nutritionModule).
   // Fase 01: hábitos, rotinas, missões, XP, níveis e conquistas passaram a existir (lifeModule).
   { id: 'learning', name: 'Leitura e estudos', status: 'planned', scope: 'livros, leituras, sessões de estudo', tools: [], actions: [] },
   { id: 'reflections', name: 'Bíblia, reflexões e metas de longo prazo', status: 'planned', scope: 'planos de leitura bíblica, diário, reflexões, metas de meses/anos', tools: [], actions: [] },
-  { id: 'meal_photo', name: 'Reconhecimento de refeições por foto', status: 'planned', scope: 'foto da refeição → registro', tools: [], actions: [] },
+  { id: 'meal_photo', name: 'Reconhecimento de refeições por foto', status: 'planned', scope: 'foto da refeição → rascunho revisado → registro (Fase 03; hoje só texto)', tools: [], actions: [] },
 ];
 
-export const MODULES: readonly AiModuleDef[] = [trainingModule, goalsModule, bodyModule, lifeModule, memoryModule, ...PLANNED];
+export const MODULES: readonly AiModuleDef[] = [trainingModule, goalsModule, bodyModule, lifeModule, nutritionModule, memoryModule, ...PLANNED];
 
 const listModules: AiTool = {
   kind: 'read',
   name: 'list_app_modules',
   label: 'Consultando os módulos do app',
-  description: 'Lista os módulos do IronTrack e se já estão disponíveis para a IA ou só planejados. Use quando perguntarem sobre algo fora de treino, metas, medidas e RPG (ex.: alimentação, leitura de livros).',
+  description: 'Lista os módulos do IronTrack e se já estão disponíveis para a IA ou só planejados. Use quando perguntarem sobre algo fora de treino, metas, medidas, RPG e alimentação (ex.: leitura de livros, foto de refeição).',
   parameters: { type: 'object', properties: {}, additionalProperties: false },
   args: z.object({}).strict(),
   async run() {

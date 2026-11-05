@@ -190,6 +190,10 @@ const RESULT_LINK: Record<string, { to: string; label: string }> = {
   habits: { to: '/missoes?aba=habitos', label: 'Ver hábitos' },
   life_routines: { to: '/missoes?aba=rotinas', label: 'Ver rotinas' },
   missions: { to: '/missoes?aba=desafios', label: 'Ver missões' },
+  meals: { to: '/alimentacao', label: 'Ver alimentação' },
+  meal_plan: { to: '/alimentacao/planejar', label: 'Ver planejamento' },
+  foods: { to: '/alimentacao/alimentos', label: 'Ver alimentos' },
+  nutrition_goals: { to: '/alimentacao/metas', label: 'Ver metas' },
 };
 
 function ProposalCard({ action, onDecide, onUndo }: { action: ActionView; onDecide: (id: string, approve: boolean) => Promise<ActionView | null>; onUndo: (id: string) => Promise<ActionView | null> }) {
