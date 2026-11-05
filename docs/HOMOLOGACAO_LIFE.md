@@ -1,5 +1,9 @@
 # Checklist de homologação — IronTrack Life (Fases 00 a 06)
 
+> Fase 07: o passo a passo do ambiente `staging` na Railway está em [STAGING_RAILWAY.md](STAGING_RAILWAY.md) e o da
+> publicação em [PUBLICACAO_LIFE.md](PUBLICACAO_LIFE.md). `AI_REQUIRE_VERIFIED_EMAIL=false` não é mais necessário no
+> staging: com `EMAIL_ALLOWLIST` e o remetente de testes do Resend a confirmação de e-mail funciona.
+
 Use **antes** de publicar as fases Life. Nada aqui foi executado em produção. Faça num ambiente de homologação
 separado (outro projeto/ambiente da Railway com Postgres próprio), nunca no serviço que atende a branch publicada
 hoje (`feature/irontrack-2-p21-fullstack-cloud`).

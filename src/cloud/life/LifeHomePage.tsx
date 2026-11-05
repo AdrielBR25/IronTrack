@@ -323,7 +323,7 @@ export default function LifeHomePage() {
     <div className="space-y-5 pb-4" data-testid="life-home">
       <header className="flex items-end justify-between gap-3 pt-[calc(env(safe-area-inset-top)+0.25rem)] md:pt-0">
         <div className="min-w-0">
-          <p className="text-sm capitalize text-muted-foreground">{fmtDate(p.today)}</p>
+          <p className="text-sm text-muted-foreground first-letter:uppercase">{fmtDate(p.today)}</p>
           <h1 className="truncate font-display text-2xl font-bold tracking-tight md:text-3xl">
             {greeting()}
             {d.displayName ? `, ${d.displayName.split(' ')[0]}` : ''}

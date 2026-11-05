@@ -55,13 +55,13 @@ export interface Api {
 export function createApi(o: ApiOptions): Api {
   const { cfg, pool } = o;
   const log = o.logger ?? createLogger(cfg.accessLog);
-  const mailer = o.mailer ?? createMailer(cfg);
+  const mailer = o.mailer ?? createMailer(cfg, () => log.event('email_suppressed', { appEnv: cfg.appEnv }));
   const limiter = new RateLimiter(pool, cfg.rateLimitSecret);
   const ai = createAiModule({ cfg, pool, log, env: o.env ?? process.env, ...o.ai });
   const assistant = createAssistantModule({ cfg, pool, log, env: o.env ?? process.env, ...o.assistant });
   const router = new Router();
 
-  router.add({ method: 'GET', path: '/api/v1/health', auth: 'public', handler: async () => ({ status: 200, body: { status: 'ok' } }) });
+  router.add({ method: 'GET', path: '/api/v1/health', auth: 'public', handler: async () => ({ status: 200, body: { status: 'ok', environment: cfg.appEnv } }) });
   router.add({
     method: 'GET',
     path: '/api/v1/ready',

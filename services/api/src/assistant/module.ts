@@ -102,6 +102,21 @@ export function createAssistantModule(d: AssistantDeps): AssistantModule {
     } else if (outcome === 'model_unavailable') modelHealth.set(model, 'unavailable');
     else if (HEALTH_OF[outcome]) health = { status: HEALTH_OF[outcome]!, at };
   };
+  /**
+   * Fase 07: modelo padrão EFETIVO. Se o "Testar" ou uma conversa já mostrou que o padrão não está liberado para esta
+   * chave (404), usa o primeiro modelo da lista que não foi recusado, em vez de insistir num modelo indisponível.
+   */
+  const effectiveDefault = (): string | null => {
+    if (!config) return null;
+    if (modelHealth.get(config.defaultModel) !== 'unavailable') return config.defaultModel;
+    return config.models.find((m) => modelHealth.get(m.id) !== 'unavailable')?.id ?? config.defaultModel;
+  };
+  /** Modelo pedido pelo app; um modelo já recusado pela OpenAI cai para o padrão efetivo. */
+  const pickModel = (requested: unknown) => {
+    if (!config) return undefined;
+    const id = typeof requested === 'string' && modelHealth.get(requested) !== 'unavailable' ? requested : (effectiveDefault() ?? config.defaultModel);
+    return config.models.find((m) => m.id === id);
+  };
   const leaks = (text: string) => {
     const k = rawKey();
     return !!k && text.includes(k);
@@ -191,7 +206,7 @@ export function createAssistantModule(d: AssistantDeps): AssistantModule {
       availability: av,
       provider: config ? { id: config.provider, displayName: config.displayName, health: availability() === 'ok' ? (health?.status ?? 'unverified') : availability(), checkedAt: health?.at ?? null } : null,
       models: config ? config.models.filter((m) => modelHealth.get(m.id) !== 'unavailable').map((m) => ({ id: m.id, displayName: m.displayName, description: m.description })) : [],
-      defaultModel: config?.defaultModel ?? null,
+      defaultModel: effectiveDefault(),
       notice: { version: ASSISTANT_NOTICE_VERSION, acceptedVersion: s?.notice_version ?? null, acceptedAt: s?.notice_accepted_at?.toISOString() ?? null },
       limits: { messagesPerDay: config?.limits.messagesPerDay ?? 0, tokensPerDay: config?.limits.tokensPerDay ?? 0, messagesPerMinute: config?.limits.messagesPerMinute ?? 0, maxMessageChars: MAX_USER_MESSAGE_CHARS },
       usage: { day: utcDay(now()), messages: usage.messages, tokens: usage.tokens },
@@ -217,7 +232,8 @@ export function createAssistantModule(d: AssistantDeps): AssistantModule {
     const content = parsed.data.content.trim();
     if (!content) return fail('message_empty', 400);
     if (content.length > MAX_USER_MESSAGE_CHARS) return fail('message_too_long', 400);
-    const model = config.models.find((m) => m.id === (parsed.data.model ?? config.defaultModel));
+    if (parsed.data.model && !config.models.some((m) => m.id === parsed.data.model)) return fail('model_not_allowed', 400);
+    const model = pickModel(parsed.data.model);
     if (!model) return fail('model_not_allowed', 400);
     const s = await settings(a.userId);
     if ((s?.notice_version ?? 0) < ASSISTANT_NOTICE_VERSION) return fail('notice_required', 409);

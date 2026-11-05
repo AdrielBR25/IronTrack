@@ -6,8 +6,16 @@ import { validateConfig, type GatewayConfig } from '../../ai-gateway/src/config.
 export type EmailProvider = 'disabled' | 'resend' | 'test-mailbox';
 export type DbSsl = 'disable' | 'require' | 'verify-full';
 
+export type AppEnv = 'production' | 'staging' | 'development';
+
 export interface ApiConfig {
   env: 'production' | 'development' | 'test';
+  /**
+   * Fase 07: qual ambiente da Railway esta API atende (APP_ENV). `staging` = homologação: e-mails só para a lista
+   * EMAIL_ALLOWLIST e com "[Homologação]" no assunto, e o banco precisa estar marcado como de homologação
+   * (db/environment.ts). Padrão: `production` com NODE_ENV=production, senão `development`.
+   */
+  appEnv: AppEnv;
   port: number;
   host: string;
   databaseUrl: string;
@@ -28,7 +36,8 @@ export interface ApiConfig {
   /** Segredo para o hash das chaves de limite (IP, e-mail). Nunca registrado. */
   rateLimitSecret: string;
   signupEnabled: boolean;
-  email: { provider: EmailProvider; from: string; resendApiKey?: string };
+  /** allowlist: endereços ou domínios (@dominio) que podem receber e-mail; vazio = todos (só fora da homologação). */
+  email: { provider: EmailProvider; from: string; resendApiKey?: string; allowlist: string[] };
   ai: { config: GatewayConfig | null; errors: string[]; requireVerifiedEmail: boolean; dailyTokenBudget: number; dailyRequests: number; maxConcurrentPerUser: number };
   requestTimeoutMs: number;
   maxBodyBytes: number;
@@ -140,10 +149,23 @@ export function loadConfig(env: Env = process.env): ApiConfig {
     if (!/^[^<>]{0,80}<?[^\s@<>]+@[^\s@<>]+>?$/.test(from)) problems.push('EMAIL_FROM ausente ou inválido (ex.: IronTrack <nao-responda@seu-dominio>)');
   }
 
+  const appEnvRaw = (env.APP_ENV ?? '').trim();
+  if (appEnvRaw && !['production', 'staging', 'development'].includes(appEnvRaw)) problems.push('APP_ENV deve ser production, staging ou development');
+  const appEnv: AppEnv = appEnvRaw === 'production' || appEnvRaw === 'staging' || appEnvRaw === 'development' ? appEnvRaw : nodeEnv === 'production' ? 'production' : 'development';
+  if (appEnv === 'production' && testMode) problems.push('API_TEST_MODE é proibido com APP_ENV=production');
+  const allowlist = (env.EMAIL_ALLOWLIST ?? '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  for (const a of allowlist) if (!/^(@[^\s@]+\.[^\s@]+|[^\s@]+@[^\s@]+\.[^\s@]+)$/.test(a)) problems.push('EMAIL_ALLOWLIST deve ter e-mails ou domínios (@dominio.com) separados por vírgula');
+  // Homologação nunca manda e-mail real para qualquer pessoa: exige a lista de destinatários permitidos.
+  if (appEnv === 'staging' && provider === 'resend' && !allowlist.length) problems.push('EMAIL_ALLOWLIST é obrigatória com APP_ENV=staging e EMAIL_PROVIDER=resend (ex.: voce@gmail.com)');
+
   const ai = loadAiConfig(env);
 
   const cfg: ApiConfig = {
     env: nodeEnv,
+    appEnv,
     port: int(env, 'PORT', 8080, 0, 65535, problems),
     host: env.HOST ?? '0.0.0.0',
     databaseUrl,
@@ -160,7 +182,7 @@ export function loadConfig(env: Env = process.env): ApiConfig {
     trustProxyHops: int(env, 'TRUST_PROXY_HOPS', 1, 0, 5, problems),
     rateLimitSecret,
     signupEnabled: env.SIGNUP_ENABLED !== 'false',
-    email: { provider, from, ...(env.RESEND_API_KEY ? { resendApiKey: env.RESEND_API_KEY } : {}) },
+    email: { provider, from, ...(env.RESEND_API_KEY ? { resendApiKey: env.RESEND_API_KEY } : {}), allowlist },
     ai: {
       ...ai,
       requireVerifiedEmail: env.AI_REQUIRE_VERIFIED_EMAIL !== 'false',

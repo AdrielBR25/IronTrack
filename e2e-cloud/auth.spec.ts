@@ -1,6 +1,6 @@
 // Contas (Prompt 21): entrada, cadastro, confirmação de e-mail, recuperação e troca de senha, sessões, saída,
 // exclusão, modo sem conta, temas e acessibilidade básica em 360 px.
-import { PASSWORD, expectInApp, linkFromMail, loginViaUi, newDevice, signupViaUi, uniqueEmail, welcome, expect, test } from './helpers';
+import { PASSWORD, expectInApp, linkFromMail, loadSampleFicha, loginViaUi, openTraining, newDevice, signupViaUi, uniqueEmail, welcome, expect, test } from './helpers';
 
 test.use({ serviceWorkers: 'block' });
 
@@ -69,9 +69,7 @@ test('senha errada e cadastro duplicado: mensagens genéricas (sem revelar se o 
 
 test('sair e entrar de novo: os dados da conta voltam; sair avisa sobre pendências', async ({ page }) => {
   const email = await signupViaUi(page);
-  await page.goto('./#/');
-  await page.getByTestId('load-sample').click();
-  await expect(page.getByTestId('start-workout')).toBeVisible();
+  await loadSampleFicha(page);
   await expect(page.locator('[data-testid="sync-status"]:visible').first()).toHaveAttribute('data-state', 'synced', { timeout: 20_000 });
   await page.goto('./#/conta');
   await page.getByRole('button', { name: 'Sair desta conta' }).click();
@@ -82,6 +80,7 @@ test('sair e entrar de novo: os dados da conta voltam; sair avisa sobre pendênc
   await expect(page.getByRole('heading', { name: 'Bem-vindo ao IronTrack' })).toBeVisible({ timeout: 15_000 });
   await loginViaUi(page, email);
   await expectInApp(page);
+  await openTraining(page);
   await expect(page.getByTestId('start-workout')).toBeVisible({ timeout: 20_000 });
 });
 
@@ -154,7 +153,11 @@ test('excluir conta: confirmação forte; depois não é possível entrar', asyn
   await dlg.getByLabel('Sua senha').fill(PASSWORD);
   await dlg.getByLabel('Digite "EXCLUIR" para confirmar').fill('EXCLUIR');
   await confirm.click();
-  await welcome(page);
+  // excluir recarrega o app sozinho na tela de entrada; navegar antes disso interromperia a saída local
+  await expect(page.getByRole('heading', { name: 'Bem-vindo ao IronTrack' })).toBeVisible({ timeout: 15_000 });
+  expect(await page.evaluate(() => localStorage.getItem('irontrack.account.v1'))).toBeNull();
+  const dbs = await page.evaluate(async () => (await indexedDB.databases()).map((d) => d.name));
+  expect(dbs.some((n) => n?.startsWith('irontrack-acct-'))).toBe(false);
   await loginViaUi(page, email);
   await expect(page.getByRole('alert')).toHaveText('E-mail ou senha incorretos.');
 });
@@ -185,9 +188,7 @@ test('tema claro e escuro na tela de entrada @desktop', async ({ browser }, info
 
 test('exportar meus dados: arquivo no formato de backup, só com os dados da conta', async ({ page }) => {
   await signupViaUi(page);
-  await page.goto('./#/');
-  await page.getByTestId('load-sample').click();
-  await expect(page.getByTestId('start-workout')).toBeVisible();
+  await loadSampleFicha(page);
   await expect(page.locator('[data-testid="sync-status"]:visible').first()).toHaveAttribute('data-state', 'synced', { timeout: 20_000 });
   await page.goto('./#/conta');
   const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Exportar meus dados' }).click()]);

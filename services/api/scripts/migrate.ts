@@ -3,6 +3,7 @@
 // `--status` só lista as pendentes, sem aplicar.
 import { createPool } from '../src/db/pool.ts';
 import { migrate, pendingMigrations } from '../src/db/migrate.ts';
+import { appEnvFrom, readDatabaseMark } from '../src/db/environment.ts';
 
 const url = process.env.DATABASE_URL ?? '';
 if (!/^postgres(ql)?:\/\//.test(url)) {
@@ -19,11 +20,14 @@ const sslEnv = process.env.DATABASE_SSL;
 const dbSsl = sslEnv === 'disable' || sslEnv === 'require' || sslEnv === 'verify-full' ? sslEnv : host.endsWith('.railway.internal') || ['localhost', '127.0.0.1'].includes(host) ? 'disable' : 'require';
 const pool = createPool({ databaseUrl: url, dbSsl, ...(process.env.DATABASE_SSL_CA ? { dbCa: process.env.DATABASE_SSL_CA } : {}), dbPoolMax: 1 });
 try {
+  const appEnv = appEnvFrom(process.env);
   if (process.argv.includes('--status')) {
     const p = await pendingMigrations(pool);
+    const { mark } = await readDatabaseMark(pool);
+    process.stdout.write(`banco marcado como: ${mark ?? '(sem marca)'} · APP_ENV: ${appEnv ?? '(não definido)'}\n`);
     process.stdout.write(p.length ? `pendentes: ${p.join(', ')}\n` : 'esquema em dia\n');
   } else {
-    const r = await migrate(pool);
+    const r = await migrate(pool, undefined, appEnv ? { appEnv } : {});
     process.stdout.write(r.applied.length ? `aplicadas: ${r.applied.join(', ')}\n` : `nenhuma pendente (${r.alreadyApplied} já aplicadas)\n`);
   }
 } catch (e) {

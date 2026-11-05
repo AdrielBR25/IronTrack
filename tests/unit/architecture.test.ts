@@ -617,7 +617,8 @@ describe('arquitetura do modo nuvem (P21)', () => {
     const bad = all.filter((f) => /DATABASE_URL|railway\.app|railway\.internal|postgres(ql)?:\/\/|RESEND_API_KEY|OPENAI_API_KEY\s*=|ANTHROPIC_API_KEY\s*=|GEMINI_API_KEY\s*=/.test(src(f)));
     expect(bad).toEqual([]);
     const envs = all.flatMap((f) => [...src(f).matchAll(/import\.meta\.env\.(VITE_\w+)/g)].map((m) => `${f}:${m[1]}`));
-    expect(envs.filter((e) => e.startsWith('cloud/'))).toEqual(['cloud/config.ts:VITE_ACCOUNTS']);
+    // Fase 07: VITE_APP_ENV só diz se o build é o da homologação (faixa e nome do app); não é URL nem credencial.
+    expect(envs.filter((e) => e.startsWith('cloud/'))).toEqual(['cloud/config.ts:VITE_ACCOUNTS', 'cloud/config.ts:VITE_APP_ENV']);
   });
 
   it('o ponteiro da conta não guarda senha nem token; as telas da conta não acessam o Dexie', () => {

@@ -5,7 +5,10 @@
 # ---- 1. build do app
 FROM node:22.18.0-bookworm-slim AS build
 WORKDIR /app
-ENV BASE_PATH=/ VITE_ACCOUNTS=on
+# Fase 07: no ambiente staging da Railway, defina a variável VITE_APP_ENV=staging no irontrack-web (a Railway a passa
+# como argumento de build): faixa "Homologação", título e nome do app instalado diferentes. Em produção, não defina.
+ARG VITE_APP_ENV=production
+ENV BASE_PATH=/ VITE_ACCOUNTS=on VITE_APP_ENV=$VITE_APP_ENV
 COPY package.json package-lock.json ./
 # Instalação determinística pelo package-lock.json. Sem RUN --mount: o builder da Railway só aceita montagens de cache.
 RUN npm ci --ignore-scripts --no-audit --no-fund

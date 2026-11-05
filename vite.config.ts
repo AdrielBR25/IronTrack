@@ -8,6 +8,8 @@ const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 
 
 // GitHub Pages serve o app em /IronTrack/. BASE_PATH permite outro subdiretório (irontrack-web na Railway: "/").
 const base = process.env.BASE_PATH ?? '/IronTrack/';
+// Fase 07: build da homologação (irontrack-web do ambiente staging) instala como outro app, com nome diferente.
+const staging = process.env.VITE_APP_ENV === 'staging';
 
 // P21: em desenvolvimento e nos testes E2E da nuvem, `/api` vai para a API local (mesma origem, como o Caddy do irontrack-web).
 // Só lido aqui (Node), nunca vai para o bundle.
@@ -23,8 +25,8 @@ export default defineConfig({
       injectRegister: false,
       includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'examples/*.json'],
       manifest: {
-        name: 'IronTrack — Treinos de musculação',
-        short_name: 'IronTrack',
+        name: staging ? 'IronTrack (Homologação)' : 'IronTrack — Treinos de musculação',
+        short_name: staging ? 'IronTrack HML' : 'IronTrack',
         description: 'Registre treinos, descanso e evolução de carga. Funciona offline.',
         lang: 'pt-BR',
         theme_color: '#0b0d0c',

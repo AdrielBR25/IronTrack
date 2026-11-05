@@ -79,6 +79,8 @@ export interface ServerFeatures {
   /** A IA exige e-mail verificado. */
   aiRequiresVerifiedEmail: boolean;
   signup: boolean;
+  /** Fase 07: ambiente do servidor (APP_ENV). Opcional: servidores anteriores não mandam. */
+  environment?: 'production' | 'staging' | 'development';
 }
 
 export interface SessionInfo {

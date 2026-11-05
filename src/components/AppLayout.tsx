@@ -7,6 +7,8 @@ import { OfflineBadge } from './UpdatePrompt';
 import { useActiveSession, useNow } from '@/hooks/data';
 import { sessionProgress, remainingMs } from '@/modules/training';
 import { Suspense, useEffect } from 'react';
+import { RouteErrorBoundary } from './RouteErrorBoundary';
+import { EnvBanner } from '@/cloud/ui/EnvBanner';
 import { SyncStatusChip } from '@/cloud/ui/SyncStatusChip';
 import { ImportOffer } from '@/cloud/ui/ImportOffer';
 import { useAccountPointer } from '@/cloud/accountPointer';
@@ -120,11 +122,14 @@ export function AppLayout() {
             <OfflineBadge className="mb-2" />
             <SyncStatusChip className="mb-2" />
           </div>
+          <EnvBanner />
           <ImportOffer />
           <motion.div key={pathname} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.18 }}>
-            <Suspense fallback={<div className="h-40 animate-pulse rounded-2xl bg-card" />}>
-              <Outlet />
-            </Suspense>
+            <RouteErrorBoundary resetKey={pathname}>
+              <Suspense fallback={<div className="h-40 animate-pulse rounded-2xl bg-card" />}>
+                <Outlet />
+              </Suspense>
+            </RouteErrorBoundary>
           </motion.div>
         </div>
       </main>

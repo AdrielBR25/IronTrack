@@ -1,5 +1,8 @@
 # IronTrack inteiro na Railway (Prompt 21.1)
 
+> Fase 07: ambiente de homologação separado em [STAGING_RAILWAY.md](STAGING_RAILWAY.md); checklist de publicação em
+> [PUBLICACAO_LIFE.md](PUBLICACAO_LIFE.md). Novas variáveis: `APP_ENV`, `EMAIL_ALLOWLIST` (API) e `VITE_APP_ENV` (web).
+
 Substitui a combinação Netlify + Railway do Prompt 21. Arquitetura de dados, sincronização e segurança continuam em
 [NUVEM_ARQUITETURA.md](NUVEM_ARQUITETURA.md), [NUVEM_SINCRONIZACAO.md](NUVEM_SINCRONIZACAO.md) e
 [NUVEM_SEGURANCA.md](NUVEM_SEGURANCA.md); rotas em [NUVEM_API.md](NUVEM_API.md).

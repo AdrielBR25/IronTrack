@@ -6,6 +6,7 @@
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import type { Pool } from './pool.ts';
+import { ensureDatabaseEnvironment, type DbEnv } from './environment.ts';
 
 export const MIGRATIONS_DIR = new URL('../../migrations/', import.meta.url);
 const LOCK_KEY = 7_041_021; // constante arbitrária da trava consultiva do IronTrack
@@ -40,10 +41,12 @@ export interface MigrateResult {
   alreadyApplied: number;
 }
 
-export async function migrate(pool: Pool, files: MigrationFile[] = readMigrations()): Promise<MigrateResult> {
+export async function migrate(pool: Pool, files: MigrationFile[] = readMigrations(), opts: { appEnv?: DbEnv } = {}): Promise<MigrateResult> {
   const c = await pool.connect();
   try {
     await c.query('SELECT pg_advisory_lock($1)', [LOCK_KEY]);
+    // Fase 07: antes de tocar no esquema, confere se este é o banco do ambiente certo (homologação × produção).
+    await ensureDatabaseEnvironment(c, opts.appEnv, { claim: true });
     await c.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
       name text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())`);
     const done = new Map((await c.query<{ name: string; checksum: string }>('SELECT name, checksum FROM schema_migrations')).rows.map((r) => [r.name, r.checksum]));
