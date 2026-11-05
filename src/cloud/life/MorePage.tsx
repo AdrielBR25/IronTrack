@@ -1,6 +1,6 @@
 // "Mais" (Fase 01): acesso a todos os módulos atuais (treino, histórico, evolução, metas…), conta e ajustes.
 import { Link } from 'react-router-dom';
-import { Apple, BarChart3, CalendarRange, LineChart, Search, BookOpen, CalendarDays, ChevronRight, Dumbbell, Gauge, History, ListChecks, Play, Settings, ShieldCheck, Target, User } from 'lucide-react';
+import { Apple, Brain, GraduationCap, Library, Timer, BarChart3, CalendarRange, LineChart, Search, BookOpen, CalendarDays, ChevronRight, Dumbbell, Gauge, History, ListChecks, Play, Settings, ShieldCheck, Target, User } from 'lucide-react';
 import { PageHeader } from '@/components/AppLayout';
 import { Card } from '@/components/ui/card';
 
@@ -26,6 +26,17 @@ const GROUPS: { title: string; items: { to: string; label: string; hint: string;
       { to: '/alimentacao/analise', label: 'Histórico e gráficos', hint: 'Médias, proteína e frequência', icon: LineChart },
       { to: '/alimentacao/metas', label: 'Metas nutricionais', hint: 'Calorias, macros, água e horários', icon: Target },
       { to: '/alimentacao/alimentos', label: 'Alimentos', hint: 'Catálogo TACO, rótulos e refeições salvas', icon: Search },
+    ],
+  },
+  {
+    title: 'Conhecimento',
+    items: [
+      { to: '/conhecimento', label: 'Leitura e estudos', hint: 'Hoje, metas, livros e matérias', icon: Brain },
+      { to: '/conhecimento/foco', label: 'Modo foco', hint: 'Cronômetro, temporizador e pomodoro', icon: Timer },
+      { to: '/conhecimento/biblioteca', label: 'Biblioteca', hint: 'Livros, progresso, notas e resenhas', icon: Library },
+      { to: '/conhecimento/estudos', label: 'Matérias', hint: 'Tópicos, tempo e histórico', icon: GraduationCap },
+      { to: '/conhecimento/metas', label: 'Metas de leitura e estudo', hint: 'Diárias, semanais e por prazo', icon: Target },
+      { to: '/conhecimento/estatisticas', label: 'Gráficos do conhecimento', hint: 'Tempo, páginas e constância', icon: LineChart },
     ],
   },
   {

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, useReducedMotion } from 'framer-motion';
-import { BedDouble, BookOpen, Check, ChevronDown, ChevronRight, Church, Dumbbell, Flame, History, Loader2, Plus, Sparkles, Trophy } from 'lucide-react';
+import { BedDouble, Check, ChevronDown, ChevronRight, Church, Dumbbell, Flame, History, Loader2, Plus, Sparkles, Trophy } from 'lucide-react';
 import type { DashboardView } from '@shared/life/protocol.ts';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -13,6 +13,7 @@ import { emitReward, lifeApi, useLifeQuery } from './api';
 import { HABIT_TEMPLATES, HabitDialog, MissionDetailDialog, draftFromTemplate, lifeError, toastLifeError, type HabitDraft } from './forms';
 import { Bar, HabitRow, MissionRow, Ring } from './ui';
 import { NutritionHomeCard } from '../nutrition/HomeCard';
+import { KnowledgeHomeCard } from '../knowledge/HomeCard';
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -368,12 +369,13 @@ export default function LifeHomePage() {
         <NutritionHomeCard />
       </Section>
 
+      <Section title="Conhecimento">
+        <KnowledgeHomeCard />
+      </Section>
+
       <Section title="Em breve">
         <div className="grid grid-cols-2 gap-2">
-          {[
-            { id: 'reading', name: 'Leitura', icon: BookOpen },
-            { id: 'bible', name: 'Bíblia', icon: Church },
-          ].map((m) => (
+          {[{ id: 'bible', name: 'Bíblia', icon: Church }].map((m) => (
             <div key={m.id} className="flex flex-col items-center gap-1.5 rounded-2xl border border-dashed bg-card/40 px-2 py-3 text-center" aria-disabled>
               <m.icon className="h-5 w-5 text-muted-foreground" />
               <span className="text-xs font-medium">{m.name}</span>

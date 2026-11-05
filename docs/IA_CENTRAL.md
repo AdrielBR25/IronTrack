@@ -109,7 +109,7 @@ desconhecido ou argumento inválido volta como erro ao modelo sem executar nada.
 ## 7. Módulos futuros
 
 `tools/registry.ts` declara os contratos. **Ativo desde a Fase 01:** RPG pessoal (hábitos, rotinas, missões,
-XP/níveis/conquistas), ver `docs/RPG_DESENVOLVIMENTO.md`. **Ativo desde a Fase 02:** alimentação. **Fase 03:** foto de refeição
+XP/níveis/conquistas), ver `docs/RPG_DESENVOLVIMENTO.md`. **Ativo desde a Fase 02:** alimentação. **Fase 04:** leitura, estudos e foco (`docs/CONHECIMENTO.md` §6). **Fase 03:** foto de refeição
 (`analyze_meal_photo`, anexo de imagem na mensagem; ver `docs/ALIMENTACAO_FOTO.md`). Ainda `planned`: leitura de rótulos por
 foto, leitura e estudos, reflexões e metas pessoais. Para ativar um módulo: criar o arquivo de ferramentas
 (`ReadTool`/`WriteTool`), os `ActionHandler` das escritas (com `apply` e `undo`), incluir o tipo em `ActionKind` e no

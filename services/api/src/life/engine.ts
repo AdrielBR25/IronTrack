@@ -103,9 +103,9 @@ export async function settle(t: LifeTx): Promise<void> {
 
 // ------------------------------------------------------------------ livro-razão
 
-type Source = 'habit' | 'mission' | 'workout' | 'routine' | 'achievement' | 'legacy' | 'nutrition';
-// Fase 02: registro alimentar ('nutrition') também entra no teto diário.
-const CAPPED: readonly Source[] = ['habit', 'mission', 'workout', 'routine', 'nutrition'];
+export type Source = 'habit' | 'mission' | 'workout' | 'routine' | 'achievement' | 'legacy' | 'nutrition' | 'knowledge';
+// Fase 02: registro alimentar ('nutrition') também entra no teto diário. Fase 04: leitura/estudos ('knowledge') também.
+const CAPPED: readonly Source[] = ['habit', 'mission', 'workout', 'routine', 'nutrition', 'knowledge'];
 
 export interface GrantInput {
   source: Source;
@@ -207,7 +207,7 @@ export async function missionProgress(c: PoolClient, userId: string, m: MissionR
     case 'routine_completions':
       return m.routine_id ? count("source = 'routine' AND source_id = $4", [m.routine_id]) : count("source = 'routine'");
     case 'active_days':
-      return (await c.query<{ n: number }>(`SELECT count(DISTINCT day)::int AS n FROM life_xp_events WHERE user_id = $1 AND day BETWEEN $2 AND $3 AND ${ACTIVE_GRANT} AND source IN ('habit', 'workout', 'routine', 'nutrition')`, p)).rows[0].n;
+      return (await c.query<{ n: number }>(`SELECT count(DISTINCT day)::int AS n FROM life_xp_events WHERE user_id = $1 AND day BETWEEN $2 AND $3 AND ${ACTIVE_GRANT} AND source IN ('habit', 'workout', 'routine', 'nutrition', 'knowledge')`, p)).rows[0].n;
     case 'nutrition_days':
       // Dias com diário alimentar registrado (o lançamento existe mesmo com 0 XP, quando o XP foi do hábito vinculado).
       return count("source = 'nutrition' AND source_key LIKE 'nutrition:day:%'");
@@ -253,7 +253,7 @@ async function refreshMissions(t: LifeTx, days: string[]): Promise<void> {
 /** Dias com atividade válida (concessão ativa de hábito, treino, rotina ou missão). Dias de descanso não quebram. */
 export async function streakOf(c: PoolClient, userId: string, today: string): Promise<{ current: number; best: number; activeToday: boolean; restToday: boolean }> {
   const from = addDays(today, -730);
-  const act = await c.query<{ day: string }>(`SELECT DISTINCT day FROM life_xp_events WHERE user_id = $1 AND day BETWEEN $2 AND $3 AND ${ACTIVE_GRANT} AND source IN ('habit', 'workout', 'routine', 'mission', 'nutrition')`, [userId, from, today]);
+  const act = await c.query<{ day: string }>(`SELECT DISTINCT day FROM life_xp_events WHERE user_id = $1 AND day BETWEEN $2 AND $3 AND ${ACTIVE_GRANT} AND source IN ('habit', 'workout', 'routine', 'mission', 'nutrition', 'knowledge')`, [userId, from, today]);
   const rest = await c.query<{ date: string }>("SELECT date FROM life_day_marks WHERE user_id = $1 AND kind = 'rest' AND date BETWEEN $2 AND $3", [userId, from, today]);
   const active = new Set(act.rows.map((r) => r.day));
   const rests = new Set(rest.rows.map((r) => r.date));
@@ -289,15 +289,24 @@ export async function achievementProgress(c: PoolClient, userId: string, today: 
   const missions = await one("SELECT count(*)::int AS n FROM life_missions WHERE user_id = $1 AND status = 'completed'");
   const habitDays = await one(`SELECT count(DISTINCT day)::int AS n FROM life_xp_events WHERE user_id = $1 AND source = 'habit' AND ${ACTIVE_GRANT}`);
   const workouts = await one(validWorkoutsSql('count'));
-  // Leitura só existe como dado real quando a pessoa acompanha leitura em minutos (hábito ou missão).
+  // Leitura existe como dado real quando há sessões de leitura (Fase 04) ou hábitos/missões de leitura em minutos.
   const readingRows = await one(
     `SELECT ((SELECT count(*) FROM life_habits h WHERE h.user_id = $1 AND h.tag = 'reading' AND h.goal_kind = 'duration')
-          + (SELECT count(*) FROM life_missions m WHERE m.user_id = $1 AND m.tag = 'reading' AND m.unit = 'minutes'))::int AS n`,
+          + (SELECT count(*) FROM life_missions m WHERE m.user_id = $1 AND m.tag = 'reading' AND m.unit = 'minutes')
+          + (SELECT count(*) FROM knowledge_sessions k WHERE k.user_id = $1 AND k.module = 'knowledge' AND k.kind = 'reading'))::int AS n`,
   );
+  // Minutos de leitura: sessões do módulo Conhecimento + hábitos/missões de leitura que NÃO vêm das sessões (registros
+  // de hábito/missão alimentados pelas sessões ficam de fora para não contar o mesmo minuto duas vezes).
   const reading = await one(
-    `SELECT ((SELECT coalesce(sum(l.amount), 0) FROM life_habit_logs l JOIN life_habits h ON h.id = l.habit_id WHERE l.user_id = $1 AND h.tag = 'reading' AND h.goal_kind = 'duration')
-          + (SELECT coalesce(sum(e.amount), 0) FROM life_mission_entries e JOIN life_missions m ON m.id = e.mission_id WHERE e.user_id = $1 AND m.tag = 'reading' AND m.unit = 'minutes'))::int AS n`,
+    `SELECT ((SELECT coalesce(sum(l.amount), 0) FROM life_habit_logs l JOIN life_habits h ON h.id = l.habit_id WHERE l.user_id = $1 AND h.tag = 'reading' AND h.goal_kind = 'duration'
+                AND NOT EXISTS (SELECT 1 FROM knowledge_goals g WHERE g.user_id = $1 AND g.habit_id = h.id))
+          + (SELECT coalesce(sum(e.amount), 0) FROM life_mission_entries e JOIN life_missions m ON m.id = e.mission_id WHERE e.user_id = $1 AND m.tag = 'reading' AND m.unit = 'minutes' AND (e.source_key IS NULL OR e.source_key NOT LIKE 'knowledge:%'))
+          + (SELECT coalesce(sum(k.active_sec), 0) / 60 FROM knowledge_sessions k WHERE k.user_id = $1 AND k.module = 'knowledge' AND k.kind = 'reading'))::int AS n`,
   );
+  const booksDone = await one("SELECT count(*)::int AS n FROM knowledge_books WHERE user_id = $1 AND status = 'done'");
+  const hasBooks = booksDone > 0 || (await one('SELECT count(*)::int AS n FROM knowledge_books WHERE user_id = $1')) > 0;
+  const studyMin = await one("SELECT (coalesce(sum(active_sec), 0) / 60)::int AS n FROM knowledge_sessions WHERE user_id = $1 AND module = 'knowledge' AND kind = 'study'");
+  const hasStudy = studyMin > 0 || (await one('SELECT count(*)::int AS n FROM knowledge_subjects WHERE user_id = $1')) > 0;
   const streak = await streakOf(c, userId, today);
   const diaryDays = await one(`SELECT count(DISTINCT day)::int AS n FROM life_xp_events WHERE user_id = $1 AND source = 'nutrition' AND source_key LIKE 'nutrition:day:%' AND ${ACTIVE_GRANT}`);
   const hasNutrition = diaryDays > 0 || (await one('SELECT count(*)::int AS n FROM nutrition_meals WHERE user_id = $1')) > 0;
@@ -308,6 +317,8 @@ export async function achievementProgress(c: PoolClient, userId: string, today: 
     reading_100: { value: Math.min(reading, 100), target: 100, available: readingRows > 0 },
     streak_7: { value: Math.min(Math.max(streak.current, streak.best), 7), target: 7, available: true },
     nutrition_week: { value: Math.min(diaryDays, 7), target: 7, available: hasNutrition },
+    first_book: { value: Math.min(booksDone, 1), target: 1, available: hasBooks },
+    study_10h: { value: Math.min(studyMin, 600), target: 600, available: hasStudy },
   };
 }
 

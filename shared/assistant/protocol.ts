@@ -114,10 +114,18 @@ export type ActionKind =
   | 'create_food'
   | 'update_nutrition_goals'
   | 'create_meal_plan'
-  | 'update_meal_plan';
+  | 'update_meal_plan'
+  // Fase 04: conhecimento
+  | 'create_book'
+  | 'update_book_progress'
+  | 'create_subject'
+  | 'create_topics'
+  | 'create_study_plan'
+  | 'update_knowledge_goals'
+  | 'schedule_knowledge_routine';
 export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'expired' | 'failed' | 'reverted';
 /** Onde a proposta aplicada gravou (para o app abrir o item). */
-export type ActionCollection = 'routines' | 'memories' | 'habits' | 'life_routines' | 'missions' | 'meals' | 'foods' | 'nutrition_goals' | 'meal_plan';
+export type ActionCollection = 'routines' | 'memories' | 'habits' | 'life_routines' | 'missions' | 'meals' | 'foods' | 'nutrition_goals' | 'meal_plan' | 'books' | 'subjects' | 'knowledge_goals' | 'knowledge_sessions';
 /** Prazo para desfazer uma proposta aplicada (Fase 01). */
 export const UNDO_WINDOW_HOURS = 168;
 

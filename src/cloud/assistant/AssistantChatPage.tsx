@@ -198,6 +198,10 @@ const RESULT_LINK: Record<string, { to: string; label: string }> = {
   meal_plan: { to: '/alimentacao/planejar', label: 'Ver planejamento' },
   foods: { to: '/alimentacao/alimentos', label: 'Ver alimentos' },
   nutrition_goals: { to: '/alimentacao/metas', label: 'Ver metas' },
+  books: { to: '/conhecimento/biblioteca', label: 'Ver biblioteca' },
+  subjects: { to: '/conhecimento/estudos', label: 'Ver estudos' },
+  knowledge_goals: { to: '/conhecimento/metas', label: 'Ver metas' },
+  knowledge_sessions: { to: '/conhecimento', label: 'Ver conhecimento' },
 };
 
 function ProposalCard({ action, onDecide, onUndo }: { action: ActionView; onDecide: (id: string, approve: boolean) => Promise<ActionView | null>; onUndo: (id: string) => Promise<ActionView | null> }) {

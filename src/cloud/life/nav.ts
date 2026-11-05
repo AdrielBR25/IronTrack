@@ -9,6 +9,6 @@ export const LIFE_NAV: NavItem[] = [
   { to: '/missoes', label: 'Missões', icon: Trophy },
   { to: '/jornada', label: 'Evolução', icon: BarChart3, also: ['/evolucao', '/metas', '/desempenho'] },
   { to: '/assistente', label: 'IA', icon: Sparkles, title: 'Assistente IA', ariaLabel: 'Assistente IA' },
-  { to: '/mais', label: 'Mais', icon: LayoutGrid, also: ['/alimentacao', '/treinar', '/treinos', '/historico', '/planejamento', '/exercicios', '/config', '/conta'] },
+  { to: '/mais', label: 'Mais', icon: LayoutGrid, also: ['/alimentacao', '/conhecimento', '/treinar', '/treinos', '/historico', '/planejamento', '/exercicios', '/config', '/conta'] },
 ];
 

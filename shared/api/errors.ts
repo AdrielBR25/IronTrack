@@ -30,6 +30,11 @@ export const API_ERRORS = {
   nutrition_date_not_allowed: { status: 422, message: 'Data fora do período permitido. Refeições consumidas não podem ficar no futuro.' },
   nutrition_food_unavailable: { status: 422, message: 'Um dos alimentos não existe mais ou foi arquivado. Escolha outro.' },
   nutrition_state: { status: 409, message: 'Esta refeição não está no estado esperado. Recarregue e tente de novo.' },
+  // IronTrack Life (Fase 04): conhecimento
+  knowledge_timer_active: { status: 409, message: 'Já existe uma sessão em andamento. Encerre ou descarte antes de começar outra.' },
+  knowledge_timer_missing: { status: 404, message: 'Esta sessão já foi encerrada ou descartada (talvez em outro aparelho).' },
+  knowledge_date_not_allowed: { status: 422, message: 'Data fora do período permitido para registros.' },
+  knowledge_pages: { status: 422, message: 'Página fora do total de páginas do livro.' },
   service_unavailable: { status: 503, message: 'Serviço temporariamente indisponível.' },
   timeout: { status: 504, message: 'O servidor demorou demais para responder.' },
   internal_error: { status: 500, message: 'Erro interno. Nada foi alterado.' },

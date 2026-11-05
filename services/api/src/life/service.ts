@@ -630,6 +630,6 @@ export async function dashboard(t: LifeTx, displayName: string, nowHHMM: string)
     nextActivities: nextActivities(routines, nowHHMM),
     workouts: { total, thisWeek, last: last ? { id: last.id, date: localDate(last.finished_at.getTime(), t.tz), name: [last.label, last.name].filter(Boolean).join(' — ') || null } : null, weeklyTarget: weekly?.target ?? t.profile.weekly_workout_target ?? 3 },
     recentAchievements: ach.slice(0, 3),
-    upcomingModules: FUTURE_MODULES.filter((m) => m.id === 'reading' || m.id === 'bible').map((m) => ({ id: m.id as 'nutrition' | 'reading' | 'bible', name: m.name, status: 'planned' as const })),
+    upcomingModules: FUTURE_MODULES.filter((m) => m.id === 'bible').map((m) => ({ id: m.id as 'nutrition' | 'reading' | 'bible', name: m.name, status: 'planned' as const })),
   };
 }

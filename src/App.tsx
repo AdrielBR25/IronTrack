@@ -45,6 +45,15 @@ const MealPlannerPage = lazy(() => import('@/cloud/nutrition/PlannerPage'));
 const NutritionAnalysisPage = lazy(() => import('@/cloud/nutrition/AnalysisPage'));
 const NutritionGoalsPage = lazy(() => import('@/cloud/nutrition/GoalsPage'));
 const FoodsPage = lazy(() => import('@/cloud/nutrition/FoodsPage'));
+// Fase 04: conhecimento — leitura, estudos e foco (modo conta).
+const KnowledgePage = lazy(() => import('@/cloud/knowledge/KnowledgePage'));
+const LibraryPage = lazy(() => import('@/cloud/knowledge/LibraryPage'));
+const BookPage = lazy(() => import('@/cloud/knowledge/BookPage'));
+const StudiesPage = lazy(() => import('@/cloud/knowledge/StudiesPage'));
+const SubjectPage = lazy(() => import('@/cloud/knowledge/SubjectPage'));
+const FocusPage = lazy(() => import('@/cloud/knowledge/FocusPage'));
+const KnowledgeGoalsPage = lazy(() => import('@/cloud/knowledge/GoalsPage'));
+const KnowledgeStatsPage = lazy(() => import('@/cloud/knowledge/StatsPage'));
 
 export default function App() {
   const settings = useSettings();
@@ -106,6 +115,14 @@ export default function App() {
               <Route path="/alimentacao/analise" element={<NutritionAnalysisPage />} />
               <Route path="/alimentacao/metas" element={<NutritionGoalsPage />} />
               <Route path="/alimentacao/alimentos" element={<FoodsPage />} />
+              <Route path="/conhecimento" element={<KnowledgePage />} />
+              <Route path="/conhecimento/biblioteca" element={<LibraryPage />} />
+              <Route path="/conhecimento/livro/:id" element={<BookPage />} />
+              <Route path="/conhecimento/estudos" element={<StudiesPage />} />
+              <Route path="/conhecimento/materia/:id" element={<SubjectPage />} />
+              <Route path="/conhecimento/foco" element={<FocusPage />} />
+              <Route path="/conhecimento/metas" element={<KnowledgeGoalsPage />} />
+              <Route path="/conhecimento/estatisticas" element={<KnowledgeStatsPage />} />
             </>
           )}
           <Route path="*" element={<HomePage />} />
