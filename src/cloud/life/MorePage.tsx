@@ -1,6 +1,6 @@
 // "Mais" (Fase 01): acesso a todos os módulos atuais (treino, histórico, evolução, metas…), conta e ajustes.
 import { Link } from 'react-router-dom';
-import { Apple, Brain, GraduationCap, Library, Timer, BarChart3, CalendarRange, LineChart, Search, BookOpen, CalendarDays, ChevronRight, Dumbbell, Gauge, History, ListChecks, Play, Settings, ShieldCheck, Target, User } from 'lucide-react';
+import { Apple, BookHeart, BookOpenText, CalendarCheck, Heart, NotebookPen, Brain, GraduationCap, Library, Timer, BarChart3, CalendarRange, LineChart, Search, BookOpen, CalendarDays, ChevronRight, Dumbbell, Gauge, History, ListChecks, Play, Settings, ShieldCheck, Target, User } from 'lucide-react';
 import { PageHeader } from '@/components/AppLayout';
 import { Card } from '@/components/ui/card';
 
@@ -37,6 +37,16 @@ const GROUPS: { title: string; items: { to: string; label: string; hint: string;
       { to: '/conhecimento/estudos', label: 'Matérias', hint: 'Tópicos, tempo e histórico', icon: GraduationCap },
       { to: '/conhecimento/metas', label: 'Metas de leitura e estudo', hint: 'Diárias, semanais e por prazo', icon: Target },
       { to: '/conhecimento/estatisticas', label: 'Gráficos do conhecimento', hint: 'Tempo, páginas e constância', icon: LineChart },
+    ],
+  },
+  {
+    title: 'Bíblia',
+    items: [
+      { to: '/biblia', label: 'Bíblia', hint: 'Passagem do dia, leitura e progresso', icon: BookHeart },
+      { to: '/biblia/ler', label: 'Ler Bíblia', hint: 'Continuar de onde parei', icon: BookOpenText },
+      { to: '/biblia/planos', label: 'Planos de leitura', hint: 'Evangelhos, Salmos, 30/90 dias, Bíblia completa', icon: CalendarCheck },
+      { to: '/biblia/diario', label: 'Diário espiritual', hint: 'Reflexões, gratidão e anotações privadas', icon: NotebookPen },
+      { to: '/biblia/favoritos', label: 'Favoritos e destaques', hint: 'Passagens salvas', icon: Heart },
     ],
   },
   {

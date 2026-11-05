@@ -87,7 +87,7 @@ protegidas; a IA pode explicar, resumir as notas da própria pessoa, criar exerc
 dias com registro / dias do mês no intervalo), tempo por matéria, livros concluídos, metas cumpridas, melhor sequência e
 distribuição por hora.
 
-## 8. Preparação para a Fase 05 (Bíblia)
+## 8. Preparação para a Fase 05 (Bíblia) — implementada: ver docs/BIBLIA.md
 
 Sessões, cronômetro, metas e notas têm `module` (`knowledge` | `bible`) e `ref` livre. A Bíblia poderá reutilizar o
 cronômetro, as metas por minutos/dias, o histórico e as notas sem nova estrutura. Nada de traduções ou importação de texto

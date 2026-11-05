@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, useReducedMotion } from 'framer-motion';
-import { BedDouble, Check, ChevronDown, ChevronRight, Church, Dumbbell, Flame, History, Loader2, Plus, Sparkles, Trophy } from 'lucide-react';
+import { BedDouble, Check, ChevronDown, ChevronRight, Dumbbell, Flame, History, Loader2, Plus, Sparkles, Trophy } from 'lucide-react';
 import type { DashboardView } from '@shared/life/protocol.ts';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -14,6 +14,7 @@ import { HABIT_TEMPLATES, HabitDialog, MissionDetailDialog, draftFromTemplate, l
 import { Bar, HabitRow, MissionRow, Ring } from './ui';
 import { NutritionHomeCard } from '../nutrition/HomeCard';
 import { KnowledgeHomeCard } from '../knowledge/HomeCard';
+import { BibleHomeCard } from '../bible/HomeCard';
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -373,17 +374,8 @@ export default function LifeHomePage() {
         <KnowledgeHomeCard />
       </Section>
 
-      <Section title="Em breve">
-        <div className="grid grid-cols-2 gap-2">
-          {[{ id: 'bible', name: 'Bíblia', icon: Church }].map((m) => (
-            <div key={m.id} className="flex flex-col items-center gap-1.5 rounded-2xl border border-dashed bg-card/40 px-2 py-3 text-center" aria-disabled>
-              <m.icon className="h-5 w-5 text-muted-foreground" />
-              <span className="text-xs font-medium">{m.name}</span>
-              <span className="text-[10px] text-muted-foreground">em breve</span>
-            </div>
-          ))}
-        </div>
-      </Section>
+      {/* Fase 05: a Bíblia saiu do "em breve"; o cartão some se a pessoa desligar "Mostrar no Início". */}
+      <BibleHomeCard />
 
       <HabitDialog open={!!habitDraft} onOpenChange={(o) => !o && setHabitDraft(null)} template={habitDraft} />
       <MissionDetailDialog mission={mission} onOpenChange={(o) => !o && setMission(null)} />

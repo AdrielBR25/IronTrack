@@ -12,6 +12,7 @@ import { ImportOffer } from '@/cloud/ui/ImportOffer';
 import { useAccountPointer } from '@/cloud/accountPointer';
 import { ACCOUNTS_ENABLED, accountModeActive } from '@/cloud/config';
 import { LifeSyncWatcher, RewardFx } from '@/cloud/life/ui';
+import { BibleReminders } from '@/cloud/bible/reminders';
 import { LIFE_NAV, type NavItem } from '@/cloud/life/nav';
 
 /** P21: onde os dados ficam (texto do rodapé lateral). */
@@ -132,6 +133,7 @@ export function AppLayout() {
         <>
           <RewardFx />
           <LifeSyncWatcher />
+          <BibleReminders />
         </>
       )}
 

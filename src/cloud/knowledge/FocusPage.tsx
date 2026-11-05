@@ -69,6 +69,16 @@ export default function FocusPage() {
       )}
       {!st.loaded && !st.timer ? (
         <p className="py-10 text-center text-sm text-muted-foreground">Carregando…</p>
+      ) : st.timer?.module === 'bible' ? (
+        // Fase 05: a leitura bíblica usa o mesmo cronômetro, mas é encerrada no leitor (que registra os capítulos).
+        <Card>
+          <CardContent className="space-y-3 p-4 text-center">
+            <p className="text-sm">Há uma leitura bíblica em andamento: {st.timer.title}.</p>
+            <Button asChild>
+              <Link to={`/biblia/ler?ref=${st.timer.ref ?? ''}`}>Abrir no leitor</Link>
+            </Button>
+          </CardContent>
+        </Card>
       ) : st.timer ? (
         <Running t={st.timer} waiting={st.waiting} onSaved={setSummary} />
       ) : summary ? (

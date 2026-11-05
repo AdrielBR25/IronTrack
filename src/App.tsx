@@ -54,6 +54,18 @@ const SubjectPage = lazy(() => import('@/cloud/knowledge/SubjectPage'));
 const FocusPage = lazy(() => import('@/cloud/knowledge/FocusPage'));
 const KnowledgeGoalsPage = lazy(() => import('@/cloud/knowledge/GoalsPage'));
 const KnowledgeStatsPage = lazy(() => import('@/cloud/knowledge/StatsPage'));
+// Fase 05: Bíblia — leitura, planos, versículo do dia e diário espiritual (modo conta).
+const BiblePage = lazy(() => import('@/cloud/bible/BiblePage'));
+const BibleReaderPage = lazy(() => import('@/cloud/bible/ReaderPage'));
+const BiblePlansPage = lazy(() => import('@/cloud/bible/PlansPage'));
+const BiblePlanPage = lazy(() => import('@/cloud/bible/PlanPage'));
+const BibleJournalPage = lazy(() => import('@/cloud/bible/JournalPage'));
+const BibleFavoritesPage = lazy(() => import('@/cloud/bible/FavoritesPage'));
+const BibleSearchPage = lazy(() => import('@/cloud/bible/SearchPage'));
+const BibleVersesPage = lazy(() => import('@/cloud/bible/VersesPage'));
+const BibleProgressPage = lazy(() => import('@/cloud/bible/ProgressPage'));
+const BibleGoalsPage = lazy(() => import('@/cloud/bible/GoalsPage'));
+const BibleSettingsPage = lazy(() => import('@/cloud/bible/SettingsPage'));
 
 export default function App() {
   const settings = useSettings();
@@ -123,6 +135,17 @@ export default function App() {
               <Route path="/conhecimento/foco" element={<FocusPage />} />
               <Route path="/conhecimento/metas" element={<KnowledgeGoalsPage />} />
               <Route path="/conhecimento/estatisticas" element={<KnowledgeStatsPage />} />
+              <Route path="/biblia" element={<BiblePage />} />
+              <Route path="/biblia/ler" element={<BibleReaderPage />} />
+              <Route path="/biblia/planos" element={<BiblePlansPage />} />
+              <Route path="/biblia/planos/:id" element={<BiblePlanPage />} />
+              <Route path="/biblia/diario" element={<BibleJournalPage />} />
+              <Route path="/biblia/favoritos" element={<BibleFavoritesPage />} />
+              <Route path="/biblia/buscar" element={<BibleSearchPage />} />
+              <Route path="/biblia/versiculos" element={<BibleVersesPage />} />
+              <Route path="/biblia/progresso" element={<BibleProgressPage />} />
+              <Route path="/biblia/metas" element={<BibleGoalsPage />} />
+              <Route path="/biblia/ajustes" element={<BibleSettingsPage />} />
             </>
           )}
           <Route path="*" element={<HomePage />} />

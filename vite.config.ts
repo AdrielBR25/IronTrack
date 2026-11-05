@@ -45,7 +45,10 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,mjs,css,html,svg,png,woff2,json}'],
-        globIgnores: ['**/*cyrillic*', '**/*greek*', '**/*vietnamese*'],
+        // Fase 05: o texto bíblico (66 livros, ~4,7 MB) não entra no pré-cache: cada livro vai para o cache ao ser aberto
+        // (ou todos em "Baixar para ler offline"), e daí em diante funciona sem conexão.
+        globIgnores: ['**/*cyrillic*', '**/*greek*', '**/*vietnamese*', '**/assets/bible/**'],
+        runtimeCaching: [{ urlPattern: /\/assets\/bible\/[^/]+\.json$/, handler: 'CacheFirst', options: { cacheName: 'irontrack-bible-bpm', expiration: { maxEntries: 80 } } }],
         navigateFallback: 'index.html',
         // P21: a API nunca é atendida pelo service worker (nem cache, nem página do app no lugar dela).
         navigateFallbackDenylist: [/^\/api\//],
@@ -56,8 +59,11 @@ export default defineConfig({
   server: apiProxy ? { proxy: apiProxy } : {},
   preview: apiProxy ? { proxy: apiProxy } : {},
   build: {
+    // Livros da Bíblia sempre como arquivo próprio (nunca embutidos no JS), para o cache por livro.
+    assetsInlineLimit: (file) => (/shared[\\/]bible[\\/]data[\\/]/.test(file) ? false : undefined),
     rollupOptions: {
       output: {
+        assetFileNames: (a) => (/\.json$/.test(a.names?.[0] ?? a.name ?? '') && /^[1-3A-Z]{3}\.json$/.test(a.names?.[0] ?? a.name ?? '') ? 'assets/bible/[name]-[hash][extname]' : 'assets/[name]-[hash][extname]'),
         manualChunks: {
           react: ['react', 'react-dom', 'react-router-dom'],
           charts: ['recharts'],

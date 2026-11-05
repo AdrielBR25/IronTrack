@@ -210,9 +210,10 @@ export async function reload(): Promise<void> {
 }
 
 export const timerActions = {
-  async start(cfg: Record<string, unknown>): Promise<TimerView> {
+  /** `starter`: a Bíblia (Fase 05) usa o mesmo cronômetro com a própria rota de início (capítulo de partida). */
+  async start(cfg: Record<string, unknown>, starter: (cfg: Record<string, unknown>) => Promise<{ timer: TimerView; serverNow: number }> = knowledgeApi.startTimer): Promise<TimerView> {
     unlockAudio();
-    const r = await knowledgeApi.startTimer(cfg);
+    const r = await starter(cfg);
     adopt(r.timer, r.serverNow);
     invalidateLife();
     return r.timer;
@@ -223,13 +224,14 @@ export const timerActions = {
     return send('resume');
   },
   skipBreak: () => send('resume'),
-  async finish(f: Record<string, unknown>) {
+  /** `finisher`: rota de encerramento (a da Bíblia registra os capítulos lidos). */
+  async finish<R = Awaited<ReturnType<typeof knowledgeApi.finishTimer>>>(f: Record<string, unknown>, finisher: (id: string, f: Record<string, unknown>) => Promise<R> = knowledgeApi.finishTimer as never): Promise<R> {
     const t = state.timer;
     if (!t) throw new Error('sem cronômetro');
     await flush();
     if (pending) throw new ApiClientError('network', 0, 'Sem conexão. A sessão continua guardada neste aparelho; tente encerrar de novo quando a conexão voltar.');
     const at = t.phase === 'focus' ? isoNow() : isoNow(t.phaseStartedAt);
-    const r = await knowledgeApi.finishTimer(t.id, { at, ...f });
+    const r = await finisher(t.id, { at, ...f });
     pending = null;
     set({ timer: null, waiting: null, pendingCount: 0 });
     return r;

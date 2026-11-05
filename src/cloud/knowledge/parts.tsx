@@ -11,13 +11,13 @@ export function ActiveTimerBanner() {
   const a = liveActive(timer, now);
   const label = timer.stale ? 'Sessão interrompida' : timer.phase === 'paused' ? 'Pausada' : timer.phase === 'focus' ? 'Em andamento' : 'Pausa do pomodoro';
   return (
-    <Link to="/conhecimento/foco" className="flex items-center gap-3 rounded-2xl border border-primary/40 bg-primary/10 p-3" data-testid="knowledge-timer-banner">
+    <Link to={timer.module === 'bible' ? `/biblia/ler?ref=${timer.ref ?? ''}` : '/conhecimento/foco'} className="flex items-center gap-3 rounded-2xl border border-primary/40 bg-primary/10 p-3" data-testid="knowledge-timer-banner">
       <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground">
         <Timer className="h-5 w-5" />
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium">{timer.title}</span>
-        <span className="block text-xs text-muted-foreground">{label}</span>
+        <span className="block text-xs text-muted-foreground">{timer.module === 'bible' ? `Leitura bíblica · ${label.toLowerCase()}` : label}</span>
       </span>
       <span className="font-display text-xl font-bold tabular-nums">{fmtClock(a.activeSec)}</span>
     </Link>
