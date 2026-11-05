@@ -10,3 +10,6 @@ export const ForgotRoute = lazy(() => import('./InAppAuth').then((m) => ({ defau
 export const ResetRoute = lazy(() => import('./InAppAuth').then((m) => ({ default: m.ResetRoute })));
 export const VerifyRoute = lazy(() => import('./InAppAuth').then((m) => ({ default: m.VerifyRoute })));
 export const TermsRoute = lazy(() => import('./InAppAuth').then((m) => ({ default: m.TermsRoute })));
+// Fase 00: Assistente IA central (OpenAI pelo servidor), só no modo conta.
+export const AssistantChatPage = lazy(() => import('../assistant/AssistantChatPage'));
+export const AssistantPrivacyPage = lazy(() => import('../assistant/AssistantPrivacyPage'));

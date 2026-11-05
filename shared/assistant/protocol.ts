@@ -1,0 +1,247 @@
+// Contrato do Assistente IA central (Fase 00, docs/IA_CENTRAL.md). Compartilhado entre a API (que valida de verdade)
+// e o app (que só exibe). Nada aqui tem segredo, URL de provedor ou chave.
+import { z } from 'zod';
+
+export const ASSISTANT_PROTOCOL = 'irontrack.assistant.v1';
+/** Versão do aviso de processamento de dados. Mudou o texto de forma relevante → sobe o número e o app mostra de novo. */
+export const ASSISTANT_NOTICE_VERSION = 1;
+export const MAX_USER_MESSAGE_CHARS = 8000;
+export const MAX_TITLE_CHARS = 120;
+export const MAX_MEMORY_CHARS = 500;
+export const MAX_MEMORIES = 50;
+
+// ------------------------------------------------------------------ fichas de treino (mesmo vocabulário do app)
+export const EQUIPMENT = ['barbell', 'dumbbell', 'machine', 'cable', 'bodyweight', 'other'] as const;
+export const CATEGORY = ['compound', 'isolation'] as const;
+
+const name = (max: number) => z.string().trim().min(1).max(max);
+
+/** Exercício proposto pela IA para uma ficha. Os limites seguem o editor de fichas do app. */
+export const proposedExerciseSchema = z
+  .object({
+    name: name(80),
+    muscleGroup: name(40),
+    category: z.enum(CATEGORY),
+    equipment: z.enum(EQUIPMENT),
+    sets: z.number().int().min(1).max(20),
+    repMin: z.number().int().min(1).max(100),
+    repMax: z.number().int().min(1).max(100),
+    restSec: z.number().int().min(0).max(900),
+    warmupSets: z.number().int().min(0).max(5).default(0),
+    targetWeight: z.number().min(0).max(1000).nullish(),
+    notes: z.string().trim().max(300).nullish(),
+  })
+  .strict()
+  .refine((e) => e.repMax >= e.repMin, { message: 'repMax menor que repMin', path: ['repMax'] });
+export type ProposedExercise = z.infer<typeof proposedExerciseSchema>;
+
+export const proposedWorkoutSchema = z
+  .object({
+    label: name(4),
+    name: name(60),
+    notes: z.string().trim().max(300).nullish(),
+    exercises: z.array(proposedExerciseSchema).min(1).max(20),
+  })
+  .strict();
+export type ProposedWorkout = z.infer<typeof proposedWorkoutSchema>;
+
+export const createRoutineArgsSchema = z
+  .object({
+    name: name(60),
+    description: z.string().trim().max(300).nullish(),
+    workouts: z.array(proposedWorkoutSchema).min(1).max(7),
+    rationale: z.string().trim().max(600).nullish(),
+  })
+  .strict();
+export type CreateRoutineArgs = z.infer<typeof createRoutineArgsSchema>;
+
+/** Campos de um exercício da ficha que a IA pode alterar. */
+export const exercisePatchSchema = z
+  .object({
+    name: name(80).optional(),
+    muscleGroup: name(40).optional(),
+    sets: z.number().int().min(1).max(20).optional(),
+    repMin: z.number().int().min(1).max(100).optional(),
+    repMax: z.number().int().min(1).max(100).optional(),
+    restSec: z.number().int().min(0).max(900).optional(),
+    warmupSets: z.number().int().min(0).max(5).optional(),
+    targetWeight: z.number().min(0).max(1000).nullable().optional(),
+    notes: z.string().trim().max(300).nullable().optional(),
+  })
+  .strict()
+  .refine((p) => Object.keys(p).length > 0, { message: 'nenhum campo' });
+
+export const routineChangeSchema = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('rename_routine'), name: name(60) }).strict(),
+  z.object({ op: z.literal('set_description'), description: z.string().trim().max(300) }).strict(),
+  z.object({ op: z.literal('add_workout'), workout: proposedWorkoutSchema }).strict(),
+  z.object({ op: z.literal('rename_workout'), workoutId: name(200), label: name(4).optional(), name: name(60).optional() }).strict(),
+  z.object({ op: z.literal('remove_workout'), workoutId: name(200) }).strict(),
+  z.object({ op: z.literal('add_exercise'), workoutId: name(200), exercise: proposedExerciseSchema, position: z.number().int().min(0).max(50).optional() }).strict(),
+  z.object({ op: z.literal('update_exercise'), workoutId: name(200), exerciseId: name(200), changes: exercisePatchSchema }).strict(),
+  z.object({ op: z.literal('remove_exercise'), workoutId: name(200), exerciseId: name(200) }).strict(),
+  z.object({ op: z.literal('move_exercise'), workoutId: name(200), exerciseId: name(200), toIndex: z.number().int().min(0).max(50) }).strict(),
+]);
+export type RoutineChange = z.infer<typeof routineChangeSchema>;
+
+export const updateRoutineArgsSchema = z
+  .object({
+    routineId: name(200),
+    changes: z.array(routineChangeSchema).min(1).max(40),
+    rationale: z.string().trim().max(600).nullish(),
+  })
+  .strict();
+export type UpdateRoutineArgs = z.infer<typeof updateRoutineArgsSchema>;
+
+export const savePreferenceArgsSchema = z.object({ content: z.string().trim().min(3).max(MAX_MEMORY_CHARS) }).strict();
+
+// ------------------------------------------------------------------ visões devolvidas ao app
+
+export type ActionKind = 'create_routine' | 'update_routine' | 'save_preference';
+export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'expired' | 'failed';
+
+/** Uma linha da prévia: o que muda, em linguagem do app. */
+export interface PreviewLine {
+  kind: 'add' | 'remove' | 'change' | 'info';
+  text: string;
+}
+
+export interface PreviewSection {
+  title: string;
+  lines: PreviewLine[];
+}
+
+export interface ActionView {
+  id: string;
+  kind: ActionKind;
+  status: ActionStatus;
+  title: string;
+  /** Justificativa dada pela IA (é sugestão, não fato). */
+  rationale: string | null;
+  preview: PreviewSection[];
+  createdAt: string;
+  expiresAt: string;
+  decidedAt: string | null;
+  /** Depois de aplicada: o que foi gravado (para o app abrir a ficha). */
+  result: { collection: 'routines' | 'memories'; entityId: string } | null;
+  /** Motivo da falha ao aplicar (frase fixa). */
+  error: string | null;
+}
+
+export interface ToolUseView {
+  name: string;
+  label: string;
+  kind: 'read' | 'write';
+  ok: boolean;
+}
+
+export type MessageRole = 'user' | 'assistant' | 'event';
+
+export interface MessageView {
+  id: string;
+  role: MessageRole;
+  content: string;
+  status: 'complete' | 'error' | 'cancelled';
+  createdAt: string;
+  model: string | null;
+  tools: ToolUseView[];
+  actionIds: string[];
+}
+
+export interface ConversationSummaryView {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+}
+
+export interface ConversationView extends ConversationSummaryView {
+  /** Resumo automático das mensagens antigas (gerado pela IA; não é registro). */
+  summary: string | null;
+  messages: MessageView[];
+  actions: ActionView[];
+}
+
+export interface MemoryView {
+  id: string;
+  content: string;
+  source: 'user' | 'ai_approved';
+  createdAt: string;
+}
+
+export interface AssistantModelView {
+  id: string;
+  displayName: string;
+  description: string;
+}
+
+export type AssistantAvailability = 'ok' | 'disabled' | 'missing_key' | 'invalid_key_format' | 'auth_failed' | 'email_not_verified';
+
+export interface AssistantStatusView {
+  protocol: typeof ASSISTANT_PROTOCOL;
+  availability: AssistantAvailability;
+  provider: { id: string; displayName: string; health: string; checkedAt: string | null } | null;
+  models: AssistantModelView[];
+  defaultModel: string | null;
+  notice: { version: number; acceptedVersion: number | null; acceptedAt: string | null };
+  limits: { messagesPerDay: number; tokensPerDay: number; messagesPerMinute: number; maxMessageChars: number };
+  usage: { day: string; messages: number; tokens: number };
+  modules: ModuleView[];
+}
+
+export interface ModuleView {
+  id: string;
+  name: string;
+  status: 'available' | 'planned';
+}
+
+// ------------------------------------------------------------------ eventos do streaming (text/event-stream)
+
+export type StreamEvent =
+  | { type: 'start'; conversationId: string; userMessage: MessageView; title: string; created: boolean }
+  | { type: 'text'; delta: string }
+  | { type: 'tool'; name: string; label: string; kind: 'read' | 'write'; state: 'start' | 'end'; ok?: boolean }
+  | { type: 'proposal'; action: ActionView }
+  | { type: 'done'; message: MessageView; usage: { inputTokens: number; outputTokens: number } }
+  | { type: 'error'; code: string; message: string; message_id?: string };
+
+export const sendMessageSchema = z
+  .object({
+    content: z.string().max(MAX_USER_MESSAGE_CHARS * 2),
+    model: z.string().max(80).optional(),
+    timezone: z.string().max(64).optional(),
+    /** Reservado para anexos/imagens (fase futura). Hoje só aceita lista vazia. */
+    attachments: z.array(z.unknown()).max(0).optional(),
+  })
+  .strict();
+
+export const ASSISTANT_ERROR_MESSAGES: Record<string, string> = {
+  assistant_disabled: 'O assistente está desativado neste servidor.',
+  provider_unavailable: 'A IA não está configurada no servidor (falta a chave da OpenAI no irontrack-api).',
+  provider_auth_failed: 'A OpenAI recusou a chave configurada no servidor.',
+  provider_billing: 'A conta da OpenAI do servidor está sem créditos ou com problema de faturamento.',
+  provider_forbidden: 'A chave do servidor não tem permissão para este modelo.',
+  provider_rate_limited: 'A OpenAI limitou as solicitações agora. Tente de novo em instantes.',
+  provider_unreachable: 'Não foi possível falar com a OpenAI agora. Tente de novo.',
+  provider_failure: 'A OpenAI não conseguiu responder agora. Tente de novo.',
+  model_unavailable: 'O modelo escolhido não está disponível para a chave do servidor.',
+  model_not_allowed: 'Modelo não permitido.',
+  content_filtered: 'A resposta foi bloqueada pelo filtro de conteúdo do provedor.',
+  invalid_response: 'O provedor devolveu uma resposta inválida.',
+  timeout: 'A IA demorou demais para responder. Tente de novo.',
+  cancelled: 'Resposta interrompida.',
+  rate_limited: 'Muitas mensagens em pouco tempo. Aguarde um minuto.',
+  daily_limit: 'Você atingiu o limite diário do assistente. Ele volta amanhã.',
+  busy: 'Aguarde a resposta anterior terminar.',
+  message_empty: 'Escreva uma mensagem.',
+  message_too_long: `Mensagem longa demais (máximo de ${MAX_USER_MESSAGE_CHARS.toLocaleString('pt-BR')} caracteres).`,
+  notice_required: 'Leia e confirme o aviso de processamento de dados antes de usar o assistente.',
+  email_not_verified: 'Confirme seu e-mail para usar o assistente.',
+  not_found: 'Conversa ou ação não encontrada.',
+  action_not_pending: 'Esta proposta já foi decidida ou expirou.',
+  action_stale: 'A ficha mudou depois da proposta. Peça uma nova proposta ao assistente.',
+  action_invalid: 'A proposta não passou na validação. Nada foi alterado.',
+  memory_limit: 'Limite de memórias atingido. Apague alguma antes de salvar outra.',
+  internal_error: 'Erro interno. Nada foi alterado.',
+};

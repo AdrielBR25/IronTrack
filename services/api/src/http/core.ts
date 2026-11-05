@@ -63,6 +63,8 @@ export interface Route {
   handler: Handler;
   /** Limite do corpo desta rota, só documental: cada handler passa o próprio limite a `readJson`. */
   maxBody?: number;
+  /** Tempo limite próprio (ex.: respostas em streaming do assistente). Padrão: REQUEST_TIMEOUT_MS. */
+  timeoutMs?: number;
 }
 
 interface CompiledRoute extends Route {
@@ -196,6 +198,11 @@ export function checkCsrf(cfg: Pick<ApiConfig, 'allowedOrigins' | 'allowedOrigin
 
 export function sendJson(res: ServerResponse, status: number, body: unknown, headers: Record<string, string | string[]> = {}): void {
   if (res.writableEnded || res.destroyed) return;
+  // Resposta em streaming já começou (cabeçalhos enviados): só encerra.
+  if (res.headersSent) {
+    res.end();
+    return;
+  }
   for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
   if (status === 204 || body === undefined) {
     res.statusCode = status;

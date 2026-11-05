@@ -14,6 +14,7 @@ import { createLogger, type Logger } from './lib/log.ts';
 import { createMailer, TestMailbox, type Mailer } from './mail/mailer.ts';
 import { authRoutes, resolveSession, testRoutes } from './modules/auth.ts';
 import { createAiModule, type AiDeps } from './modules/ai.ts';
+import { createAssistantModule, type AssistantDeps } from './assistant/module.ts';
 import { exportRoutes } from './modules/exporter.ts';
 import { importRoutes } from './modules/importer.ts';
 import { syncRoutes } from './modules/sync.ts';
@@ -26,6 +27,8 @@ export interface ApiOptions {
   logger?: Logger;
   /** Substituições da IA (testes: provedor simulado). */
   ai?: Pick<AiDeps, 'fetch' | 'adapters' | 'now'>;
+  /** Substituições do assistente central (testes: provedor OpenAI simulado). */
+  assistant?: Pick<AssistantDeps, 'fetch' | 'provider' | 'now'>;
 }
 
 export interface Api {
@@ -48,6 +51,7 @@ export function createApi(o: ApiOptions): Api {
   const mailer = o.mailer ?? createMailer(cfg);
   const limiter = new RateLimiter(pool, cfg.rateLimitSecret);
   const ai = createAiModule({ cfg, pool, log, env: o.env ?? process.env, ...o.ai });
+  const assistant = createAssistantModule({ cfg, pool, log, env: o.env ?? process.env, ...o.assistant });
   const router = new Router();
 
   router.add({ method: 'GET', path: '/api/v1/health', auth: 'public', handler: async () => ({ status: 200, body: { status: 'ok' } }) });
@@ -65,11 +69,12 @@ export function createApi(o: ApiOptions): Api {
       }
     },
   });
-  authRoutes(router, { cfg, pool, mailer, limiter, log, aiAvailable: () => ai.available() });
+  authRoutes(router, { cfg, pool, mailer, limiter, log, aiAvailable: () => ai.available() || assistant.available() });
   syncRoutes(router, { pool, limiter });
   importRoutes(router, { pool, limiter });
   exportRoutes(router, { pool, limiter });
   ai.register(router);
+  assistant.register(router);
   if (cfg.testMode && cfg.env !== 'production' && mailer instanceof TestMailbox) testRoutes(router, mailer);
 
   let running = 0;
@@ -84,7 +89,7 @@ export function createApi(o: ApiOptions): Api {
     });
     const ctx: RequestCtx = { req, res, method: req.method ?? 'GET', url: new URL('http://api.invalid/'), params: {}, ip: clientIp(req, cfg.trustProxyHops), signal: ctrl.signal, log: {} };
     let status = 500;
-    const timer = setTimeout(() => ctrl.abort(new ApiError('timeout')), cfg.requestTimeoutMs);
+    let timer = setTimeout(() => ctrl.abort(new ApiError('timeout')), cfg.requestTimeoutMs);
     try {
       securityHeaders(res, cfg.env === 'production');
       const origin = req.headers.origin;
@@ -113,6 +118,10 @@ export function createApi(o: ApiOptions): Api {
       if (m === null) throw new ApiError('not_found');
       if (m === 'method') throw new ApiError('method_not_allowed');
       ctx.params = m.params;
+      if (m.route.timeoutMs) {
+        clearTimeout(timer);
+        timer = setTimeout(() => ctrl.abort(new ApiError('timeout')), m.route.timeoutMs);
+      }
       ctx.log.route = `${m.route.method} ${m.route.path}`;
       if (ctx.method !== 'GET' && !checkCsrf(cfg, req)) throw new ApiError('csrf_failed');
       if (m.route.auth !== 'public') {
@@ -173,7 +182,9 @@ export function createApi(o: ApiOptions): Api {
       await pool.query("DELETE FROM import_job_items WHERE job_id IN (SELECT id FROM import_jobs WHERE (status = 'committed' AND committed_at < now() - interval '7 days') OR (status = 'staging' AND created_at < now() - interval '2 days'))");
       await pool.query("UPDATE import_jobs SET status = 'cancelled' WHERE status = 'staging' AND created_at < now() - interval '2 days'");
       await pool.query("DELETE FROM ai_usage_events WHERE created_at < now() - interval '90 days'");
+      await pool.query("UPDATE assistant_actions SET status = 'expired', decided_at = now() WHERE status = 'pending' AND expires_at < now()");
+      await pool.query("DELETE FROM assistant_usage_daily WHERE day < (now() - interval '90 days')::date");
     },
-    aiStatus: () => ai.describe(),
+    aiStatus: () => [...ai.describe(), ...assistant.describe()],
   };
 }

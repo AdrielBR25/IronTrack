@@ -246,3 +246,17 @@ Limite de 5 testes por minuto por conta. Nada é consultado ao abrir a tela.
 Cotas padrão por conta: 6 pedidos/min, 50 pedidos/dia, 20.000 tokens/dia, 1 pedido simultâneo; entrada de até
 24.000 caracteres. Perguntas e respostas nunca são gravadas nem registradas em log.
 
+
+## 13. Assistente IA central com OpenAI (Fase 00)
+
+Detalhes em [IA_CENTRAL.md](IA_CENTRAL.md). No serviço **irontrack-api** (nunca no irontrack-web):
+
+| Variável | Obrigatória | Valor |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | sim | chave da API da OpenAI (`sk-…`/`sk-proj-…`), sem aspas. Assinatura do ChatGPT não serve. |
+| `AI_REQUIRE_VERIFIED_EMAIL` | não | `false` enquanto o e-mail (Resend) não estiver configurado; senão o assistente pede e-mail confirmado. |
+| `ASSISTANT_ENABLED` | não | `false` desliga o assistente central. |
+| `ASSISTANT_CONFIG_JSON` | não | substitui `services/api/config/assistant.json` (modelos e limites). |
+
+A migração `0002_assistant.sql` cria só tabelas novas e roda no preDeploy, como a 0001. Depois de implantar, o log de
+inicialização mostra `Assistente: OpenAI — chave em OPENAI_API_KEY configurada; ainda não validada`.

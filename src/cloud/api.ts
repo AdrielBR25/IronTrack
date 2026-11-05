@@ -5,6 +5,7 @@ import { API_ERRORS, CSRF_HEADER, CSRF_VALUE } from '@shared/api/errors.ts';
 import type { AccountInfo, ServerFeatures, SessionInfo } from '@shared/api/auth.ts';
 import type { PullResponse, PushResponse, SyncOp } from '@shared/sync/protocol.ts';
 import { SYNC_PROTOCOL } from '@shared/sync/protocol.ts';
+import type { ActionView, AssistantStatusView, ConversationSummaryView, ConversationView, MemoryView, StreamEvent } from '@shared/assistant/protocol.ts';
 import { API_BASE } from './config';
 
 export class ApiClientError extends Error {
@@ -105,4 +106,92 @@ export const api = {
     apiRequest<PushResponse>('POST', '/sync/push', { protocol: SYNC_PROTOCOL, accountId, deviceId, ops }, { timeoutMs: 45_000, ...(signal ? { signal } : {}) }),
   pull: (accountId: string, cursor: string, signal?: AbortSignal) =>
     apiRequest<PullResponse & { reset?: boolean }>('GET', `/sync/pull?cursor=${encodeURIComponent(cursor)}&accountId=${encodeURIComponent(accountId)}`, undefined, { timeoutMs: 45_000, ...(signal ? { signal } : {}) }),
+};
+
+// ------------------------------------------------------------------ Assistente IA central (Fase 00)
+
+/**
+ * POST com resposta em streaming (text/event-stream) do assistente. Mesma origem, cookie da sessão e anti-CSRF.
+ * Erros antes do streaming chegam como JSON (ApiClientError). Cada evento `data:` é entregue a `onEvent`.
+ */
+export async function apiStream(path: string, body: unknown, onEvent: (ev: unknown) => void, signal: AbortSignal): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers: { accept: 'text/event-stream', 'content-type': 'application/json', [CSRF_HEADER]: CSRF_VALUE },
+      body: JSON.stringify(body),
+      credentials: 'same-origin',
+      cache: 'no-store',
+      redirect: 'error',
+      signal,
+    });
+  } catch {
+    if (signal.aborted) throw new ApiClientError('cancelled', 0, 'Resposta interrompida.');
+    throw new ApiClientError('network', 0, NETWORK_MESSAGE);
+  }
+  if (!(res.headers.get('content-type') ?? '').startsWith('text/event-stream')) {
+    const text = await res.text().catch(() => '');
+    let parsed: { error?: { code?: string; message?: string } } | undefined;
+    try {
+      parsed = text ? JSON.parse(text) : undefined;
+    } catch {
+      parsed = undefined;
+    }
+    if (!parsed?.error?.code) throw new ApiClientError(res.status === 404 ? 'api_unavailable' : 'http_error', res.status, 'O servidor respondeu com um erro inesperado.');
+    const retry = Number(res.headers.get('retry-after'));
+    throw new ApiClientError(parsed.error.code, res.status, parsed.error.message ?? 'Erro.', { ...(Number.isFinite(retry) && retry > 0 ? { retryAfter: retry } : {}), body: parsed });
+  }
+  const reader = res.body?.getReader();
+  if (!reader) return;
+  const decoder = new TextDecoder();
+  let buf = '';
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let i: number;
+      while ((i = buf.indexOf('\n\n')) >= 0) {
+        const block = buf.slice(0, i);
+        buf = buf.slice(i + 2);
+        const data = block
+          .split('\n')
+          .filter((l) => l.startsWith('data: '))
+          .map((l) => l.slice(6))
+          .join('\n');
+        if (!data) continue;
+        try {
+          onEvent(JSON.parse(data));
+        } catch {
+          /* evento malformado: ignorado */
+        }
+      }
+    }
+  } catch {
+    if (signal.aborted) throw new ApiClientError('cancelled', 0, 'Resposta interrompida.');
+    throw new ApiClientError('network', 0, 'A conexão caiu durante a resposta. O que já chegou foi mantido.');
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+}
+
+export const assistantApi = {
+  status: () => apiRequest<AssistantStatusView>('GET', '/assistant/status', undefined, { timeoutMs: 10_000 }),
+  acceptNotice: (version: number) => apiRequest<AssistantStatusView>('POST', '/assistant/notice', { version }),
+  test: (model?: string) => apiRequest<{ result: string; model: string; health: string; paid: false }>('POST', '/assistant/test', model ? { model } : {}, { timeoutMs: 15_000 }),
+  conversations: () => apiRequest<{ conversations: ConversationSummaryView[] }>('GET', '/assistant/conversations'),
+  conversation: (id: string) => apiRequest<{ conversation: ConversationView }>('GET', `/assistant/conversations/${encodeURIComponent(id)}`),
+  rename: (id: string, title: string) => apiRequest<{ title: string }>('PATCH', `/assistant/conversations/${encodeURIComponent(id)}`, { title }),
+  remove: (id: string) => apiRequest<void>('DELETE', `/assistant/conversations/${encodeURIComponent(id)}`),
+  removeAll: () => apiRequest<{ deleted: number }>('DELETE', '/assistant/conversations'),
+  send: (conversationId: string | null, body: { content: string; model?: string; timezone?: string }, onEvent: (ev: StreamEvent) => void, signal: AbortSignal) =>
+    apiStream(`/assistant/conversations/${conversationId ? encodeURIComponent(conversationId) : 'new'}/messages`, body, (e) => onEvent(e as StreamEvent), signal),
+  action: (id: string) => apiRequest<{ action: ActionView }>('GET', `/assistant/actions/${encodeURIComponent(id)}`),
+  approve: (id: string) => apiRequest<{ action: ActionView }>('POST', `/assistant/actions/${encodeURIComponent(id)}/approve`, {}),
+  reject: (id: string) => apiRequest<{ action: ActionView }>('POST', `/assistant/actions/${encodeURIComponent(id)}/reject`, {}),
+  memories: () => apiRequest<{ memories: MemoryView[]; max: number }>('GET', '/assistant/memories'),
+  addMemory: (content: string) => apiRequest<{ memories: MemoryView[] }>('POST', '/assistant/memories', { content }),
+  removeMemory: (id: string) => apiRequest<void>('DELETE', `/assistant/memories/${encodeURIComponent(id)}`),
+  removeAllMemories: () => apiRequest<{ deleted: number }>('DELETE', '/assistant/memories'),
 };

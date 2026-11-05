@@ -32,7 +32,7 @@ const PerformancePage = lazy(() => import('@/pages/PerformancePage'));
 const ExercisePerformancePage = lazy(() => import('@/pages/ExercisePerformancePage'));
 import { useSettings } from '@/hooks/data';
 // P21: contas e sincronização (só com VITE_ACCOUNTS=on; sem isso as rotas nem existem).
-import { ACCOUNTS_ENABLED } from '@/cloud/config';
+import { ACCOUNTS_ENABLED, accountModeActive } from '@/cloud/config';
 import * as Cloud from '@/cloud/ui/routes';
 
 export default function App() {
@@ -69,7 +69,8 @@ export default function App() {
           <Route path="/metas" element={<TrainingGoalsPage />} />
           <Route path="/planejamento" element={<WeeklyPlannerPage />} />
           <Route path="/planejamento/importar" element={<LegacyImportPage />} />
-          <Route path="/assistente" element={<AIAssistantPage />} />
+          {/* Fase 00: no modo conta, o assistente é o chat central da conta (OpenAI pelo servidor); sem conta, o de antes. */}
+          <Route path="/assistente" element={accountModeActive() ? <Cloud.AssistantChatPage /> : <AIAssistantPage />} />
           <Route path="/config" element={<SettingsPage />} />
           {ACCOUNTS_ENABLED && (
             <>
@@ -82,6 +83,8 @@ export default function App() {
               <Route path="/conta/redefinir-senha" element={<Cloud.ResetRoute />} />
               <Route path="/conta/verificar-email" element={<Cloud.VerifyRoute />} />
               <Route path="/conta/termos" element={<Cloud.TermsRoute />} />
+              <Route path="/assistente/privacidade" element={<Cloud.AssistantPrivacyPage />} />
+              <Route path="/assistente/classico" element={<AIAssistantPage />} />
             </>
           )}
           <Route path="*" element={<HomePage />} />
