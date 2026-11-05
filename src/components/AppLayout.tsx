@@ -10,7 +10,9 @@ import { Suspense, useEffect } from 'react';
 import { SyncStatusChip } from '@/cloud/ui/SyncStatusChip';
 import { ImportOffer } from '@/cloud/ui/ImportOffer';
 import { useAccountPointer } from '@/cloud/accountPointer';
-import { ACCOUNTS_ENABLED } from '@/cloud/config';
+import { ACCOUNTS_ENABLED, accountModeActive } from '@/cloud/config';
+import { LifeSyncWatcher, RewardFx } from '@/cloud/life/ui';
+import { LIFE_NAV, type NavItem } from '@/cloud/life/nav';
 
 /** P21: onde os dados ficam (texto do rodapé lateral). */
 function StorageNote() {
@@ -25,7 +27,8 @@ function StorageNote() {
   return <p className="px-2 text-xs text-muted-foreground">Dados salvos só neste navegador.</p>;
 }
 
-export const NAV: { to: string; label: string; icon: typeof Home; end?: boolean; title?: string; ariaLabel?: string; also?: string[] }[] = [
+
+export const NAV: NavItem[] = [
   { to: '/', label: 'Início', icon: Home, end: true },
   // P13: o planejamento semanal (#/planejamento) fica dentro de Treinos, sem novo item na barra.
   // P17: a biblioteca de exercícios (#/exercicios) também (a barra do celular já tem 6 itens em 360 px).
@@ -46,8 +49,8 @@ function ActivePill() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const now = useNow(1000, !!session);
-  // Na tela inicial o cartão principal já mostra CONTINUAR TREINO.
-  if (!session || pathname === '/') return null;
+  // Na tela inicial (e no painel de treino do modo conta) o cartão principal já mostra CONTINUAR TREINO.
+  if (!session || pathname === '/' || pathname === '/treinar') return null;
   const p = sessionProgress(session);
   const rest = session.rest ? remainingMs(session.rest, now) : 0;
   return (
@@ -73,6 +76,8 @@ function ActivePill() {
 
 export function AppLayout() {
   const { pathname } = useLocation();
+  const life = accountModeActive();
+  const nav = life ? LIFE_NAV : NAV;
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, [pathname]);
@@ -84,7 +89,7 @@ export function AppLayout() {
           <Logo />
         </div>
         <nav className="mt-6 flex flex-col gap-1" aria-label="Principal">
-          {NAV.map(({ to, label, icon: Icon, end, title, also }) => (
+          {nav.map(({ to, label, icon: Icon, end, title, also }) => (
             <NavLink
               key={to}
               to={to}
@@ -123,14 +128,21 @@ export function AppLayout() {
         </div>
       </main>
 
+      {life && (
+        <>
+          <RewardFx />
+          <LifeSyncWatcher />
+        </>
+      )}
+
       {/* Barra inferior (celular) */}
       <div className="fixed inset-x-0 bottom-0 z-40 md:hidden">
         <div className="px-3 pb-2">
           <ActivePill />
         </div>
         <nav className="border-t border-border/60 bg-background/95 pb-safe backdrop-blur-2xl backdrop-saturate-150" aria-label="Principal">
-          <ul className="grid grid-cols-6">
-            {NAV.map(({ to, label, icon: Icon, end, ariaLabel, also }) => (
+          <ul className={cn('grid', life ? 'grid-cols-5' : 'grid-cols-6')}>
+            {nav.map(({ to, label, icon: Icon, end, ariaLabel, also }) => (
               <li key={to}>
                 <NavLink
                   to={to}

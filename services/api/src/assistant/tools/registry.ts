@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { MAX_MEMORIES, savePreferenceArgsSchema } from '../../../../../shared/assistant/protocol.ts';
 import { bodyModule, goalsModule } from './progress.ts';
+import { lifeModule } from './life.ts';
 import { trainingModule } from './training.ts';
 import { ToolError, type ActionHandler, type AiModuleDef, type AiTool, type WriteTool } from './types.ts';
 
@@ -31,7 +32,12 @@ const preferenceHandler: ActionHandler = {
     if ((n.rows[0]?.n ?? 0) >= MAX_MEMORIES) throw new ToolError('memory_limit', 'Limite de preferências salvas atingido.');
     const id = randomUUID();
     await c.query("INSERT INTO assistant_memories (id, user_id, content, source) VALUES ($1, $2, $3, 'ai_approved')", [id, ctx.userId, content]);
-    return { collection: 'memories', entityId: id, summary: `Preferência salva: "${content}"` };
+    return { collection: 'memories', entityId: id, summary: `Preferência salva: "${content}"`, undo: { id } };
+  },
+  async undo(c, ctx, _a, u) {
+    const { id } = u as { id: string };
+    await c.query('DELETE FROM assistant_memories WHERE user_id = $1 AND id = $2', [ctx.userId, id]);
+    return { summary: 'Preferência removida.' };
   },
 };
 
@@ -40,20 +46,19 @@ const memoryModule: AiModuleDef = { id: 'assistant_memory', name: 'Preferências
 /** Contratos dos módulos futuros (sem ferramentas ainda). Ver docs/IA_CENTRAL.md §7. */
 const PLANNED: AiModuleDef[] = [
   { id: 'nutrition', name: 'Alimentação e nutrição', status: 'planned', scope: 'refeições, calorias, macronutrientes, plano alimentar', tools: [], actions: [] },
-  { id: 'habits', name: 'Hábitos e rotinas', status: 'planned', scope: 'hábitos diários, sequências, rotinas', tools: [], actions: [] },
-  { id: 'missions', name: 'Missões e desafios', status: 'planned', scope: 'missões, desafios e recompensas', tools: [], actions: [] },
-  { id: 'gamification', name: 'XP, níveis e conquistas', status: 'planned', scope: 'pontos de experiência, níveis, conquistas', tools: [], actions: [] },
+  // Fase 01: hábitos, rotinas, missões, XP, níveis e conquistas passaram a existir (lifeModule).
   { id: 'learning', name: 'Leitura e estudos', status: 'planned', scope: 'livros, leituras, sessões de estudo', tools: [], actions: [] },
-  { id: 'reflections', name: 'Reflexões e metas pessoais', status: 'planned', scope: 'diário, reflexões, metas de vida', tools: [], actions: [] },
+  { id: 'reflections', name: 'Bíblia, reflexões e metas de longo prazo', status: 'planned', scope: 'planos de leitura bíblica, diário, reflexões, metas de meses/anos', tools: [], actions: [] },
+  { id: 'meal_photo', name: 'Reconhecimento de refeições por foto', status: 'planned', scope: 'foto da refeição → registro', tools: [], actions: [] },
 ];
 
-export const MODULES: readonly AiModuleDef[] = [trainingModule, goalsModule, bodyModule, memoryModule, ...PLANNED];
+export const MODULES: readonly AiModuleDef[] = [trainingModule, goalsModule, bodyModule, lifeModule, memoryModule, ...PLANNED];
 
 const listModules: AiTool = {
   kind: 'read',
   name: 'list_app_modules',
   label: 'Consultando os módulos do app',
-  description: 'Lista os módulos do IronTrack e se já estão disponíveis para a IA ou só planejados. Use quando perguntarem sobre algo fora de treino, metas e medidas (ex.: alimentação, hábitos).',
+  description: 'Lista os módulos do IronTrack e se já estão disponíveis para a IA ou só planejados. Use quando perguntarem sobre algo fora de treino, metas, medidas e RPG (ex.: alimentação, leitura de livros).',
   parameters: { type: 'object', properties: {}, additionalProperties: false },
   args: z.object({}).strict(),
   async run() {

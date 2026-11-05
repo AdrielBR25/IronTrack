@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { createRoutineArgsSchema, updateRoutineArgsSchema, type PreviewSection } from '../../../../../shared/assistant/protocol.ts';
-import { lockRow, lockUserSeq, normalizeRecord, saveUserSeq, writeRow } from '../../modules/records.ts';
+import { deleteRow, lockRow, lockUserSeq, normalizeRecord, saveRevision, saveUserSeq, writeRow } from '../../modules/records.ts';
 import { exerciseStats, loadCompletedSessions, loadRoutine, loadRoutines, loadSession, loadSettings, normalizeName, performedExercises, recordCounts, type SessionDoc } from './records.ts';
 import { applyRoutineChanges, describeExercise, generateIds, toWorkout, type GeneratedIds } from './routineEdit.ts';
 import { addDays, localDate, localMidnight } from './time.ts';
@@ -342,7 +342,20 @@ const createHandler: ActionHandler = {
     );
     await writeRow(c, 'routines', ctx.userId, id, doc, 1, seq + 1, null);
     await saveUserSeq(c, ctx.userId, seq + 1);
-    return { collection: 'routines', entityId: id, summary: `Ficha "${a.name}" criada (${a.workouts.length} treino(s)).` };
+    return { collection: 'routines', entityId: id, summary: `Ficha "${a.name}" criada (${a.workouts.length} treino(s)).`, undo: { version: 1 } };
+  },
+  // Desfazer = excluir a ficha criada, se ninguém a alterou depois (a versão anterior vai para record_revisions).
+  async undo(c, ctx, action, u) {
+    const { version } = u as { version: number };
+    const id = (action.payload as { ids: GeneratedIds }).ids.routine!;
+    const { seq } = await lockUserSeq(c, ctx.userId);
+    const cur = await lockRow(c, 'routines', ctx.userId, id);
+    if (!cur || cur.deleted) return { summary: 'A ficha já tinha sido excluída.' };
+    if (cur.version !== version) throw new StaleError();
+    await saveRevision(c, ctx.userId, 'routines', id, cur, 'delete', null);
+    await deleteRow(c, 'routines', ctx.userId, id, cur.version + 1, seq + 1, null);
+    await saveUserSeq(c, ctx.userId, seq + 1);
+    return { summary: `Ficha "${String(cur.doc.name)}" excluída.` };
   },
 };
 
@@ -359,7 +372,20 @@ const updateHandler: ActionHandler = {
     const normalized = normalizeRecord('routines', a.routineId, doc, dataProfileId);
     await writeRow(c, 'routines', ctx.userId, a.routineId, normalized, cur.version + 1, seq + 1, null);
     await saveUserSeq(c, ctx.userId, seq + 1);
-    return { collection: 'routines', entityId: a.routineId, summary: `Ficha "${String(normalized.name)}" atualizada (${a.changes.length} alteração(ões)).` };
+    return { collection: 'routines', entityId: a.routineId, summary: `Ficha "${String(normalized.name)}" atualizada (${a.changes.length} alteração(ões)).`, undo: { before: cur.doc, version: cur.version + 1 } };
+  },
+  // Desfazer = gravar de novo a ficha anterior como versão nova (sincroniza para os aparelhos), se não mudou depois.
+  async undo(c, ctx, action, u) {
+    const { before, version } = u as { before: Record<string, unknown>; version: number };
+    const id = action.targetId!;
+    const { seq, dataProfileId } = await lockUserSeq(c, ctx.userId);
+    const cur = await lockRow(c, 'routines', ctx.userId, id);
+    if (!cur || cur.deleted || cur.version !== version) throw new StaleError();
+    const doc = normalizeRecord('routines', id, { ...before, updatedAt: ctx.now }, dataProfileId);
+    await saveRevision(c, ctx.userId, 'routines', id, cur, 'conflict_resolution', null);
+    await writeRow(c, 'routines', ctx.userId, id, doc, cur.version + 1, seq + 1, null);
+    await saveUserSeq(c, ctx.userId, seq + 1);
+    return { summary: `Ficha "${String(doc.name)}" voltou como estava.` };
   },
 };
 

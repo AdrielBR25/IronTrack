@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ASSISTANT_ERROR_MESSAGES, type ActionView, type AssistantStatusView, type ConversationSummaryView, type MessageView, type StreamEvent } from '@shared/assistant/protocol.ts';
 import { ApiClientError, assistantApi } from '../api';
 import { getSyncEngine } from '../syncEngine';
+import { invalidateLife } from '../life/api';
 
 export interface LiveTool {
   name: string;
@@ -189,8 +190,9 @@ export function useAssistantChat() {
         if (approve) await syncQuick(8000);
         const { action } = approve ? await assistantApi.approve(id) : await assistantApi.reject(id);
         setActions((a) => ({ ...a, [id]: action }));
-        // Traz a ficha nova/alterada para o aparelho.
+        // Traz a ficha nova/alterada para o aparelho; telas do RPG recarregam.
         if (approve) void getSyncEngine()?.syncNow();
+        if (approve) invalidateLife();
         if (current.current) {
           const { conversation } = await assistantApi.conversation(current.current);
           setMessages(conversation.messages);
@@ -212,6 +214,25 @@ export function useAssistantChat() {
     },
     [],
   );
+
+  /** Fase 01: desfaz uma proposta aplicada (o servidor recusa se o item mudou depois). */
+  const undo = useCallback(async (id: string): Promise<ActionView | null> => {
+    try {
+      const { action } = await assistantApi.undo(id);
+      setActions((a) => ({ ...a, [id]: action }));
+      void getSyncEngine()?.syncNow();
+      invalidateLife();
+      if (current.current) {
+        const { conversation } = await assistantApi.conversation(current.current);
+        setMessages(conversation.messages);
+        setActions(Object.fromEntries(conversation.actions.map((a) => [a.id, a])));
+      }
+      return action;
+    } catch (e) {
+      setError(errorMessage(e));
+      return null;
+    }
+  }, []);
 
   const rename = useCallback(
     async (id: string, t: string) => {
@@ -236,7 +257,7 @@ export function useAssistantChat() {
     setStatus(await assistantApi.acceptNotice(status.notice.version));
   }, [status]);
 
-  return { status, statusError, refreshStatus, conversations, conversationId, title, messages, actions, streaming, error, setError, model, setModel, loadingConversation, open, send, stop, decide, rename, remove, acceptNotice };
+  return { status, statusError, refreshStatus, conversations, conversationId, title, messages, actions, streaming, error, setError, model, setModel, loadingConversation, open, send, stop, decide, undo, rename, remove, acceptNotice };
 }
 
 export type AssistantChat = ReturnType<typeof useAssistantChat>;

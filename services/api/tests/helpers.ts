@@ -45,7 +45,7 @@ export const fakeAnthropic = (behavior: { text?: string; fail?: boolean } = {}):
 
 export async function setupApi(
   env: Record<string, string> = {},
-  opts: { adapter?: UpstreamAdapter; providerKey?: string | null; fetch?: FetchLike; serviceEnv?: Record<string, string>; assistant?: ApiOptions['assistant'] } = {},
+  opts: { adapter?: UpstreamAdapter; providerKey?: string | null; fetch?: FetchLike; serviceEnv?: Record<string, string>; assistant?: ApiOptions['assistant']; lifeNow?: () => number } = {},
 ): Promise<TestEnv> {
   const admin = adminUrl();
   const dbName = `it_${randomBytes(6).toString('hex')}`;
@@ -77,7 +77,7 @@ export async function setupApi(
     error: (w, e) => write(JSON.stringify({ w, e: String(e) })),
   };
   const providerKey = opts.providerKey === undefined ? 'sk-ant-teste-chave-secreta-0000000000' : opts.providerKey;
-  const api = createApi({ cfg, pool, logger, env: { ...(providerKey ? { ANTHROPIC_API_KEY: providerKey } : {}), ...opts.serviceEnv }, ...(opts.assistant ? { assistant: opts.assistant } : {}), ai: { adapters: { anthropic: opts.adapter ?? fakeAnthropic() }, fetch: opts.fetch ?? (async () => new Response('{}', { status: 200 })) } });
+  const api = createApi({ cfg, pool, logger, env: { ...(providerKey ? { ANTHROPIC_API_KEY: providerKey } : {}), ...opts.serviceEnv }, ...(opts.assistant ? { assistant: opts.assistant } : {}), ...(opts.lifeNow ? { lifeNow: opts.lifeNow } : {}), ai: { adapters: { anthropic: opts.adapter ?? fakeAnthropic() }, fetch: opts.fetch ?? (async () => new Response('{}', { status: 200 })) } });
   await new Promise<void>((r) => api.server.listen(0, '127.0.0.1', () => r()));
   const addr = api.server.address();
   const base = `http://127.0.0.1:${addr && typeof addr === 'object' ? addr.port : 0}`;

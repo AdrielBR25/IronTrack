@@ -7,6 +7,7 @@ import {
   ASSISTANT_ERROR_MESSAGES,
   ASSISTANT_NOTICE_VERSION,
   ASSISTANT_PROTOCOL,
+  UNDO_WINDOW_HOURS,
   MAX_MEMORY_CHARS,
   MAX_MEMORIES,
   MAX_TITLE_CHARS,
@@ -18,7 +19,7 @@ import {
 } from '../../../../shared/assistant/protocol.ts';
 import type { ApiConfig } from '../config.ts';
 import { withTx, type Pool } from '../db/pool.ts';
-import { ApiError, readJson, type RequestCtx, type Router } from '../http/core.ts';
+import { ApiError, isApiError, readJson, type RequestCtx, type Router } from '../http/core.ts';
 import type { Logger } from '../lib/log.ts';
 import { loadAssistantConfig, openAiKeyFormatOk, type AssistantConfig } from './config.ts';
 import { runTurn, summarize, utcDay, type EngineDeps } from './engine.ts';
@@ -257,15 +258,42 @@ export function createAssistantModule(d: AssistantDeps): AssistantModule {
       try {
         const applied = await handler.apply(c, { pool: d.pool, userId: a.userId, dataProfileId: a.dataProfileId, timezone: DEFAULT_TZ, now: now() }, { id: row.id, kind: row.kind, payload: row.payload, targetId: row.target_id, baseVersion: row.base_version });
         await c.query('RELEASE SAVEPOINT apply');
-        await c.query("UPDATE assistant_actions SET status = 'applied', decided_at = now(), result = $2 WHERE id = $1", [row.id, JSON.stringify({ collection: applied.collection, entityId: applied.entityId })]);
+        await c.query("UPDATE assistant_actions SET status = 'applied', decided_at = now(), result = $2, undo_data = $3 WHERE id = $1", [row.id, JSON.stringify({ collection: applied.collection, entityId: applied.entityId }), applied.undo === undefined || !handler.undo ? null : JSON.stringify(applied.undo)]);
         if (row.conversation_id) await S.insertMessage(c, { userId: a.userId, conversationId: row.conversation_id, role: 'event', content: `A pessoa aprovou e o app aplicou: ${applied.summary}` });
         return { row: (await S.getAction(c, a.userId, row.id))! };
       } catch (e) {
         await c.query('ROLLBACK TO SAVEPOINT apply');
-        const code = e instanceof StaleError ? 'action_stale' : e instanceof ToolError && e.code === 'memory_limit' ? 'memory_limit' : e instanceof ToolError || isZod(e) || isRecordError(e) ? 'action_invalid' : null;
+        const code = e instanceof StaleError ? 'action_stale' : e instanceof ToolError && e.code === 'memory_limit' ? 'memory_limit' : e instanceof ToolError || isZod(e) || isRecordError(e) || isApiError(e) ? 'action_invalid' : null;
         if (!code) throw e;
         await c.query("UPDATE assistant_actions SET status = 'failed', decided_at = now(), error = $2 WHERE id = $1", [row.id, ASSISTANT_ERROR_MESSAGES[code]]);
         return { err: fail(code, code === 'action_stale' ? 409 : 422) };
+      }
+    });
+    if ('err' in result) return result.err!;
+    return { status: 200, body: { action: S.actionView(result.row, now()) } };
+  }
+
+  /** Desfazer (Fase 01): só propostas aplicadas, dentro do prazo, com handler e sem mudanças posteriores no item. */
+  async function undo(ctx: RequestCtx) {
+    const a = ctx.auth!;
+    const result = await withTx(d.pool, async (c) => {
+      const row = await S.getAction(c, a.userId, ctx.params.id, true);
+      if (!row) return { err: fail('not_found', 404) };
+      const handler = ACTION_HANDLERS.get(row.kind);
+      if (row.status !== 'applied' || row.undo_data == null || !handler?.undo || !row.decided_at || now() - row.decided_at.getTime() >= UNDO_WINDOW_HOURS * 3_600_000) return { err: fail('action_not_undoable', 409) };
+      await c.query('SAVEPOINT undo');
+      try {
+        const r = await handler.undo(c, { pool: d.pool, userId: a.userId, dataProfileId: a.dataProfileId, timezone: DEFAULT_TZ, now: now() }, { id: row.id, kind: row.kind, payload: row.payload, targetId: row.target_id, baseVersion: row.base_version }, row.undo_data);
+        await c.query('RELEASE SAVEPOINT undo');
+        await c.query("UPDATE assistant_actions SET status = 'reverted', reverted_at = now() WHERE id = $1", [row.id]);
+        if (row.conversation_id) await S.insertMessage(c, { userId: a.userId, conversationId: row.conversation_id, role: 'event', content: `A pessoa desfez a alteração "${row.title}". ${r.summary}` });
+        return { row: (await S.getAction(c, a.userId, row.id))! };
+      } catch (e) {
+        await c.query('ROLLBACK TO SAVEPOINT undo');
+        if (e instanceof StaleError) return { err: fail('action_undo_stale', 409) };
+        if (e instanceof ToolError && e.code === 'action_undo_blocked') return { err: fail('action_undo_blocked', 409) };
+        if (e instanceof ToolError || isApiError(e) || isZod(e) || isRecordError(e)) return { err: fail('action_not_undoable', 409) };
+        throw e;
       }
     });
     if ('err' in result) return result.err!;
@@ -382,6 +410,7 @@ export function createAssistantModule(d: AssistantDeps): AssistantModule {
       } });
       router.add({ method: 'POST', path: `${P}/actions/:id/approve`, auth: 'session', handler: (ctx) => decide(ctx, true) });
       router.add({ method: 'POST', path: `${P}/actions/:id/reject`, auth: 'session', handler: (ctx) => decide(ctx, false) });
+      router.add({ method: 'POST', path: `${P}/actions/:id/undo`, auth: 'session', handler: undo });
       router.add({ method: 'GET', path: `${P}/memories`, auth: 'session', handler: async (ctx) => ({ status: 200, body: { memories: await S.listMemories(d.pool, ctx.auth!.userId), max: MAX_MEMORIES } }) });
       router.add({
         method: 'POST',

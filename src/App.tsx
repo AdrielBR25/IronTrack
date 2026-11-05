@@ -34,6 +34,11 @@ import { useSettings } from '@/hooks/data';
 // P21: contas e sincronização (só com VITE_ACCOUNTS=on; sem isso as rotas nem existem).
 import { ACCOUNTS_ENABLED, accountModeActive } from '@/cloud/config';
 import * as Cloud from '@/cloud/ui/routes';
+// Fase 01: RPG de desenvolvimento pessoal (modo conta).
+const LifeHomePage = lazy(() => import('@/cloud/life/LifeHomePage'));
+const MissionsPage = lazy(() => import('@/cloud/life/MissionsPage'));
+const JourneyPage = lazy(() => import('@/cloud/life/JourneyPage'));
+const MorePage = lazy(() => import('@/cloud/life/MorePage'));
 
 export default function App() {
   const settings = useSettings();
@@ -54,7 +59,9 @@ export default function App() {
           }
         />
         <Route element={<AppLayout />}>
-          <Route path="/" element={<HomePage />} />
+          {/* Fase 01: no modo conta o Início é o painel do RPG; o painel de treino de antes fica em #/treinar. */}
+          <Route path="/" element={accountModeActive() ? <LifeHomePage /> : <HomePage />} />
+          <Route path="/treinar" element={<HomePage />} />
           <Route path="/treinos" element={<WorkoutsPage />} />
           <Route path="/treinos/:routineId/:workoutId" element={<WorkoutEditorPage />} />
           <Route path="/treinos/:routineId/:workoutId/substituir" element={<BulkReplacePage />} />
@@ -85,6 +92,9 @@ export default function App() {
               <Route path="/conta/termos" element={<Cloud.TermsRoute />} />
               <Route path="/assistente/privacidade" element={<Cloud.AssistantPrivacyPage />} />
               <Route path="/assistente/classico" element={<AIAssistantPage />} />
+              <Route path="/missoes" element={<MissionsPage />} />
+              <Route path="/jornada" element={<JourneyPage />} />
+              <Route path="/mais" element={<MorePage />} />
             </>
           )}
           <Route path="*" element={<HomePage />} />

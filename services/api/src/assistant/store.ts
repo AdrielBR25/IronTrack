@@ -1,7 +1,7 @@
 // Persistência do assistente no PostgreSQL: conversas, mensagens, memórias, propostas e cota. Toda consulta filtra
 // pela conta da sessão (`user_id`); um ID de outra conta simplesmente "não existe".
 import { randomUUID } from 'node:crypto';
-import type { ActionKind, ActionStatus, ActionView, ConversationSummaryView, MemoryView, MessageRole, MessageView, PreviewSection, ToolUseView } from '../../../../shared/assistant/protocol.ts';
+import { UNDO_WINDOW_HOURS, type ActionCollection, type ActionKind, type ActionStatus, type ActionView, type ConversationSummaryView, type MemoryView, type MessageRole, type MessageView, type PreviewSection, type ToolUseView } from '../../../../shared/assistant/protocol.ts';
 import type { Pool, PoolClient } from '../db/pool.ts';
 
 type Q = Pick<Pool | PoolClient, 'query'>;
@@ -40,8 +40,10 @@ export interface ActionRow {
   preview: PreviewSection[];
   target_id: string | null;
   base_version: number | null;
-  result: { collection: 'routines' | 'memories'; entityId: string } | null;
+  result: { collection: ActionCollection; entityId: string } | null;
   error: string | null;
+  undo_data: unknown;
+  reverted_at: Date | null;
   created_at: Date;
   expires_at: Date;
   decided_at: Date | null;
@@ -63,6 +65,8 @@ export function actionView(r: ActionRow, now: number): ActionView {
     decidedAt: r.decided_at?.toISOString() ?? null,
     result: r.result ? { collection: r.result.collection, entityId: r.result.entityId } : null,
     error: r.error,
+    undoable: r.status === 'applied' && r.undo_data != null && !!r.decided_at && now - r.decided_at.getTime() < UNDO_WINDOW_HOURS * 3_600_000,
+    revertedAt: r.reverted_at?.toISOString() ?? null,
   };
 }
 

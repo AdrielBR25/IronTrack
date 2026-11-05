@@ -108,10 +108,17 @@ desconhecido ou argumento inválido volta como erro ao modelo sem executar nada.
 
 ## 7. Módulos futuros
 
-`tools/registry.ts` já declara os contratos (status `planned`, sem ferramentas): alimentação e nutrição, hábitos e
-rotinas, missões e desafios, XP/níveis/conquistas, leitura e estudos, reflexões e metas pessoais. Para ativar um
-módulo: criar o arquivo de ferramentas (`ReadTool`/`WriteTool`), os `ActionHandler` das escritas, incluir o tipo em
-`ActionKind` e no CHECK de `assistant_actions.kind` (nova migração) e trocar o status para `available`.
+`tools/registry.ts` declara os contratos. **Ativo desde a Fase 01:** RPG pessoal (hábitos, rotinas, missões,
+XP/níveis/conquistas), ver `docs/RPG_DESENVOLVIMENTO.md`. Ainda `planned`: alimentação/nutrição (incluindo foto da
+refeição), leitura e estudos, reflexões e metas pessoais. Para ativar um módulo: criar o arquivo de ferramentas
+(`ReadTool`/`WriteTool`), os `ActionHandler` das escritas (com `apply` e `undo`), incluir o tipo em `ActionKind` e no
+CHECK de `assistant_actions.kind` (nova migração) e trocar o status para `available`.
+
+**Desfazer (Fase 01):** ao aplicar, o handler devolve `undo` (estado anterior), gravado em `undo_data`. A pessoa pode
+desfazer em até 7 dias; se o item mudou depois, a reversão é recusada (`action_undo_stale`). Status final `reverted`.
+
+**Diagnóstico da OpenAI (Fase 01):** Privacidade → "Testar conexão" usa o endpoint existente de teste, que consulta
+`GET /v1/models/{modelo}` (gratuito, sem gerar texto) para cada modelo configurado e informa se a chave do servidor tem acesso.
 
 ## 8. Interface
 

@@ -21,6 +21,11 @@ export const API_ERRORS = {
   email_failed: { status: 502, message: 'Não foi possível enviar o e-mail agora. Tente novamente em alguns minutos.' },
   import_invalid: { status: 422, message: 'O conteúdo da importação é inválido. Nada foi gravado.' },
   import_state: { status: 409, message: 'Esta importação não está mais disponível para esta ação.' },
+  // IronTrack Life (Fase 01)
+  life_stale: { status: 409, message: 'Este item mudou em outro aparelho. Recarregue e tente de novo.' },
+  life_inactive: { status: 409, message: 'Esta atividade está pausada, arquivada ou encerrada.' },
+  life_date_not_allowed: { status: 422, message: 'Só é possível registrar hoje ou ontem.' },
+  life_limit: { status: 409, message: 'Limite de itens atingido.' },
   service_unavailable: { status: 503, message: 'Serviço temporariamente indisponível.' },
   timeout: { status: 504, message: 'O servidor demorou demais para responder.' },
   internal_error: { status: 500, message: 'Erro interno. Nada foi alterado.' },

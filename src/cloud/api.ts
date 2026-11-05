@@ -190,6 +190,7 @@ export const assistantApi = {
   action: (id: string) => apiRequest<{ action: ActionView }>('GET', `/assistant/actions/${encodeURIComponent(id)}`),
   approve: (id: string) => apiRequest<{ action: ActionView }>('POST', `/assistant/actions/${encodeURIComponent(id)}/approve`, {}),
   reject: (id: string) => apiRequest<{ action: ActionView }>('POST', `/assistant/actions/${encodeURIComponent(id)}/reject`, {}),
+  undo: (id: string) => apiRequest<{ action: ActionView }>('POST', `/assistant/actions/${encodeURIComponent(id)}/undo`, {}),
   memories: () => apiRequest<{ memories: MemoryView[]; max: number }>('GET', '/assistant/memories'),
   addMemory: (content: string) => apiRequest<{ memories: MemoryView[] }>('POST', '/assistant/memories', { content }),
   removeMemory: (id: string) => apiRequest<void>('DELETE', `/assistant/memories/${encodeURIComponent(id)}`),

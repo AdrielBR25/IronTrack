@@ -97,8 +97,12 @@ export const savePreferenceArgsSchema = z.object({ content: z.string().trim().mi
 
 // ------------------------------------------------------------------ visões devolvidas ao app
 
-export type ActionKind = 'create_routine' | 'update_routine' | 'save_preference';
-export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'expired' | 'failed';
+export type ActionKind = 'create_routine' | 'update_routine' | 'save_preference' | 'create_habit' | 'update_habit' | 'create_life_routine' | 'update_life_routine' | 'create_missions' | 'update_mission';
+export type ActionStatus = 'pending' | 'applied' | 'rejected' | 'expired' | 'failed' | 'reverted';
+/** Onde a proposta aplicada gravou (para o app abrir o item). */
+export type ActionCollection = 'routines' | 'memories' | 'habits' | 'life_routines' | 'missions';
+/** Prazo para desfazer uma proposta aplicada (Fase 01). */
+export const UNDO_WINDOW_HOURS = 168;
 
 /** Uma linha da prévia: o que muda, em linguagem do app. */
 export interface PreviewLine {
@@ -123,9 +127,12 @@ export interface ActionView {
   expiresAt: string;
   decidedAt: string | null;
   /** Depois de aplicada: o que foi gravado (para o app abrir a ficha). */
-  result: { collection: 'routines' | 'memories'; entityId: string } | null;
+  result: { collection: ActionCollection; entityId: string } | null;
   /** Motivo da falha ao aplicar (frase fixa). */
   error: string | null;
+  /** Fase 01: aplicada, dentro do prazo e com o necessário para desfazer. */
+  undoable: boolean;
+  revertedAt: string | null;
 }
 
 export interface ToolUseView {
@@ -242,6 +249,9 @@ export const ASSISTANT_ERROR_MESSAGES: Record<string, string> = {
   action_not_pending: 'Esta proposta já foi decidida ou expirou.',
   action_stale: 'A ficha mudou depois da proposta. Peça uma nova proposta ao assistente.',
   action_invalid: 'A proposta não passou na validação. Nada foi alterado.',
+  action_not_undoable: 'Esta alteração não pode mais ser desfeita (prazo encerrado ou sem suporte).',
+  action_undo_stale: 'O item mudou depois da alteração da IA. Desfaça manualmente para não perder o que mudou.',
+  action_undo_blocked: 'Uma das missões já foi concluída; desfazer apagaria XP legítimo. Cancele manualmente as outras.',
   memory_limit: 'Limite de memórias atingido. Apague alguma antes de salvar outra.',
   internal_error: 'Erro interno. Nada foi alterado.',
 };

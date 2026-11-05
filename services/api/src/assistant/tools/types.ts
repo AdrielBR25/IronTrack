@@ -4,7 +4,7 @@
 //    pessoa aprova (POST /api/v1/assistant/actions/:id/approve), pelo `ActionHandler` do mesmo tipo, revalidando tudo.
 // Não existe ferramenta genérica (SQL livre, comando, URL): só as funções registradas aqui, com argumentos validados.
 import type { z } from 'zod';
-import type { ActionKind, PreviewSection } from '../../../../../shared/assistant/protocol.ts';
+import type { ActionCollection, ActionKind, PreviewSection } from '../../../../../shared/assistant/protocol.ts';
 import type { Pool, PoolClient } from '../../db/pool.ts';
 
 export interface ToolContext {
@@ -62,7 +62,10 @@ export interface StoredAction {
 /** Aplica uma proposta aprovada dentro da transação da aprovação. Lança ToolError para recusar. */
 export interface ActionHandler {
   kind: ActionKind;
-  apply(c: PoolClient, ctx: ToolContext, action: StoredAction): Promise<{ collection: 'routines' | 'memories'; entityId: string; summary: string }>;
+  /** `undo` = o necessário para desfazer depois (estado anterior + versão gravada). */
+  apply(c: PoolClient, ctx: ToolContext, action: StoredAction): Promise<{ collection: ActionCollection; entityId: string; summary: string; undo?: unknown }>;
+  /** Desfaz uma aplicação (Fase 01). Lança StaleError se o registro mudou depois; ToolError para recusar. */
+  undo?(c: PoolClient, ctx: ToolContext, action: StoredAction, undo: unknown): Promise<{ summary: string }>;
 }
 
 export interface AiModuleDef {

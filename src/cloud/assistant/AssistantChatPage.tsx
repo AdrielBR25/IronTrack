@@ -2,9 +2,9 @@
 // streaming com Markdown, consulta aos registros reais por ferramentas e propostas de alteração que só são aplicadas
 // depois da aprovação explícita da pessoa. Detalhes de privacidade em #/assistente/privacidade.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Check, CircleAlert, History, Loader2, MessageSquarePlus, Paperclip, Pencil, SendHorizontal, Shield, Sparkles, Square, Trash2, Wrench, X } from 'lucide-react';
+import { Check, CircleAlert, History, Loader2, MessageSquarePlus, Paperclip, Pencil, SendHorizontal, Shield, Sparkles, Square, Trash2, Undo2, Wrench, X } from 'lucide-react';
 import { MAX_USER_MESSAGE_CHARS, type ActionView, type MessageView } from '@shared/assistant/protocol.ts';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -18,6 +18,8 @@ import { useAssistantChat, type AssistantChat, type LiveTool } from './useAssist
 
 export const SUGGESTIONS = [
   'Como foi minha evolução no supino nos últimos três meses?',
+  'Quais missões ainda faltam hoje?',
+  'Crie uma rotina matinal para mim.',
   'Qual foi meu treino mais recente?',
   'Quais metas ainda não cumpri?',
   'Com base nos meus registros, o que posso melhorar?',
@@ -183,8 +185,21 @@ function ConversationsDialog({ chat, open, onOpenChange }: { chat: AssistantChat
 const LINE_STYLE = { add: 'text-emerald-600 dark:text-emerald-400', remove: 'text-destructive', change: 'text-warn', info: 'text-muted-foreground' } as const;
 const LINE_MARK = { add: '+', remove: '−', change: '~', info: '·' } as const;
 
-function ProposalCard({ action, onDecide }: { action: ActionView; onDecide: (id: string, approve: boolean) => Promise<ActionView | null> }) {
-  const [busy, setBusy] = useState<'approve' | 'reject' | null>(null);
+const RESULT_LINK: Record<string, { to: string; label: string }> = {
+  routines: { to: '/treinos', label: 'Ver fichas' },
+  habits: { to: '/missoes?aba=habitos', label: 'Ver hábitos' },
+  life_routines: { to: '/missoes?aba=rotinas', label: 'Ver rotinas' },
+  missions: { to: '/missoes?aba=desafios', label: 'Ver missões' },
+};
+
+function ProposalCard({ action, onDecide, onUndo }: { action: ActionView; onDecide: (id: string, approve: boolean) => Promise<ActionView | null>; onUndo: (id: string) => Promise<ActionView | null> }) {
+  const [busy, setBusy] = useState<'approve' | 'reject' | 'undo' | null>(null);
+  const undo = async () => {
+    setBusy('undo');
+    const r = await onUndo(action.id);
+    setBusy(null);
+    if (r?.status === 'reverted') toast.success('Alteração desfeita.');
+  };
   const decide = async (approve: boolean) => {
     setBusy(approve ? 'approve' : 'reject');
     const r = await onDecide(action.id, approve);
@@ -200,7 +215,7 @@ function ProposalCard({ action, onDecide }: { action: ActionView; onDecide: (id:
           <p className="mt-0.5 text-sm font-semibold">{action.title}</p>
         </div>
         <Badge variant={action.status === 'applied' ? 'default' : action.status === 'pending' ? 'warn' : 'outline'} className="shrink-0">
-          {{ pending: 'Aguardando', applied: 'Aplicada', rejected: 'Cancelada', expired: 'Expirada', failed: 'Não aplicada' }[action.status]}
+          {{ pending: 'Aguardando', applied: 'Aplicada', rejected: 'Cancelada', expired: 'Expirada', failed: 'Não aplicada', reverted: 'Desfeita' }[action.status]}
         </Badge>
       </div>
       {action.rationale && (
@@ -236,10 +251,19 @@ function ProposalCard({ action, onDecide }: { action: ActionView; onDecide: (id:
             {busy === 'approve' ? <Loader2 className="animate-spin" aria-hidden /> : <Check aria-hidden />} Aprovar e aplicar
           </Button>
         </div>
-      ) : action.status === 'applied' && action.result?.collection === 'routines' ? (
-        <Button asChild variant="outline" size="sm">
-          <Link to="/treinos">Ver fichas</Link>
-        </Button>
+      ) : action.status === 'applied' ? (
+        <div className="flex flex-wrap gap-2">
+          {action.result && RESULT_LINK[action.result.collection] && (
+            <Button asChild variant="outline" size="sm">
+              <Link to={RESULT_LINK[action.result.collection].to}>{RESULT_LINK[action.result.collection].label}</Link>
+            </Button>
+          )}
+          {action.undoable && (
+            <Button variant="ghost" size="sm" disabled={!!busy} onClick={() => void undo()} data-testid="assistant-proposal-undo">
+              {busy === 'undo' ? <Loader2 className="animate-spin" aria-hidden /> : <Undo2 aria-hidden />} Desfazer
+            </Button>
+          )}
+        </div>
       ) : null}
     </Card>
   );
@@ -285,7 +309,7 @@ function Message({ m, chat }: { m: MessageView; chat: AssistantChat }) {
         </div>
       )}
       {actions.map((a) => (
-        <ProposalCard key={a.id} action={a} onDecide={chat.decide} />
+        <ProposalCard key={a.id} action={a} onDecide={chat.decide} onUndo={chat.undo} />
       ))}
     </li>
   );
@@ -309,7 +333,7 @@ function Streaming({ s, chat }: { s: { text: string; tools: LiveTool[] }; chat: 
         </p>
       </div>
       {pending.map((a) => (
-        <ProposalCard key={a.id} action={a} onDecide={chat.decide} />
+        <ProposalCard key={a.id} action={a} onDecide={chat.decide} onUndo={chat.undo} />
       ))}
     </li>
   );
@@ -317,7 +341,9 @@ function Streaming({ s, chat }: { s: { text: string; tools: LiveTool[] }; chat: 
 
 export default function AssistantChatPage() {
   const chat = useAssistantChat();
-  const [draft, setDraft] = useState('');
+  // Fase 01: atalhos do Início abrem o chat com a pergunta já escrita (#/assistente?q=…); nada é enviado sozinho.
+  const [params] = useSearchParams();
+  const [draft, setDraft] = useState(() => (params.get('q') ?? '').slice(0, MAX_USER_MESSAGE_CHARS));
   const [listOpen, setListOpen] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const bottom = useRef<HTMLDivElement>(null);

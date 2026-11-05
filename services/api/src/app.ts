@@ -18,6 +18,7 @@ import { createAssistantModule, type AssistantDeps } from './assistant/module.ts
 import { exportRoutes } from './modules/exporter.ts';
 import { importRoutes } from './modules/importer.ts';
 import { syncRoutes } from './modules/sync.ts';
+import { lifeRoutes } from './life/module.ts';
 
 export interface ApiOptions {
   cfg: ApiConfig;
@@ -29,6 +30,8 @@ export interface ApiOptions {
   ai?: Pick<AiDeps, 'fetch' | 'adapters' | 'now'>;
   /** Substituições do assistente central (testes: provedor OpenAI simulado). */
   assistant?: Pick<AssistantDeps, 'fetch' | 'provider' | 'now'>;
+  /** Relógio do RPG (testes: virada do dia, fuso). */
+  lifeNow?: () => number;
 }
 
 export interface Api {
@@ -73,6 +76,7 @@ export function createApi(o: ApiOptions): Api {
   syncRoutes(router, { pool, limiter });
   importRoutes(router, { pool, limiter });
   exportRoutes(router, { pool, limiter });
+  lifeRoutes(router, { pool, ...(o.lifeNow ? { now: o.lifeNow } : {}) });
   ai.register(router);
   assistant.register(router);
   if (cfg.testMode && cfg.env !== 'production' && mailer instanceof TestMailbox) testRoutes(router, mailer);

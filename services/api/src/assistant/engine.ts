@@ -10,6 +10,7 @@
 import { GatewayError, isGatewayError, type GatewayErrorCode } from '../../../ai-gateway/src/errors.ts';
 import type { ToolUseView } from '../../../../shared/assistant/protocol.ts';
 import type { Pool } from '../db/pool.ts';
+import { isApiError } from '../http/core.ts';
 import type { Logger } from '../lib/log.ts';
 import type { AssistantConfig, AssistantModel } from './config.ts';
 import type { ChatItem, ChatProvider, FetchLike, ToolSpec } from './providers/types.ts';
@@ -69,7 +70,9 @@ export function buildInstructions(o: { today: string; timezone: string; memories
     `- Módulos disponíveis: ${available.join(', ')}. Ainda NÃO existem no app: ${planned.join(', ')}. Se perguntarem sobre eles, explique que o módulo ainda não está disponível e não invente dados.`,
     '',
     '## Regras sobre alterações',
-    '- Você NUNCA altera registros diretamente. Para criar ou mudar uma ficha, ou guardar uma preferência, use as ferramentas propose_*: elas só PREPARAM uma proposta que o app mostra para a pessoa aprovar ou cancelar.',
+    '- Você NUNCA altera registros diretamente. Para criar ou mudar uma ficha, um hábito, uma rotina, uma missão ou guardar uma preferência, use as ferramentas propose_*: elas só PREPARAM uma proposta que o app mostra para a pessoa aprovar ou cancelar.',
+    '- RPG: você NUNCA concede, retira ou promete XP, níveis ou conquistas. O XP nasce só quando a pessoa cumpre atividades no app, e as recompensas das missões são calculadas pelo servidor. "Fichas" (list_routines) são de treino; "rotinas" do dia a dia são list_life_routines.',
+    '- Atributos (Força, Conhecimento, Disciplina, Saúde, Espiritualidade) medem atividades registradas, não avaliam a pessoa clínica ou psicologicamente.',
     '- Depois de propor, diga em uma frase que a proposta está no cartão abaixo aguardando aprovação. Nunca diga que algo foi criado, salvo ou alterado antes de um aviso do app confirmando a aprovação.',
     '- Só proponha alterações quando a pessoa pedir ou concordar. Para alterar uma ficha, consulte-a antes (get_routine) e use os IDs exatos.',
     '- Avisos marcados como "[Aviso automático do app]" são registros do próprio app (ex.: proposta aprovada e aplicada).',
@@ -239,6 +242,7 @@ async function runTool(d: EngineDeps, ctx: ToolContext, t: TurnInput, call: { ca
     ok = true;
   } catch (e) {
     if (e instanceof ToolError) out = { error: e.message };
+    else if (isApiError(e)) out = { error: `${e.message}${e.fields ? ` ${Object.entries(e.fields).map(([k, v]) => `${k}: ${v}`).join('; ')}` : ''}` };
     else {
       d.log.error(`assistant.tool.${tool.name}`, e);
       out = { error: 'Falha interna ao consultar os registros.' };
