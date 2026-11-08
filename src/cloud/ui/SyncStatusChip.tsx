@@ -36,7 +36,7 @@ export function SyncStatusChip({ className }: { className?: string }) {
       data-state={s.state}
       className={cn(
         'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        tone === 'ok' && 'bg-primary/15 text-primary',
+        tone === 'ok' && 'bg-secondary/70 text-muted-foreground',
         tone === 'busy' && 'bg-secondary text-secondary-foreground',
         tone === 'warn' && 'bg-warn/15 text-warn',
         tone === 'error' && 'bg-destructive/15 text-destructive',

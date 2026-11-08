@@ -3,7 +3,7 @@
 // origem (nada é copiado); aqui só se criam atividades personalizadas e ajustes de horário/ordem/situação.
 // Nada vira "concluído" porque o horário passou: só o registro real (ou a pessoa, nas atividades personalizadas).
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { AlertTriangle, ArrowDown, ArrowUp, BedDouble, ChevronLeft, ChevronRight, Clock, ExternalLink, Loader2, Plus, Sparkles, Trash2 } from 'lucide-react';
 import { AGENDA_CATEGORIES, CATEGORY_LABEL, CUSTOM_CATEGORIES, STATUS_LABEL, addMinutes, type AgendaCategory, type AgendaDay, type AgendaItem, type AgendaStatus } from '@shared/planner/protocol.ts';
@@ -304,6 +304,14 @@ export default function WeekPage() {
   const [sel, setSel] = useState<string | null>(null);
   const [open, setOpen] = useState<AgendaItem | null>(null);
   const [adding, setAdding] = useState(false);
+  // Fase 08: "Registrar → Atividade" chega com ?nova=1 e abre o formulário de nova atividade.
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    if (params.get('nova')) {
+      setAdding(true);
+      setParams({}, { replace: true });
+    }
+  }, [params, setParams]);
   const q = useLifeQuery(() => plannerApi.week(start ?? undefined), [start]);
   const w = q.data;
   const today = w?.today ?? null;

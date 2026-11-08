@@ -637,12 +637,18 @@ describe('arquitetura do modo nuvem (P21)', () => {
 });
 
 describe('arquitetura do RPG pessoal (Life Fase 01)', () => {
-  it('modo conta com 5 itens (Início, Semana, Evolução, IA, Mais); navegação local inalterada; telas sob demanda', () => {
+  it('modo conta: celular com Início, Semana, Registrar (+), IA e Mais; computador também com Evolução; telas sob demanda', () => {
+    // Fase 08: a barra do celular tem 4 destinos + o botão Registrar no meio (5 posições); a lateral tem 5 destinos.
     const nav = readFileSync(join(ROOT, 'cloud/life/nav.ts'), 'utf8');
-    expect((nav.match(/^\s*\{ to: '\//gm) ?? []).length).toBe(5);
-    for (const l of ['Início', 'Semana', 'Evolução', 'IA', 'Mais']) expect(nav).toContain(`label: '${l}'`);
+    const [mobile, desktop] = nav.split('export const LIFE_NAV_DESKTOP');
+    expect((mobile.match(/\bto: '\//g) ?? []).length).toBe(4);
+    expect((desktop.match(/\bto: '\//g) ?? []).length).toBe(5);
+    for (const l of ['Início', 'Semana', 'IA', 'Mais']) expect(mobile).toContain(`label: '${l}'`);
+    for (const l of ['Início', 'Semana', 'Evolução', 'IA', 'Mais']) expect(desktop).toContain(`label: '${l}'`);
+    const layout = readFileSync(join(ROOT, 'components/AppLayout.tsx'), 'utf8');
+    expect(layout).toContain('data-testid="nav-register"');
     const app = readFileSync(join(ROOT, 'App.tsx'), 'utf8');
-    for (const r of ['/missoes', '/jornada', '/mais', '/treinar', '/semana', '/minha-evolucao']) expect(app).toContain(`path="${r}"`);
+    for (const r of ['/missoes', '/jornada', '/mais', '/mais/:cat', '/treinar', '/semana', '/minha-evolucao']) expect(app).toContain(`path="${r}"`);
     expect(app).toMatch(/lazy\(\(\) => import\('@\/cloud\/life\/LifeHomePage'\)\)/);
   });
 });

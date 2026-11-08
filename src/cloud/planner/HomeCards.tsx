@@ -4,8 +4,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ArrowDown, ArrowUp, BookOpen, CalendarDays, ChevronRight, Dumbbell, History, Lightbulb, Loader2, Utensils } from 'lucide-react';
-import { CATEGORY_LABEL, HOME_CARD_LABEL, type HomeLayoutView, type TodayView } from '@shared/planner/protocol.ts';
+import { BookOpen, CalendarDays, Check, ChevronRight, Dumbbell, History, Lightbulb, Loader2, Utensils } from 'lucide-react';
+import { CATEGORY_LABEL, HOME_CARD_LABEL, HOME_CARDS_HIDDEN_BY_DEFAULT, normalizeLayout, type HomeLayoutView, type TodayView } from '@shared/planner/protocol.ts';
 import type { DashboardView } from '@shared/life/protocol.ts';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -14,6 +14,8 @@ import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { Bar } from '../life/ui';
 import { toastLifeError } from '../life/forms';
+import { lifeApi } from '../life/api';
+import { DEFAULT_QUICK, QUICK_ACTIONS, readQuick, saveQuick } from '../life/catalog';
 import { plannerApi } from './api';
 import { CATEGORY_COLOR, StatusBadge } from './WeekPage';
 
@@ -168,25 +170,71 @@ export function WeekLink() {
   );
 }
 
-/** Personalizar o Início: mostrar/ocultar e reordenar cartões (salvo na conta, vale em todos os aparelhos). */
-export function LayoutDialog({ open, layout, onOpenChange }: { open: boolean; layout: HomeLayoutView | undefined; onOpenChange: (o: boolean) => void }) {
-  const [cards, setCards] = useState(layout?.cards ?? []);
+/**
+ * Personalizar o Início (Fase 08): três partes num só lugar — objetivos (atalho do primeiro acesso), ações rápidas e
+ * cartões. Os cartões ficam salvos na conta (todos os aparelhos; a ordem salva é preservada); as ações rápidas, neste
+ * aparelho; a meta semanal de treinos, no perfil do RPG (mesma regra da Jornada).
+ */
+const AREAS = [
+  { id: 'treino', label: 'Treinar com constância', quick: 'treinar', cards: ['workout'] },
+  { id: 'alimentacao', label: 'Comer melhor', quick: 'refeicao', cards: ['nutrition'] },
+  { id: 'estudos', label: 'Estudar e ler mais', quick: 'foco', cards: ['knowledge'] },
+  { id: 'biblia', label: 'Ler a Bíblia', quick: 'biblia', cards: ['bible'] },
+  { id: 'habitos', label: 'Criar bons hábitos', quick: 'missoes', cards: ['today'] },
+] as const;
+
+export function LayoutDialog({
+  open,
+  layout,
+  onOpenChange,
+  focus = 'cards',
+  accountId,
+  weeklyWorkoutTarget = null,
+  onSaved,
+}: {
+  open: boolean;
+  layout: HomeLayoutView | undefined;
+  onOpenChange: (o: boolean) => void;
+  focus?: 'quick' | 'cards' | 'goals';
+  accountId?: string;
+  weeklyWorkoutTarget?: number | null;
+  onSaved?: () => void;
+}) {
+  const [cards, setCards] = useState(layout?.cards ?? normalizeLayout(null));
+  const [quick, setQuick] = useState<string[]>(() => readQuick(accountId));
+  const [areas, setAreas] = useState<string[]>([]);
+  const [target, setTarget] = useState<number | null>(weeklyWorkoutTarget);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    if (open && layout) setCards(layout.cards);
-  }, [open, layout]);
-  const move = (i: number, d: -1 | 1) => {
-    const j = i + d;
-    if (j < 0 || j >= cards.length) return;
-    const next = [...cards];
-    [next[i], next[j]] = [next[j], next[i]];
-    setCards(next);
+    if (!open) return;
+    setCards(layout?.cards ?? normalizeLayout(null));
+    setQuick(readQuick(accountId));
+    setAreas([]);
+    setTarget(weeklyWorkoutTarget);
+  }, [open, layout, accountId, weeklyWorkoutTarget]);
+  const toggleQuick = (id: string) => {
+    if (quick.includes(id)) setQuick(quick.filter((x) => x !== id));
+    else if (quick.length < 4) setQuick([...quick, id]);
+  };
+  const toggleArea = (id: string) => {
+    const next = areas.includes(id) ? areas.filter((x) => x !== id) : [...areas, id];
+    setAreas(next);
+    // Ações rápidas: as das áreas escolhidas primeiro, completadas pelo padrão.
+    const picked = AREAS.filter((a) => next.includes(a.id)).map((a) => a.quick as string);
+    setQuick([...new Set([...picked, ...DEFAULT_QUICK])].slice(0, 4));
+    // Cartões: liga os resumos das áreas escolhidas (nunca desliga nada sozinho).
+    const want = new Set(AREAS.filter((a) => next.includes(a.id)).flatMap((a) => a.cards as readonly string[]));
+    setCards((cur) => cur.map((c) => (want.has(c.id) ? { ...c, visible: true } : c)));
   };
   const save = async () => {
     setBusy(true);
     try {
-      await plannerApi.saveLayout(cards, layout?.version ?? 0);
-      toast.success('Início personalizado.');
+      const changed = JSON.stringify(cards) !== JSON.stringify(layout?.cards ?? normalizeLayout(null));
+      if (changed) await plannerApi.saveLayout(cards, layout?.version ?? 0);
+      if (quick.length === 4) saveQuick(accountId, quick);
+      if (focus === 'goals' && target !== weeklyWorkoutTarget) await lifeApi.patchProfile({ weeklyWorkoutTarget: target });
+      toast.success(focus === 'goals' ? 'Pronto! Seu Início foi ajustado aos seus objetivos.' : 'Início personalizado.');
+      onSaved?.();
       onOpenChange(false);
     } catch (e) {
       toastLifeError(e);
@@ -194,30 +242,85 @@ export function LayoutDialog({ open, layout, onOpenChange }: { open: boolean; la
       setBusy(false);
     }
   };
+  const chip = (on: boolean) =>
+    cn('flex min-h-[2.75rem] items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-medium ring-1 transition active:scale-[0.98]', on ? 'bg-primary/12 text-foreground ring-primary/60' : 'bg-secondary/50 text-muted-foreground ring-transparent hover:text-foreground');
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent data-testid="home-layout-dialog">
         <DialogHeader>
-          <DialogTitle>Personalizar Início</DialogTitle>
-          <DialogDescription>Escolha os cartões e a ordem. Vale para todos os seus aparelhos.</DialogDescription>
+          <DialogTitle>{focus === 'goals' ? 'Seus objetivos' : 'Personalizar Início'}</DialogTitle>
+          <DialogDescription>{focus === 'goals' ? 'Escolha o que importa agora. O Início se ajusta; dá para mudar depois.' : 'O padrão já mostra o essencial. Ajuste se quiser.'}</DialogDescription>
         </DialogHeader>
-        <ul className="max-h-[55vh] divide-y divide-border/60 overflow-y-auto">
-          {cards.map((c, i) => (
-            <li key={c.id} className="flex items-center gap-2 py-2">
-              <Switch checked={c.visible} onCheckedChange={(v) => setCards(cards.map((x) => (x.id === c.id ? { ...x, visible: v } : x)))} aria-label={`Mostrar ${HOME_CARD_LABEL[c.id]}`} />
-              <span className={cn('min-w-0 flex-1 truncate text-sm', !c.visible && 'text-muted-foreground')}>{HOME_CARD_LABEL[c.id]}</span>
-              <Button variant="ghost" size="icon-sm" aria-label={`Subir ${HOME_CARD_LABEL[c.id]}`} disabled={i === 0} onClick={() => move(i, -1)}>
-                <ArrowUp />
-              </Button>
-              <Button variant="ghost" size="icon-sm" aria-label={`Descer ${HOME_CARD_LABEL[c.id]}`} disabled={i === cards.length - 1} onClick={() => move(i, 1)}>
-                <ArrowDown />
-              </Button>
-            </li>
-          ))}
-        </ul>
+
+        {focus === 'goals' && (
+          <section className="space-y-2" aria-label="Objetivos">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {AREAS.map((a) => (
+                <button key={a.id} type="button" aria-pressed={areas.includes(a.id)} onClick={() => toggleArea(a.id)} className={chip(areas.includes(a.id))}>
+                  <span className={cn('flex h-5 w-5 shrink-0 items-center justify-center rounded-md border', areas.includes(a.id) ? 'border-primary bg-primary text-primary-foreground' : 'border-border')}>
+                    {areas.includes(a.id) && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+                  </span>
+                  {a.label}
+                </button>
+              ))}
+            </div>
+            {areas.includes('treino') && (
+              <label className="flex items-center justify-between gap-3 rounded-xl bg-secondary/40 px-3 py-2 text-sm">
+                Treinos por semana
+                <select value={target ?? ''} onChange={(e) => setTarget(e.target.value ? Number(e.target.value) : null)} className="h-9 rounded-lg border bg-background px-2 text-sm" aria-label="Meta semanal de treinos">
+                  <option value="">Automática</option>
+                  {[1, 2, 3, 4, 5, 6, 7].map((n) => (
+                    <option key={n} value={n}>
+                      {n}× semana
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </section>
+        )}
+
+        <section className="space-y-2" aria-labelledby="layout-quick">
+          <h3 id="layout-quick" className="text-xs font-medium text-muted-foreground">
+            Ações rápidas · escolha 4 ({quick.length}/4)
+          </h3>
+          <div className="grid grid-cols-2 gap-2" data-testid="layout-quick">
+            {QUICK_ACTIONS.map((a) => {
+              const on = quick.includes(a.id);
+              return (
+                <button key={a.id} type="button" aria-pressed={on} disabled={!on && quick.length >= 4} onClick={() => toggleQuick(a.id)} className={cn(chip(on), 'disabled:opacity-40')}>
+                  <a.icon className={cn('h-4 w-4 shrink-0', on ? 'text-primary' : '')} aria-hidden />
+                  <span className="truncate">{a.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        {focus !== 'goals' && (
+          <section className="space-y-1" aria-labelledby="layout-cards">
+            <div className="flex items-center justify-between">
+              <h3 id="layout-cards" className="text-xs font-medium text-muted-foreground">
+                O que aparece no Início
+              </h3>
+              <button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => setCards(cards.map((c) => ({ ...c, visible: !HOME_CARDS_HIDDEN_BY_DEFAULT.includes(c.id) })))}>
+                Restaurar padrão
+              </button>
+            </div>
+            <ul className="divide-y divide-border/50">
+              {cards.map((c) => (
+                <li key={c.id} className="flex items-center gap-3 py-2">
+                  <span className={cn('min-w-0 flex-1 truncate text-sm', !c.visible && 'text-muted-foreground')}>{HOME_CARD_LABEL[c.id]}</span>
+                  <Switch checked={c.visible} onCheckedChange={(v) => setCards(cards.map((x) => (x.id === c.id ? { ...x, visible: v } : x)))} aria-label={`Mostrar ${HOME_CARD_LABEL[c.id]}`} />
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
         <DialogFooter>
-          <Button className="w-full" disabled={busy} onClick={() => void save()} data-testid="home-layout-save">
-            {busy && <Loader2 className="animate-spin" />} Salvar
+          <Button className="w-full" disabled={busy || quick.length !== 4} onClick={() => void save()} data-testid="home-layout-save">
+            {busy && <Loader2 className="animate-spin" />} {quick.length !== 4 ? `Escolha mais ${4 - quick.length} ação(ões)` : 'Salvar'}
           </Button>
         </DialogFooter>
       </DialogContent>

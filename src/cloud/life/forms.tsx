@@ -161,8 +161,13 @@ const habitBody = (d: HabitDraft) => ({
 export function HabitDialog({ open, onOpenChange, habit, template }: { open: boolean; onOpenChange: (o: boolean) => void; habit?: HabitView | null; template?: HabitDraft | null }) {
   const [d, setD] = useState<HabitDraft>(() => (habit ? draftFromHabit(habit) : (template ?? draftFromTemplate({ name: '' }))));
   const [busy, setBusy] = useState(false);
+  // Fase 08: criar hábito sem formulário enorme — nome, frequência e meta; o resto fica em "Mais opções".
+  const [more, setMore] = useState(!!habit);
   useEffect(() => {
-    if (open) setD(habit ? draftFromHabit(habit) : (template ?? draftFromTemplate({ name: '' })));
+    if (open) {
+      setD(habit ? draftFromHabit(habit) : (template ?? draftFromTemplate({ name: '' })));
+      setMore(!!habit);
+    }
   }, [open, habit, template]);
   const set = (p: Partial<HabitDraft>) => setD((x) => ({ ...x, ...p }));
   const save = async () => {
@@ -200,8 +205,19 @@ export function HabitDialog({ open, onOpenChange, habit, template }: { open: boo
         </DialogHeader>
         <div className="space-y-4">
           <Field label="Nome">
-            <Input value={d.name} maxLength={60} onChange={(e) => set({ name: e.target.value })} placeholder="Ex.: Ler 20 minutos" autoFocus={!habit} />
+            <Input value={d.name} maxLength={60} onChange={(e) => set({ name: e.target.value })} placeholder="Ex.: Ler 20 minutos" autoFocus={!habit} aria-label="Nome do hábito" />
           </Field>
+          {!habit && !d.name.trim() && (
+            <div className="-mt-2 flex flex-wrap gap-1.5" aria-label="Sugestões">
+              {HABIT_TEMPLATES.map((t) => (
+                <button key={t.name} type="button" onClick={() => setD(draftFromTemplate(t))} className="rounded-full bg-secondary px-2.5 py-1 text-xs font-medium active:scale-95">
+                  {t.name}
+                </button>
+              ))}
+            </div>
+          )}
+          {more && (
+          <>
           <Field label="Ícone">
             <div className="grid grid-cols-10 gap-1">
               {ICONS.map((i) => {
@@ -234,6 +250,8 @@ export function HabitDialog({ open, onOpenChange, habit, template }: { open: boo
               </NativeSelect>
             </Field>
           </div>
+          </>
+          )}
           <Field label="Frequência">
             <Segmented
               value={d.frequency}
@@ -268,6 +286,8 @@ export function HabitDialog({ open, onOpenChange, habit, template }: { open: boo
               <Input value={d.goalUnit} maxLength={20} onChange={(e) => set({ goalUnit: e.target.value })} placeholder={d.goalKind === 'duration' ? 'min' : 'copos, páginas…'} aria-label="Unidade" />
             </div>
           )}
+          {more ? (
+          <>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Horário preferido">
               <Input type="time" value={d.preferredTime} onChange={(e) => set({ preferredTime: e.target.value })} />
@@ -279,6 +299,12 @@ export function HabitDialog({ open, onOpenChange, habit, template }: { open: boo
           <Field label="Descrição (opcional)">
             <Textarea value={d.description} maxLength={300} onChange={(e) => set({ description: e.target.value })} className="min-h-[60px]" />
           </Field>
+          </>
+          ) : (
+            <button type="button" onClick={() => setMore(true)} className="text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+              Mais opções (ícone, categoria, horário, XP)
+            </button>
+          )}
         </div>
         <DialogFooter className="gap-2">
           {habit && habit.status !== 'archived' && (

@@ -39,6 +39,8 @@ const LifeHomePage = lazy(() => import('@/cloud/life/LifeHomePage'));
 const MissionsPage = lazy(() => import('@/cloud/life/MissionsPage'));
 const JourneyPage = lazy(() => import('@/cloud/life/JourneyPage'));
 const MorePage = lazy(() => import('@/cloud/life/MorePage'));
+// Fase 08: cada categoria do Mais abre a própria página (poucos itens, voltar fácil).
+const MoreCategoryPage = lazy(() => import('@/cloud/life/MorePage').then((m) => ({ default: m.MoreCategoryPage })));
 const WeekPage = lazy(() => import('@/cloud/planner/WeekPage'));
 const LifeEvolutionPage = lazy(() => import('@/cloud/planner/EvolutionPage'));
 // Fase 02: alimentação (modo conta).
@@ -124,6 +126,7 @@ export default function App() {
               <Route path="/missoes" element={<MissionsPage />} />
               <Route path="/jornada" element={<JourneyPage />} />
               <Route path="/mais" element={<MorePage />} />
+              <Route path="/mais/:cat" element={<MoreCategoryPage />} />
               <Route path="/semana" element={<WeekPage />} />
               <Route path="/minha-evolucao" element={<LifeEvolutionPage />} />
               <Route path="/alimentacao" element={<NutritionPage />} />

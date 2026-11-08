@@ -1,96 +1,153 @@
-// "Mais" (Fase 01): acesso a todos os módulos atuais (treino, histórico, evolução, metas…), conta e ajustes.
-import { Link } from 'react-router-dom';
-import { Apple, BookHeart, BookOpenText, CalendarCheck, Heart, NotebookPen, Brain, GraduationCap, Library, Timer, BarChart3, CalendarRange, LineChart, Search, BookOpen, CalendarDays, ChevronRight, Dumbbell, Gauge, History, ListChecks, Play, Settings, ShieldCheck, Target, User } from 'lucide-react';
+// "Mais" (Fase 08): centro de navegação. Mostra as categorias (não todas as rotas), uma busca de funções e as funções
+// que a pessoa mais usa neste aparelho. Cada categoria abre a própria página (#/mais/:categoria) com poucos itens.
+import { useMemo, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { ChevronRight, Search, X } from 'lucide-react';
 import { PageHeader } from '@/components/AppLayout';
 import { Card } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
+import { CATEGORIES, frequentFeatures, recordUse, searchFeatures, type Category, type Feature } from './catalog';
 
-const GROUPS: { title: string; items: { to: string; label: string; hint: string; icon: typeof Dumbbell }[] }[] = [
-  {
-    title: 'Treino',
-    items: [
-      { to: '/treinar', label: 'Treinar hoje', hint: 'Próximo treino, calendário e retomada', icon: Play },
-      { to: '/treinos', label: 'Fichas de treino', hint: 'Fichas, planejamento e exercícios', icon: Dumbbell },
-      { to: '/historico', label: 'Histórico', hint: 'Treinos concluídos', icon: History },
-      { to: '/evolucao', label: 'Evolução dos treinos', hint: 'Volume, cargas e medidas', icon: BarChart3 },
-      { to: '/desempenho', label: 'Desempenho', hint: 'Recordes e comparações', icon: Gauge },
-      { to: '/metas', label: 'Metas de treino', hint: 'Objetivos de carga e frequência', icon: Target },
-      { to: '/planejamento', label: 'Planejamento semanal', hint: 'Dias de treino e descanso', icon: CalendarDays },
-      { to: '/exercicios', label: 'Biblioteca de exercícios', hint: 'Catálogo e favoritos', icon: BookOpen },
-    ],
-  },
-  {
-    title: 'Alimentação',
-    items: [
-      { to: '/alimentacao', label: 'Diário alimentar', hint: 'Refeições, calorias, macros e água', icon: Apple },
-      { to: '/alimentacao/planejar', label: 'Planejamento alimentar', hint: 'Semana planejada × consumido', icon: CalendarRange },
-      { to: '/alimentacao/analise', label: 'Histórico e gráficos', hint: 'Médias, proteína e frequência', icon: LineChart },
-      { to: '/alimentacao/metas', label: 'Metas nutricionais', hint: 'Calorias, macros, água e horários', icon: Target },
-      { to: '/alimentacao/alimentos', label: 'Alimentos', hint: 'Catálogo TACO, rótulos e refeições salvas', icon: Search },
-    ],
-  },
-  {
-    title: 'Conhecimento',
-    items: [
-      { to: '/conhecimento', label: 'Leitura e estudos', hint: 'Hoje, metas, livros e matérias', icon: Brain },
-      { to: '/conhecimento/foco', label: 'Modo foco', hint: 'Cronômetro, temporizador e pomodoro', icon: Timer },
-      { to: '/conhecimento/biblioteca', label: 'Biblioteca', hint: 'Livros, progresso, notas e resenhas', icon: Library },
-      { to: '/conhecimento/estudos', label: 'Matérias', hint: 'Tópicos, tempo e histórico', icon: GraduationCap },
-      { to: '/conhecimento/metas', label: 'Metas de leitura e estudo', hint: 'Diárias, semanais e por prazo', icon: Target },
-      { to: '/conhecimento/estatisticas', label: 'Gráficos do conhecimento', hint: 'Tempo, páginas e constância', icon: LineChart },
-    ],
-  },
-  {
-    title: 'Bíblia',
-    items: [
-      { to: '/biblia', label: 'Bíblia', hint: 'Passagem do dia, leitura e progresso', icon: BookHeart },
-      { to: '/biblia/ler', label: 'Ler Bíblia', hint: 'Continuar de onde parei', icon: BookOpenText },
-      { to: '/biblia/planos', label: 'Planos de leitura', hint: 'Evangelhos, Salmos, 30/90 dias, Bíblia completa', icon: CalendarCheck },
-      { to: '/biblia/diario', label: 'Diário espiritual', hint: 'Reflexões, gratidão e anotações privadas', icon: NotebookPen },
-      { to: '/biblia/favoritos', label: 'Favoritos e destaques', hint: 'Passagens salvas', icon: Heart },
-    ],
-  },
-  {
-    title: 'Desenvolvimento pessoal',
-    items: [
-      { to: '/semana', label: 'Minha Semana', hint: 'Agenda de 7 dias com todas as áreas', icon: CalendarDays },
-      { to: '/minha-evolucao', label: 'Minha Evolução', hint: 'Indicadores da semana e do mês', icon: BarChart3 },
-      { to: '/missoes', label: 'Missões', hint: 'Diárias, semanais e desafios', icon: ListChecks },
-      { to: '/jornada', label: 'Jornada', hint: 'Nível, atributos e conquistas', icon: Target },
-      { to: '/missoes?aba=habitos', label: 'Hábitos', hint: 'Criar, pausar e arquivar', icon: ListChecks },
-      { to: '/missoes?aba=rotinas', label: 'Rotinas', hint: 'Matinal, estudos, treino, noturna', icon: CalendarDays },
-    ],
-  },
-  {
-    title: 'Conta',
-    items: [
-      { to: '/conta', label: 'Conta e sincronização', hint: 'Dados na nuvem, aparelhos', icon: User },
-      { to: '/assistente/privacidade', label: 'Privacidade e diagnóstico da IA', hint: 'Dados enviados, memórias, teste da OpenAI', icon: ShieldCheck },
-      { to: '/config', label: 'Configurações', hint: 'Tema, unidades, backup', icon: Settings },
-    ],
-  },
-];
+function FeatureRow({ f, sub }: { f: Feature; sub?: string }) {
+  return (
+    <Link to={f.to} onClick={() => recordUse(f.id)} className="flex min-h-[3.5rem] items-center gap-3 px-4 py-2.5 transition-colors hover:bg-accent/60 active:bg-accent">
+      <f.icon className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium">{f.label}</span>
+        <span className="block truncate text-xs text-muted-foreground">{sub ?? f.hint}</span>
+      </span>
+      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" aria-hidden />
+    </Link>
+  );
+}
+
+function CategoryTile({ c }: { c: Category }) {
+  return (
+    <Link
+      to={`/mais/${c.id}`}
+      data-testid={`more-cat-${c.id}`}
+      className="group flex min-h-[6.5rem] flex-col justify-between gap-3 rounded-2xl bg-card p-4 ring-1 ring-border/60 transition hover:ring-primary/40 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+    >
+      <span className={cn('flex h-10 w-10 items-center justify-center rounded-xl', c.tone)}>
+        <c.icon className="h-5 w-5" aria-hidden />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold leading-tight">{c.label}</span>
+        <span className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{c.hint}</span>
+      </span>
+    </Link>
+  );
+}
 
 export default function MorePage() {
+  const [q, setQ] = useState('');
+  const results = useMemo(() => searchFeatures(q), [q]);
+  const frequent = useMemo(() => frequentFeatures(), []);
+  const searching = q.trim().length > 0;
   return (
     <div className="space-y-5" data-testid="life-more">
       <PageHeader title="Mais" />
-      {GROUPS.map((g) => (
-        <section key={g.title} className="space-y-2">
-          <h2 className="px-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{g.title}</h2>
-          <Card className="divide-y divide-border/60">
-            {g.items.map((i) => (
-              <Link key={i.to} to={i.to} className="flex items-center gap-3 px-4 py-3 active:bg-accent">
-                <i.icon className="h-5 w-5 shrink-0 text-primary" />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium">{i.label}</span>
-                  <span className="block truncate text-xs text-muted-foreground">{i.hint}</span>
-                </span>
-                <ChevronRight className="h-4 w-4 text-muted-foreground" />
-              </Link>
+      <label className="relative block">
+        <span className="sr-only">Buscar função</span>
+        <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+        <input
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Buscar função"
+          className="h-12 w-full rounded-2xl bg-card pl-10 pr-10 text-sm ring-1 ring-border/60 placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary [&::-webkit-search-cancel-button]:hidden"
+          data-testid="more-search"
+        />
+        {searching && (
+          <button
+            type="button"
+            onClick={() => setQ('')}
+            aria-label="Limpar busca"
+            className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-accent"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </label>
+
+      {searching ? (
+        results.length ? (
+          <Card className="divide-y divide-border/50 overflow-hidden" data-testid="more-results">
+            {results.map((f) => (
+              <FeatureRow key={f.id} f={f} sub={`${f.category.label} · ${f.hint}`} />
             ))}
           </Card>
-        </section>
-      ))}
+        ) : (
+          <p className="px-1 py-6 text-center text-sm text-muted-foreground">Nenhuma função encontrada para “{q.trim()}”.</p>
+        )
+      ) : (
+        <>
+          <section className="space-y-2">
+            <h2 className="px-1 text-xs font-medium text-muted-foreground">Mais usados</h2>
+            <div className="grid grid-cols-2 gap-2">
+              {frequent.map((f) => (
+                <Link
+                  key={f.id}
+                  to={f.to}
+                  onClick={() => recordUse(f.id)}
+                  className="flex min-h-[3rem] items-center gap-2.5 rounded-xl bg-secondary/70 px-3 py-2 text-sm font-medium transition hover:bg-secondary active:scale-[0.98]"
+                >
+                  <f.icon className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+                  <span className="truncate">{f.label}</span>
+                </Link>
+              ))}
+            </div>
+          </section>
+          <section className="space-y-2">
+            <h2 className="px-1 text-xs font-medium text-muted-foreground">Categorias</h2>
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+              {CATEGORIES.filter((c) => c.id !== 'conta').map((c) => (
+                <CategoryTile key={c.id} c={c} />
+              ))}
+            </div>
+            {CATEGORIES.filter((c) => c.id === 'conta').map((c) => (
+              <Link key={c.id} to={`/mais/${c.id}`} data-testid={`more-cat-${c.id}`} className="flex min-h-[3.5rem] items-center gap-3 rounded-2xl bg-card px-4 py-2.5 ring-1 ring-border/60 transition hover:ring-primary/40 active:scale-[0.99]">
+                <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl', c.tone)}>
+                  <c.icon className="h-[18px] w-[18px]" aria-hidden />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold">{c.label}</span>
+                  <span className="block truncate text-xs text-muted-foreground">{c.hint}</span>
+                </span>
+                <ChevronRight className="h-4 w-4 text-muted-foreground/60" aria-hidden />
+              </Link>
+            ))}
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Página de uma categoria do Mais: poucos itens, nomes claros e voltar fácil. */
+export function MoreCategoryPage() {
+  const { cat } = useParams();
+  const navigate = useNavigate();
+  const c = CATEGORIES.find((x) => x.id === cat);
+  if (!c) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="Mais" back="/mais" />
+        <p className="text-sm text-muted-foreground">Categoria não encontrada.</p>
+        <button type="button" className="text-sm font-medium text-primary" onClick={() => navigate('/mais')}>
+          Voltar para Mais
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-4" data-testid={`more-category-${c.id}`}>
+      <PageHeader title={c.label} subtitle={c.hint} back="/mais" />
+      <Card className="divide-y divide-border/50 overflow-hidden">
+        {c.items.map((f) => (
+          <FeatureRow key={f.id} f={f} />
+        ))}
+      </Card>
     </div>
   );
 }

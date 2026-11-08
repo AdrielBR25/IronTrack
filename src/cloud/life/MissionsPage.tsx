@@ -1,5 +1,5 @@
 // Missões (Fase 01): hoje, semana, hábitos, rotinas e desafios, com criação, edição, pausa e histórico.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Check, ChevronRight, Pencil, Plus } from 'lucide-react';
 import { ROUTINE_KIND_LABEL, type HabitView, type MissionView, type RoutineView } from '@shared/life/protocol.ts';
@@ -110,6 +110,13 @@ export default function MissionsPage() {
   const [routineNew, setRoutineNew] = useState<(typeof ROUTINE_TEMPLATES)[number] | 'blank' | null>(null);
   const [missionNew, setMissionNew] = useState(false);
   const [mission, setMission] = useState<MissionView | null>(null);
+  // Fase 08: atalho "Novo hábito" (ações rápidas / Registrar) abre o formulário direto.
+  useEffect(() => {
+    if (params.get('novo')) {
+      setHabitNew(draftFromTemplate({ name: '' }));
+      setParams({ aba: 'habitos' }, { replace: true });
+    }
+  }, [params, setParams]);
   const d = dash.data;
   const allHabits = habits.data?.habits ?? [];
 

@@ -192,22 +192,27 @@ export function dayLoad(items: Pick<AgendaItem, 'status' | 'startTime' | 'durati
 export const HOME_CARDS = ['character', 'today', 'next_activities', 'workout', 'nutrition', 'next_meal', 'knowledge', 'next_study', 'bible', 'week_goals', 'suggestions', 'ai', 'achievements'] as const;
 export type HomeCardId = (typeof HOME_CARDS)[number];
 export const HOME_CARD_LABEL: Record<HomeCardId, string> = {
-  character: 'Nível e XP',
-  today: 'Missões e hábitos do dia',
-  next_activities: 'Próximas atividades',
-  workout: 'Treino planejado',
-  nutrition: 'Resumo nutricional',
+  character: 'Nível e XP no topo',
+  today: 'Missões e hábitos de hoje',
+  next_activities: 'Próxima atividade',
+  workout: 'Treino do dia',
+  nutrition: 'Alimentação de hoje',
   next_meal: 'Próxima refeição',
-  knowledge: 'Leitura e estudos',
-  next_study: 'Próxima sessão de estudo/leitura',
+  knowledge: 'Leitura e estudos de hoje',
+  next_study: 'Próximo estudo ou leitura',
   bible: 'Versículo do dia',
-  week_goals: 'Metas da semana',
+  week_goals: 'Meta da semana',
   suggestions: 'Sugestões',
-  ai: 'IA central',
-  achievements: 'Conquistas',
+  ai: 'Atalho da IA',
+  achievements: 'Conquistas recentes',
 };
-/** Ordem padrão (cartões novos aparecem no fim de layouts antigos, visíveis). */
-export const DEFAULT_HOME_LAYOUT: { id: HomeCardId; visible: boolean }[] = HOME_CARDS.map((id) => ({ id, visible: id !== 'achievements' }));
+/**
+ * Fase 08: o padrão mostra só o essencial (personagem, hoje, próxima atividade, treino, meta, IA e versículo). Os
+ * resumos de alimentação/estudos, sugestões e conquistas ficam desligados até a pessoa ligar em "Personalizar".
+ * Layouts já salvos são respeitados como estão; cartões novos entram no fim com este padrão.
+ */
+export const HOME_CARDS_HIDDEN_BY_DEFAULT: readonly HomeCardId[] = ['nutrition', 'next_meal', 'knowledge', 'next_study', 'suggestions', 'achievements'];
+export const DEFAULT_HOME_LAYOUT: { id: HomeCardId; visible: boolean }[] = HOME_CARDS.map((id) => ({ id, visible: !HOME_CARDS_HIDDEN_BY_DEFAULT.includes(id) }));
 
 export const homeLayoutSchema = z
   .object({

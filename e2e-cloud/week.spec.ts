@@ -12,7 +12,7 @@ test('minha semana: criar, ajustar horário, conflito, concluir e ver a evoluç�
   // Início: personalizar (salva na conta) e voltar.
   await page.getByTestId('home-customize').click();
   await expect(page.getByTestId('home-layout-dialog')).toBeVisible();
-  await page.getByRole('switch', { name: 'Mostrar Conquistas' }).click();
+  await page.getByRole('switch', { name: 'Mostrar Conquistas recentes' }).click();
   await page.getByTestId('home-layout-save').click();
   await expect(page.getByTestId('home-layout-dialog')).toBeHidden();
 
@@ -53,7 +53,9 @@ test('minha semana: criar, ajustar horário, conflito, concluir e ver a evoluç�
   await expect(page.getByTestId('week-item').filter({ hasText: 'Estudar inglês' })).toHaveAttribute('data-status', 'done', { timeout: 20_000 });
 
   // Minha Evolução: indicadores calculados pelo app; conta nova mostra "Sem dados", nunca desempenho ruim.
-  await page.getByRole('navigation').getByRole('link', { name: 'Evolução' }).click();
+  // Fase 08: no celular a Evolução fica a um toque no Início (a barra tem Início, Semana, Registrar, IA e Mais).
+  await page.getByRole('navigation').getByRole('link', { name: 'Início' }).click();
+  await page.getByTestId('home-evolution').click();
   await expect(page.getByTestId('evolution-page')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('evolution-metric').first()).toBeVisible();
   await expect(page.getByText('sem IA', { exact: false }).first()).toBeVisible();
