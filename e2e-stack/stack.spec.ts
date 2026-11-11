@@ -2,7 +2,7 @@
 // Prova o proxy /api/v1 (mesma origem, cookie, CSRF, corpo grande, IP do cliente), os cabeçalhos e o cache do app,
 // as rotas do HashRouter, o PWA offline e o humanoide 3D sob a CSP real.
 import { randomBytes } from 'node:crypto';
-import { PASSWORD, expectInApp, expectSynced, linkFromMail, loginViaUi, signupViaUi, uniqueEmail, welcome, expect, test } from '../e2e-cloud/helpers';
+import { PASSWORD, expectInApp, expectSynced, linkFromMail, loadSampleFicha, loginViaUi, signupViaUi, uniqueEmail, welcome, expect, test } from '../e2e-cloud/helpers';
 
 const ORIGIN = new URL(process.env.STACK_URL ?? 'http://localhost:8090/').origin;
 const csrf = { 'x-irontrack-csrf': '1', origin: ORIGIN };
@@ -144,9 +144,7 @@ test('IP do cliente atrás do proxy: cada IP tem o próprio limite e um IP forja
 
 test('sincronização entre dois navegadores pelo proxy', async ({ page, browser }, info) => {
   const email = await signupViaUi(page);
-  await page.goto('./#/');
-  await page.getByTestId('load-sample').click();
-  await expect(page.getByTestId('start-workout')).toBeVisible();
+  await loadSampleFicha(page);
   await expectSynced(page);
   const ctx = await browser.newContext({ ...info.project.use, baseURL: ORIGIN, extraHTTPHeaders: { 'x-forwarded-for': `10.8.${randomBytes(1)[0]}.${randomBytes(1)[0]}` } });
   const b = await ctx.newPage();
