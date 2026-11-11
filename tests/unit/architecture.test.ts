@@ -617,7 +617,8 @@ describe('arquitetura do modo nuvem (P21)', () => {
     const bad = all.filter((f) => /DATABASE_URL|railway\.app|railway\.internal|postgres(ql)?:\/\/|RESEND_API_KEY|OPENAI_API_KEY\s*=|ANTHROPIC_API_KEY\s*=|GEMINI_API_KEY\s*=/.test(src(f)));
     expect(bad).toEqual([]);
     const envs = all.flatMap((f) => [...src(f).matchAll(/import\.meta\.env\.(VITE_\w+)/g)].map((m) => `${f}:${m[1]}`));
-    expect(envs.filter((e) => e.startsWith('cloud/'))).toEqual(['cloud/config.ts:VITE_ACCOUNTS']);
+    // Fase 07: VITE_APP_ENV só diz se o build é o da homologação (faixa e nome do app); não é URL nem credencial.
+    expect(envs.filter((e) => e.startsWith('cloud/'))).toEqual(['cloud/config.ts:VITE_ACCOUNTS', 'cloud/config.ts:VITE_APP_ENV']);
   });
 
   it('o ponteiro da conta não guarda senha nem token; as telas da conta não acessam o Dexie', () => {
@@ -632,5 +633,22 @@ describe('arquitetura do modo nuvem (P21)', () => {
     expect(outside.map(fmt)).toEqual([]);
     // Os domínios, a persistência e o compartilhado nunca dependem da nuvem.
     expect(edges.filter((e) => e.target && inDir(e.target, CLOUD) && inDir(e.from, 'modules', 'db', 'lib', 'hooks', 'integrations')).map(fmt)).toEqual([]);
+  });
+});
+
+describe('arquitetura do RPG pessoal (Life Fase 01)', () => {
+  it('modo conta: celular com Início, Semana, Registrar (+), IA e Mais; computador também com Evolução; telas sob demanda', () => {
+    // Fase 08: a barra do celular tem 4 destinos + o botão Registrar no meio (5 posições); a lateral tem 5 destinos.
+    const nav = readFileSync(join(ROOT, 'cloud/life/nav.ts'), 'utf8');
+    const [mobile, desktop] = nav.split('export const LIFE_NAV_DESKTOP');
+    expect((mobile.match(/\bto: '\//g) ?? []).length).toBe(4);
+    expect((desktop.match(/\bto: '\//g) ?? []).length).toBe(5);
+    for (const l of ['Início', 'Semana', 'IA', 'Mais']) expect(mobile).toContain(`label: '${l}'`);
+    for (const l of ['Início', 'Semana', 'Evolução', 'IA', 'Mais']) expect(desktop).toContain(`label: '${l}'`);
+    const layout = readFileSync(join(ROOT, 'components/AppLayout.tsx'), 'utf8');
+    expect(layout).toContain('data-testid="nav-register"');
+    const app = readFileSync(join(ROOT, 'App.tsx'), 'utf8');
+    for (const r of ['/missoes', '/jornada', '/mais', '/mais/:cat', '/treinar', '/semana', '/minha-evolucao']) expect(app).toContain(`path="${r}"`);
+    expect(app).toMatch(/lazy\(\(\) => import\('@\/cloud\/life\/LifeHomePage'\)\)/);
   });
 });

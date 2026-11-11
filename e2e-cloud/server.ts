@@ -4,6 +4,7 @@
 // Uso: node e2e-cloud/server.ts  (Node 22.18+). Porta da API: E2E_API_PORT (padrão 8788).
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import pg from 'pg';
 import { createApi } from '../services/api/src/app.ts';
 import { loadConfig } from '../services/api/src/config.ts';
@@ -30,6 +31,19 @@ const provider = createServer((req, res) => {
       res.end(JSON.stringify(id === 'claude-haiku-5-5' ? { type: 'model', id, display_name: 'Claude Haiku 5.5' } : { type: 'error', error: { type: 'not_found_error', message: `model: ${id}` } }));
       return;
     }
+    // Fase 00: OpenAI simulada (Responses API com streaming e ferramentas) para o assistente central.
+    if (req.url === '/openai/v1/responses' && req.method === 'POST' && req.headers.authorization?.startsWith('Bearer sk-proj-e2e')) {
+      const parsed = JSON.parse(body);
+      // Fase 03: análise de foto (saída estruturada, sem streaming). Prato fixo: arroz, feijão, frango, alface e um molho
+      // que não dá para identificar (precisa de revisão).
+      if (parsed.text?.format?.type === 'json_schema') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ id: 'resp_v', status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: JSON.stringify(E2E_PLATE) }] }], usage: { input_tokens: 1200, output_tokens: 250 } }));
+        return;
+      }
+      openAiReply(parsed, res);
+      return;
+    }
     if (req.method !== 'POST' || req.url !== '/v1/messages' || !req.headers['x-api-key']) {
       res.writeHead(404).end();
       return;
@@ -40,6 +54,56 @@ const provider = createServer((req, res) => {
     res.end(JSON.stringify({ id: 'msg_teste', type: 'message', role: 'assistant', model: 'claude-haiku-5-5', content: [{ type: 'text', text: `Resposta do provedor simulado (${n} caracteres recebidos).` }], stop_reason: 'end_turn', usage: { input_tokens: 30, output_tokens: 12 } }));
   });
 });
+
+const E2E_PLATE = {
+  contem_comida: true,
+  qualidade_imagem: 'boa',
+  itens: [
+    { nome: 'arroz branco', termos_busca: ['arroz tipo 1 cozido'], preparo: 'cozido', papel: 'principal', quantidade: 150, quantidade_min: 120, quantidade_max: 180, unidade: 'g', confianca: 'alta', observacao: null },
+    { nome: 'feijão carioca', termos_busca: ['feijão carioca cozido'], preparo: 'cozido', papel: 'principal', quantidade: 120, quantidade_min: 100, quantidade_max: 140, unidade: 'g', confianca: 'alta', observacao: null },
+    { nome: 'peito de frango', termos_busca: ['frango peito grelhado'], preparo: 'grelhado', papel: 'principal', quantidade: 160, quantidade_min: 130, quantidade_max: 190, unidade: 'g', confianca: 'media', observacao: null },
+    { nome: 'alface', termos_busca: ['alface crua'], preparo: 'cru', papel: 'acompanhamento', quantidade: 40, quantidade_min: 20, quantidade_max: 60, unidade: 'g', confianca: 'media', observacao: null },
+    { nome: 'molho da casa', termos_busca: ['molho especial e2e'], preparo: 'nao_identificado', papel: 'molho', quantidade: null, quantidade_min: null, quantidade_max: null, unidade: 'g', confianca: 'baixa', observacao: 'Base do molho incerta.' },
+  ],
+  observacoes_caloricas: ['O frango pode ter sido preparado com óleo.'],
+  nao_identificado: [],
+  resumo: 'Prato com arroz, feijão, frango grelhado e salada.',
+};
+
+/** "Modelo" roteirizado: pede uma ficha quando a pessoa pede, consulta a evolução quando perguntam do supino, senão responde texto. */
+function openAiReply(body: { input: { role?: string; type?: string; content?: string; output?: string }[] }, res: import('node:http').ServerResponse) {
+  const last = [...body.input].reverse().find((i) => i.role === 'user')?.content ?? '';
+  const outputs = body.input.filter((i) => i.type === 'function_call_output');
+  const out: unknown[] = [];
+  let text = '';
+  if (!outputs.length && /crie uma ficha/i.test(last)) {
+    out.push({
+      type: 'function_call',
+      id: 'fc_1',
+      call_id: 'call_1',
+      name: 'propose_create_routine',
+      arguments: JSON.stringify({
+        name: 'Full body IA',
+        rationale: 'Três treinos completos por semana.',
+        workouts: [{ label: 'A', name: 'Corpo todo', exercises: [{ name: 'Agachamento livre', muscleGroup: 'Quadríceps', category: 'compound', equipment: 'barbell', sets: 3, repMin: 6, repMax: 8, restSec: 120 }] }],
+      }),
+    });
+  } else if (!outputs.length && /supino/i.test(last)) {
+    out.push({ type: 'function_call', id: 'fc_2', call_id: 'call_2', name: 'get_exercise_progress', arguments: JSON.stringify({ exercise: 'supino' }) });
+  } else if (outputs.length) {
+    const o = JSON.parse(outputs[outputs.length - 1].output ?? '{}');
+    text = o.status === 'awaiting_user_approval' ? 'Preparei a proposta abaixo. **Revise e aprove** se fizer sentido.' : `Consultei seus registros: ${o.data?.matches?.length ? 'há dados de supino.' : 'não há treinos de supino registrados no período.'}`;
+  } else text = 'Olá! Sou a **OpenAI simulada** do teste.';
+  const events: unknown[] = [];
+  if (text) {
+    for (const part of text.match(/.{1,12}/g) ?? []) events.push({ type: 'response.output_text.delta', delta: part });
+    out.push({ type: 'message', id: 'msg_1', role: 'assistant', content: [{ type: 'output_text', text }] });
+  }
+  events.push({ type: 'response.completed', response: { id: 'resp_e2e', status: 'completed', output: out, usage: { input_tokens: 50, output_tokens: 10 } } });
+  res.writeHead(200, { 'content-type': 'text/event-stream' });
+  res.end(events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join(''));
+}
+
 await new Promise<void>((r) => provider.listen(0, '127.0.0.1', () => r()));
 const pa = provider.address();
 const providerBase = `http://127.0.0.1:${pa && typeof pa === 'object' ? pa.port : 0}`;
@@ -87,6 +151,9 @@ const env: Record<string, string> = {
   ACCESS_LOG: 'off',
   // chave fictícia, só para o provedor simulado local
   ANTHROPIC_API_KEY: `sk-ant-api03-e2e-${randomBytes(12).toString('hex')}`,
+  // Fase 00: assistente central com a OpenAI simulada local (chave fictícia).
+  OPENAI_API_KEY: `sk-proj-e2e-${randomBytes(12).toString('hex')}`,
+  ASSISTANT_CONFIG_JSON: JSON.stringify({ ...JSON.parse(readFileSync(new URL('../services/api/config/assistant.json', import.meta.url), 'utf8')), baseUrl: `${providerBase}/openai` }),
 };
 const cfg = loadConfig(env);
 const pool = createPool(cfg);

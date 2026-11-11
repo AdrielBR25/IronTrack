@@ -25,11 +25,15 @@ export default {
         popover: { DEFAULT: 'hsl(var(--popover))', foreground: 'hsl(var(--popover-foreground))' },
         warn: 'hsl(var(--warn))',
       },
+      // Fase 08: `/12` era usado nos fundos suaves (atributos, ícones) mas não existia na escala: os fundos não apareciam.
+      opacity: { 12: '0.12' },
       borderRadius: { lg: 'var(--radius)', md: 'calc(var(--radius) - 4px)', sm: 'calc(var(--radius) - 8px)', xl: 'calc(var(--radius) + 4px)', '2xl': 'calc(var(--radius) + 10px)' },
       keyframes: {
         'pulse-ring': { '0%,100%': { boxShadow: '0 0 0 0 hsl(var(--primary) / 0.5)' }, '50%': { boxShadow: '0 0 0 10px hsl(var(--primary) / 0)' } },
+        // Fase 03: linha de "leitura" sobre a foto durante a análise.
+        scan: { '0%': { top: '-10%' }, '100%': { top: '105%' } },
       },
-      animation: { 'pulse-ring': 'pulse-ring 1.6s ease-in-out infinite' },
+      animation: { 'pulse-ring': 'pulse-ring 1.6s ease-in-out infinite', scan: 'scan 1.8s cubic-bezier(.45,0,.55,1) infinite alternate' },
     },
   },
   plugins: [animate],

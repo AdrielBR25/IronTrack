@@ -77,6 +77,23 @@ export async function expectSynced(page: Page) {
   await expect(page.locator('[data-testid="sync-status"]:visible').first()).toHaveAttribute('data-state', 'synced', { timeout: 20_000 });
 }
 
+/**
+ * Fase 07: no modo conta o Início é o painel do Life; o painel de treino (com "carregar exemplo" e "Iniciar treino")
+ * fica em Mais → "Treinar hoje" (#/treinar). Navega pelo menu, como a pessoa faria, sem pular a navegação nova.
+ */
+export async function openTraining(page: Page) {
+  await page.goto('./#/mais');
+  await page.getByRole('link', { name: /Treinar hoje/ }).click();
+  await expect(page).toHaveURL(/#\/treinar$/);
+}
+
+/** Carrega a ficha de exemplo pelo painel de treino e espera o botão de iniciar aparecer. */
+export async function loadSampleFicha(page: Page) {
+  await openTraining(page);
+  await page.getByTestId('load-sample').click();
+  await expect(page.getByTestId('start-workout')).toBeVisible();
+}
+
 /** Mensagens da caixa de e-mail de teste da API (só existe com API_TEST_MODE). */
 export async function mailbox(page: Page, email: string): Promise<{ subject: string; text: string }[]> {
   const r = await page.request.get(`/api/v1/__test__/mailbox?to=${encodeURIComponent(email)}`);

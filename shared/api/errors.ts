@@ -21,6 +21,25 @@ export const API_ERRORS = {
   email_failed: { status: 502, message: 'Não foi possível enviar o e-mail agora. Tente novamente em alguns minutos.' },
   import_invalid: { status: 422, message: 'O conteúdo da importação é inválido. Nada foi gravado.' },
   import_state: { status: 409, message: 'Esta importação não está mais disponível para esta ação.' },
+  // IronTrack Life (Fase 01)
+  life_stale: { status: 409, message: 'Este item mudou em outro aparelho. Recarregue e tente de novo.' },
+  life_inactive: { status: 409, message: 'Esta atividade está pausada, arquivada ou encerrada.' },
+  life_date_not_allowed: { status: 422, message: 'Só é possível registrar hoje ou ontem.' },
+  life_limit: { status: 409, message: 'Limite de itens atingido.' },
+  // IronTrack Life (Fase 02): alimentação
+  nutrition_date_not_allowed: { status: 422, message: 'Data fora do período permitido. Refeições consumidas não podem ficar no futuro.' },
+  nutrition_food_unavailable: { status: 422, message: 'Um dos alimentos não existe mais ou foi arquivado. Escolha outro.' },
+  nutrition_state: { status: 409, message: 'Esta refeição não está no estado esperado. Recarregue e tente de novo.' },
+  // IronTrack Life (Fase 04): conhecimento
+  knowledge_timer_active: { status: 409, message: 'Já existe uma sessão em andamento. Encerre ou descarte antes de começar outra.' },
+  knowledge_timer_missing: { status: 404, message: 'Esta sessão já foi encerrada ou descartada (talvez em outro aparelho).' },
+  knowledge_date_not_allowed: { status: 422, message: 'Data fora do período permitido para registros.' },
+  knowledge_pages: { status: 422, message: 'Página fora do total de páginas do livro.' },
+  // IronTrack Life (Fase 05): Bíblia
+  bible_ref_invalid: { status: 422, message: 'Referência bíblica inexistente nesta tradução.' },
+  bible_date_not_allowed: { status: 422, message: 'Só é possível registrar leituras dos últimos 30 dias, nunca no futuro.' },
+  bible_plan_inactive: { status: 409, message: 'Este plano está pausado, arquivado ou concluído.' },
+  planner_duplicate: { status: 409, message: 'Já existe uma atividade igual neste dia e horário.' },
   service_unavailable: { status: 503, message: 'Serviço temporariamente indisponível.' },
   timeout: { status: 504, message: 'O servidor demorou demais para responder.' },
   internal_error: { status: 500, message: 'Erro interno. Nada foi alterado.' },

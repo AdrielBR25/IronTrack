@@ -14,7 +14,7 @@ import { newToken, tokenHash, uuid } from '../lib/crypto.ts';
 import type { Logger } from '../lib/log.ts';
 import { dummyHash, hashPassword, needsRehash, verifyPassword } from '../lib/passwords.ts';
 import { LIMITS, type RateLimiter } from '../lib/rateLimit.ts';
-import { MailError, type Mailer } from '../mail/mailer.ts';
+import { MailError, mailFailureInfo, type Mailer } from '../mail/mailer.ts';
 import { resetEmail, securityNotice, verificationEmail } from '../mail/templates.ts';
 import type { z } from 'zod';
 
@@ -45,7 +45,7 @@ interface UserRow {
 export const toAccount = (u: UserRow): AccountInfo => ({ id: u.id, name: u.name, email: u.email, emailVerified: !!u.email_verified_at, dataProfileId: u.data_profile_id, createdAt: u.created_at.toISOString() });
 
 export function features(d: Pick<AuthDeps, 'cfg' | 'mailer' | 'aiAvailable'>): ServerFeatures {
-  return { email: d.mailer.enabled, ai: d.aiAvailable(), aiRequiresVerifiedEmail: d.cfg.ai.requireVerifiedEmail, signup: d.cfg.signupEnabled };
+  return { email: d.mailer.enabled, ai: d.aiAvailable(), aiRequiresVerifiedEmail: d.cfg.ai.requireVerifiedEmail, signup: d.cfg.signupEnabled, environment: d.cfg.appEnv };
 }
 
 /** Valida com Zod e devolve 422 com os campos (só nomes e frases fixas, nunca o valor recebido). */
@@ -118,8 +118,8 @@ async function sendVerification(d: AuthDeps, u: Pick<UserRow, 'id' | 'email' | '
   try {
     await d.mailer.send(verificationEmail(u.email, u.name, d.cfg.appOrigin, token));
     return 'sent';
-  } catch {
-    d.log.event('email_failed', { kind: 'verification' });
+  } catch (e) {
+    d.log.event('email_failed', { kind: 'verification', ...mailFailureInfo(e) });
     return 'failed';
   }
 }
@@ -259,7 +259,7 @@ export function authRoutes(router: Router, d: AuthDeps): void {
         const token = newToken();
         await pool.query(`INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at) VALUES ($1, $2, $3, now() + make_interval(mins => $4))`, [uuid(), u.id, tokenHash(token), RESET_TTL_MIN]);
         // Falha do provedor não muda a resposta (senão revelaria que a conta existe); fica no log operacional.
-        d.mailer.send(resetEmail(b.email, cfg.appOrigin, token)).catch(() => d.log.event('email_failed', { kind: 'reset' }));
+        d.mailer.send(resetEmail(b.email, cfg.appOrigin, token)).catch((e) => d.log.event('email_failed', { kind: 'reset', ...mailFailureInfo(e) }));
       }
       return { status: 202, body: { accepted: true } };
     },
@@ -292,7 +292,7 @@ export function authRoutes(router: Router, d: AuthDeps): void {
         return u.rows[0].email;
       });
       if (!email) throw new ApiError('token_invalid');
-      d.mailer.send(securityNotice(email, 'password_reset')).catch(() => d.log.event('email_failed', { kind: 'security' }));
+      d.mailer.send(securityNotice(email, 'password_reset')).catch((e) => d.log.event('email_failed', { kind: 'security', ...mailFailureInfo(e) }));
       return { status: 200, body: { reset: true }, headers: { 'set-cookie': clearSessionCookie(cfg) } };
     },
   });
@@ -333,7 +333,7 @@ export function authRoutes(router: Router, d: AuthDeps): void {
         await c.query('UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1', [a.userId, hash]);
         await c.query("UPDATE auth_sessions SET revoked_at = now(), revoked_reason = 'password_changed' WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL", [a.userId, a.sessionId]);
       });
-      if (d.mailer.enabled) d.mailer.send(securityNotice(u.email, 'password_changed')).catch(() => d.log.event('email_failed', { kind: 'security' }));
+      if (d.mailer.enabled) d.mailer.send(securityNotice(u.email, 'password_changed')).catch((e) => d.log.event('email_failed', { kind: 'security', ...mailFailureInfo(e) }));
       return { status: 200, body: { changed: true } };
     },
   });

@@ -5,10 +5,14 @@ import '@fontsource-variable/space-grotesk';
 import './index.css';
 import App from './App';
 import { initInstallCapture } from './lib/install';
+import { installStaleChunkGuard, reloadOnceForStaleChunk } from './lib/staleChunks';
 import { db, describeOpenError } from './db/db';
 import { chooseBootMode, startAccountRuntime } from './cloud/runtime';
+import { IS_STAGING } from './cloud/config';
 
 initInstallCapture();
+if (IS_STAGING) document.title = `[Homologação] ${document.title}`;
+installStaleChunkGuard();
 
 const root = ReactDOM.createRoot(document.getElementById('root')!);
 
@@ -17,12 +21,27 @@ const root = ReactDOM.createRoot(document.getElementById('root')!);
 const mode = chooseBootMode();
 
 if (mode.kind === 'auth') {
-  void import('./cloud/ui/AuthApp').then(({ default: AuthApp }) =>
-    root.render(
-      <React.StrictMode>
-        <AuthApp />
-      </React.StrictMode>,
-    ),
+  import('./cloud/ui/AuthApp').then(
+    ({ default: AuthApp }) =>
+      root.render(
+        <React.StrictMode>
+          <AuthApp />
+        </React.StrictMode>,
+      ),
+    // Fase 07: sem isto, uma falha ao baixar a tela de entrada (versão antiga em cache, sem conexão) deixava a tela branca.
+    (e) => {
+      console.error(e);
+      if (navigator.onLine !== false && reloadOnceForStaleChunk()) return;
+      root.render(
+        <div role="alert" style={{ padding: 24, fontFamily: 'system-ui, sans-serif', maxWidth: 520, margin: '0 auto' }}>
+          <h1 style={{ fontSize: 20, fontWeight: 700 }}>Não foi possível abrir a tela de entrada</h1>
+          <p style={{ marginTop: 12 }}>Confira a conexão com a internet e recarregue a página. Nenhum dado deste aparelho foi alterado.</p>
+          <button type="button" style={{ marginTop: 16, padding: '10px 16px', borderRadius: 12 }} onClick={() => window.location.reload()}>
+            Recarregar
+          </button>
+        </div>,
+      );
+    },
   );
 } else {
   // Abre o banco (e aplica migrações pendentes) antes de montar o app. Se falhar,

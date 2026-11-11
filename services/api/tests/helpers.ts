@@ -3,7 +3,7 @@
 // Nunca aponte TEST_DATABASE_URL para o banco de produção: cada arquivo cria e APAGA o próprio banco.
 import pg from 'pg';
 import { randomBytes } from 'node:crypto';
-import { createApi, type Api } from '../src/app.ts';
+import { createApi, type Api, type ApiOptions } from '../src/app.ts';
 import { loadConfig, type ApiConfig } from '../src/config.ts';
 import { createPool, type Pool } from '../src/db/pool.ts';
 import { migrate } from '../src/db/migrate.ts';
@@ -43,7 +43,10 @@ export const fakeAnthropic = (behavior: { text?: string; fail?: boolean } = {}):
   },
 });
 
-export async function setupApi(env: Record<string, string> = {}, opts: { adapter?: UpstreamAdapter; providerKey?: string | null; fetch?: FetchLike } = {}): Promise<TestEnv> {
+export async function setupApi(
+  env: Record<string, string> = {},
+  opts: { adapter?: UpstreamAdapter; providerKey?: string | null; fetch?: FetchLike; serviceEnv?: Record<string, string>; assistant?: ApiOptions['assistant']; lifeNow?: () => number } = {},
+): Promise<TestEnv> {
   const admin = adminUrl();
   const dbName = `it_${randomBytes(6).toString('hex')}`;
   const adminPool = new pg.Pool({ connectionString: admin, max: 1 });
@@ -74,7 +77,7 @@ export async function setupApi(env: Record<string, string> = {}, opts: { adapter
     error: (w, e) => write(JSON.stringify({ w, e: String(e) })),
   };
   const providerKey = opts.providerKey === undefined ? 'sk-ant-teste-chave-secreta-0000000000' : opts.providerKey;
-  const api = createApi({ cfg, pool, logger, env: providerKey ? { ANTHROPIC_API_KEY: providerKey } : {}, ai: { adapters: { anthropic: opts.adapter ?? fakeAnthropic() }, fetch: opts.fetch ?? (async () => new Response('{}', { status: 200 })) } });
+  const api = createApi({ cfg, pool, logger, env: { ...(providerKey ? { ANTHROPIC_API_KEY: providerKey } : {}), ...opts.serviceEnv }, ...(opts.assistant ? { assistant: opts.assistant } : {}), ...(opts.lifeNow ? { lifeNow: opts.lifeNow } : {}), ai: { adapters: { anthropic: opts.adapter ?? fakeAnthropic() }, fetch: opts.fetch ?? (async () => new Response('{}', { status: 200 })) } });
   await new Promise<void>((r) => api.server.listen(0, '127.0.0.1', () => r()));
   const addr = api.server.address();
   const base = `http://127.0.0.1:${addr && typeof addr === 'object' ? addr.port : 0}`;

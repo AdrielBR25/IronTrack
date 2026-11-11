@@ -8,6 +8,8 @@ const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 
 
 // GitHub Pages serve o app em /IronTrack/. BASE_PATH permite outro subdiretório (irontrack-web na Railway: "/").
 const base = process.env.BASE_PATH ?? '/IronTrack/';
+// Fase 07: build da homologação (irontrack-web do ambiente staging) instala como outro app, com nome diferente.
+const staging = process.env.VITE_APP_ENV === 'staging';
 
 // P21: em desenvolvimento e nos testes E2E da nuvem, `/api` vai para a API local (mesma origem, como o Caddy do irontrack-web).
 // Só lido aqui (Node), nunca vai para o bundle.
@@ -23,8 +25,8 @@ export default defineConfig({
       injectRegister: false,
       includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'examples/*.json'],
       manifest: {
-        name: 'IronTrack — Treinos de musculação',
-        short_name: 'IronTrack',
+        name: staging ? 'IronTrack (Homologação)' : 'IronTrack — Treinos de musculação',
+        short_name: staging ? 'IronTrack HML' : 'IronTrack',
         description: 'Registre treinos, descanso e evolução de carga. Funciona offline.',
         lang: 'pt-BR',
         theme_color: '#0b0d0c',
@@ -45,7 +47,10 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,mjs,css,html,svg,png,woff2,json}'],
-        globIgnores: ['**/*cyrillic*', '**/*greek*', '**/*vietnamese*'],
+        // Fase 05: o texto bíblico (66 livros, ~4,7 MB) não entra no pré-cache: cada livro vai para o cache ao ser aberto
+        // (ou todos em "Baixar para ler offline"), e daí em diante funciona sem conexão.
+        globIgnores: ['**/*cyrillic*', '**/*greek*', '**/*vietnamese*', '**/assets/bible/**'],
+        runtimeCaching: [{ urlPattern: /\/assets\/bible\/[^/]+\.json$/, handler: 'CacheFirst', options: { cacheName: 'irontrack-bible-bpm', expiration: { maxEntries: 80 } } }],
         navigateFallback: 'index.html',
         // P21: a API nunca é atendida pelo service worker (nem cache, nem página do app no lugar dela).
         navigateFallbackDenylist: [/^\/api\//],
@@ -56,8 +61,11 @@ export default defineConfig({
   server: apiProxy ? { proxy: apiProxy } : {},
   preview: apiProxy ? { proxy: apiProxy } : {},
   build: {
+    // Livros da Bíblia sempre como arquivo próprio (nunca embutidos no JS), para o cache por livro.
+    assetsInlineLimit: (file) => (/shared[\\/]bible[\\/]data[\\/]/.test(file) ? false : undefined),
     rollupOptions: {
       output: {
+        assetFileNames: (a) => (/\.json$/.test(a.names?.[0] ?? a.name ?? '') && /^[1-3A-Z]{3}\.json$/.test(a.names?.[0] ?? a.name ?? '') ? 'assets/bible/[name]-[hash][extname]' : 'assets/[name]-[hash][extname]'),
         manualChunks: {
           react: ['react', 'react-dom', 'react-router-dom'],
           charts: ['recharts'],

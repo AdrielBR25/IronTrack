@@ -8,3 +8,10 @@ export const API_BASE = '/api/v1';
 
 /** Modo conta ativo neste aparelho (contas ligadas e uma conta aberta). */
 export const accountModeActive = (): boolean => ACCOUNTS_ENABLED && readAccountPointer()?.mode === 'account';
+
+/**
+ * Fase 07: ambiente do build (VITE_APP_ENV, definido no serviço irontrack-web da Railway). `staging` = homologação:
+ * faixa "Homologação" nas telas, título da aba e nome do app instalado diferentes, para nunca confundir com produção.
+ */
+export const APP_ENV: 'production' | 'staging' = import.meta.env.VITE_APP_ENV === 'staging' ? 'staging' : 'production';
+export const IS_STAGING = APP_ENV === 'staging';

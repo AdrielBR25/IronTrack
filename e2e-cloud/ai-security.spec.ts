@@ -7,7 +7,7 @@ const ORIGIN = 'http://localhost:4174';
 
 test('IA pela conta: sem token nem endereço; só provedores habilitados; e-mail confirmado exigido', async ({ page }) => {
   const email = await signupViaUi(page);
-  await page.goto('./#/assistente');
+  await page.goto('./#/assistente/classico');
   await page.getByTestId('mode-remote').check();
   await expect(page.getByTestId('gateway-token')).toHaveCount(0);
   await page.getByTestId('connect-account').click();
@@ -20,7 +20,7 @@ test('IA pela conta: sem token nem endereço; só provedores habilitados; e-mail
   // confirma e pergunta de verdade (provedor simulado local), passando pela prévia e autorização
   await page.goto(await linkFromMail(page, email, 'verificar-email'));
   await expect(page.getByText('E-mail confirmado.')).toBeVisible();
-  await page.goto('./#/assistente');
+  await page.goto('./#/assistente/classico');
   await page.getByTestId('mode-remote').check();
   if (await page.getByTestId('connect-account').isVisible()) await page.getByTestId('connect-account').click();
   // Hotfix 21.2: servidor no ar não é "Claude disponível": antes do teste, a chave aparece como ainda não testada

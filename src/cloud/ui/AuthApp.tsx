@@ -1,5 +1,7 @@
 // Tela de entrada do modo conta (Prompt 21): aparece quando o aparelho ainda não escolheu entre entrar numa conta e
 // usar sem conta. Nenhum banco é aberto aqui. Também atende os links dos e-mails (confirmar e-mail, nova senha).
+import { EnvBanner } from './EnvBanner';
+import { IS_STAGING } from '../config';
 import { useEffect, useState } from 'react';
 import { HashRouter, Link, Route, Routes, useNavigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
@@ -25,7 +27,7 @@ function useSystemTheme() {
 
 export function AuthShell({ title, subtitle, children, back }: { title: string; subtitle?: React.ReactNode; children: React.ReactNode; back?: boolean }) {
   useEffect(() => {
-    document.title = `${title} · IronTrack`;
+    document.title = `${IS_STAGING ? '[Homologação] ' : ''}${title} · IronTrack`;
   }, [title]);
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col px-4 pb-10 pt-[calc(2rem+env(safe-area-inset-top))]">
@@ -35,6 +37,7 @@ export function AuthShell({ title, subtitle, children, back }: { title: string; 
           Iron<span className="text-primary">Track</span>
         </span>
       </div>
+      <EnvBanner />
       <h1 className="font-display text-2xl font-bold tracking-tight">{title}</h1>
       {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
       <div className="mt-6">{children}</div>

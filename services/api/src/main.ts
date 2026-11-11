@@ -5,6 +5,7 @@
 import { createApi } from './app.ts';
 import { ConfigError, loadConfig } from './config.ts';
 import { createPool } from './db/pool.ts';
+import { DatabaseEnvironmentError, ensureDatabaseEnvironment } from './db/environment.ts';
 
 const err = (s: string) => process.stderr.write(`[api] ${s}\n`);
 
@@ -21,10 +22,23 @@ try {
 }
 
 const pool = createPool(cfg);
+// Fase 07: a API da homologação nunca sobe apontando para o banco de produção (e vice-versa). Sem conexão com o banco
+// a verificação fica para a próxima inicialização (a API sobe "não pronta", como antes).
+try {
+  await ensureDatabaseEnvironment(pool, cfg.appEnv);
+} catch (e) {
+  if (e instanceof DatabaseEnvironmentError) {
+    err(`banco recusado: ${e.message}`);
+    await pool.end().catch(() => undefined);
+    process.exit(1);
+  }
+  err('não foi possível conferir a marca de ambiente do banco agora (sem conexão?).');
+}
 const api = createApi({ cfg, pool });
 if (cfg.ai.errors.length) err(`IA desativada: configuração de provedores inválida (${cfg.ai.errors.join(', ')}).`);
 // Hotfix 21.2: estado de cada provedor de IA (presença e formato da chave; nunca o valor).
 for (const line of api.aiStatus()) err(line);
+err(`ambiente: ${cfg.appEnv}${cfg.appEnv === 'staging' ? ` (homologação; e-mails só para ${cfg.email.allowlist.length} destinatário(s)/domínio(s) da EMAIL_ALLOWLIST)` : ''}`);
 err(`e-mail: ${api.mailer.provider}${api.mailer.enabled ? '' : ' (verificação e recuperação de senha INDISPONÍVEIS)'}`);
 
 const maintenance = setInterval(() => void api.maintenance().catch(() => err('manutenção periódica falhou (tentará de novo)')), 10 * 60_000);

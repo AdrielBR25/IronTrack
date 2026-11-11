@@ -1,7 +1,7 @@
 // Sincronização entre dois navegadores independentes (Prompt 21): propagação, offline, conflitos explícitos e
 // resolução, treino finalizado × alterado, sessão expirada durante a sincronização.
 import type { Page } from '@playwright/test';
-import { expectInApp, expectSynced, loginViaUi, newDevice, readAccountTable, signupViaUi, syncNow, expect, test } from './helpers';
+import { expectInApp, expectSynced, loadSampleFicha, loginViaUi, openTraining, newDevice, readAccountTable, signupViaUi, syncNow, expect, test } from './helpers';
 
 test.use({ serviceWorkers: 'block' });
 
@@ -29,9 +29,7 @@ async function twoDevices(page: Page, browser: import('@playwright/test').Browse
 
 test('ficha criada num aparelho aparece no outro', async ({ page, browser }, info) => {
   const { b } = await twoDevices(page, browser, info);
-  await page.goto('./#/');
-  await page.getByTestId('load-sample').click();
-  await expect(page.getByTestId('start-workout')).toBeVisible();
+  await loadSampleFicha(page);
   await expectSynced(page);
   await syncNow(b.page);
   await b.page.goto('./#/treinos');
@@ -58,8 +56,7 @@ test('offline: alterações ficam pendentes (nunca "Sincronizado") e sobem ao re
 
 test('desconexão durante o treino: séries registradas offline chegam ao outro aparelho', async ({ page, browser }, info) => {
   const { b } = await twoDevices(page, browser, info);
-  await page.goto('./#/');
-  await page.getByTestId('load-sample').click();
+  await loadSampleFicha(page);
   await expectSynced(page);
   await page.getByTestId('start-workout').click();
   await expect(page).toHaveURL(/#\/treino$/);
@@ -124,8 +121,7 @@ test('conflito resolvido com "usar a da nuvem"', async ({ page, browser }, info)
 
 test('treino finalizado num aparelho e alterado no outro: conflito; "manter os dois" preserva tudo', async ({ page, browser }, info) => {
   const { b } = await twoDevices(page, browser, info);
-  await page.goto('./#/');
-  await page.getByTestId('load-sample').click();
+  await loadSampleFicha(page);
   await page.getByTestId('start-workout').click();
   await page.getByTestId('complete-set').click();
   await page.getByTestId('rest-skip').click();
@@ -183,12 +179,12 @@ test('sessão expirada durante a sincronização: nada se perde e tudo sobe depo
 
 test('o app abre offline com os dados da conta (sem servidor)', async ({ page }) => {
   await signupViaUi(page);
-  await page.goto('./#/');
-  await page.getByTestId('load-sample').click();
+  await loadSampleFicha(page);
   await expectSynced(page);
   // servidor fora: a API não responde, mas o app abre com os dados do aparelho
   await page.route('**/api/**', (r) => r.abort('internetdisconnected'));
   await page.reload();
+  await openTraining(page);
   await expect(page.getByTestId('start-workout')).toBeVisible();
   await expect(page.locator('[data-testid="sync-status"]:visible').first()).not.toHaveAttribute('data-state', 'synced', { timeout: 10_000 });
 });
